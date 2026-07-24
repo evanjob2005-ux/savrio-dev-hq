@@ -145,36 +145,95 @@ jobs:
         if: steps.detect.outputs.npm == 'true'
         run: |
           set -euo pipefail
-          # Report all severities but only fail the job on critical findings,
-          # so routine upstream advisories do not block unrelated work while a
-          # critical vulnerability still stops the line.
-          npm audit --audit-level=critical --json > audit.json || true
+
+          # Capture the real npm audit exit code. npm exits non-zero both when
+          # vulnerabilities are found (a valid report) and when the scanner
+          # itself fails (registry outage, auth error, malformed output). The
+          # two cases are distinguished below by inspecting the JSON, so a
+          # scanner failure can never be interpreted as a clean audit.
+          audit_exit=0
+          npm audit --json > audit.json 2> audit.err || audit_exit=$?
+          export AUDIT_EXIT="$audit_exit"
+          echo "npm audit exited with code ${audit_exit}."
 
           python <<'PYTHON'
           import json
           import os
+          import sys
 
-          with open("audit.json", "r", encoding="utf-8") as handle:
-              report = json.load(handle)
+          exit_code = os.environ.get("AUDIT_EXIT", "unknown")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
-          vulns = report.get("metadata", {}).get("vulnerabilities", {})
+          def write_summary(lines):
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as handle:
+                      handle.write("\n".join(lines) + "\n")
+
+          def fail_scanner(reason):
+              print(f"::error::npm audit scanner failure: {reason}")
+              write_summary([
+                  "## npm Audit",
+                  "",
+                  f"- Scanner status: **FAILED** ({reason})",
+                  f"- npm audit exit code: {exit_code}",
+                  "- Policy: **not evaluated** — failing closed",
+              ])
+              sys.exit(1)
+
+          # A missing or unparseable report is a scanner failure, not "clean".
+          try:
+              with open("audit.json", "r", encoding="utf-8") as handle:
+                  report = json.load(handle)
+          except (OSError, ValueError) as error:
+              fail_scanner(f"could not read or parse audit.json ({error})")
+
+          if not isinstance(report, dict):
+              fail_scanner("report is not a JSON object")
+          # npm surfaces registry/network/auth problems under an "error" key.
+          if report.get("error"):
+              fail_scanner(f"npm reported an error object: {report['error']}")
+
+          metadata = report.get("metadata")
+          if not isinstance(metadata, dict):
+              fail_scanner("report is missing the metadata object")
+          vulns = metadata.get("vulnerabilities")
+          if not isinstance(vulns, dict):
+              fail_scanner("report is missing metadata.vulnerabilities")
+
           order = ["critical", "high", "moderate", "low", "info"]
-          counts = {level: vulns.get(level, 0) for level in order}
+          for level in order:
+              if not isinstance(vulns.get(level), int):
+                  fail_scanner(f"vulnerability count for '{level}' is missing or non-numeric")
+
+          counts = {level: vulns[level] for level in order}
+          critical = counts["critical"]
+          high = counts["high"]
+          # Security policy: High and Critical block production readiness.
+          policy_pass = (critical + high) == 0
 
           for level in order:
               if counts[level]:
-                  marker = "error" if level == "critical" else "warning"
+                  marker = "error" if level in ("critical", "high") else "warning"
                   print(f"::{marker}::npm audit found {counts[level]} {level} vulnerabilities.")
 
-          summary = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary:
-              with open(summary, "a", encoding="utf-8") as handle:
-                  handle.write("## npm Audit\n\n")
-                  handle.write("| Severity | Count |\n| --- | --- |\n")
-                  for level in order:
-                      handle.write(f"| {level} | {counts[level]} |\n")
+          write_summary([
+              "## npm Audit",
+              "",
+              "- Scanner status: **succeeded**",
+              f"- npm audit exit code: {exit_code}",
+              f"- Critical: {critical}",
+              f"- High: {high}",
+              f"- Policy (block on High or Critical): {'PASS' if policy_pass else 'FAIL'}",
+              "",
+              "| Severity | Count |",
+              "| --- | --- |",
+              *[f"| {level} | {counts[level]} |" for level in order],
+          ])
 
-          raise SystemExit(1 if counts["critical"] else 0)
+          if not policy_pass:
+              print(f"::error::npm audit policy failed: {critical} critical, {high} high.")
+              sys.exit(1)
+          print("npm audit passed: no high or critical vulnerabilities.")
           PYTHON
 
   dependency-review:
