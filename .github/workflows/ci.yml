@@ -160,6 +160,24 @@ jobs:
 
           echo "Final newline check complete. ${missing} file(s) flagged."
 
+      - name: Validate CODEOWNERS ownership
+        id: codeowners
+        run: |
+          set -euo pipefail
+          file=".github/CODEOWNERS"
+          if [[ ! -f "$file" ]]; then
+            echo "::error::${file} is missing."
+            exit 1
+          fi
+
+          # Unresolved ownership placeholders must be replaced with a real
+          # GitHub @user or @org/team before code-owner review can be trusted.
+          if grep -nE 'YOUR_GITHUB_USERNAME|REPLACE[-_]WITH|PLACEHOLDER' "$file"; then
+            echo "::error file=${file}::CODEOWNERS contains unresolved ownership placeholders (listed above). Replace every '@REPLACE-WITH-GITHUB-OWNER' with the real repository owner before enabling required code-owner reviews and branch protection."
+            exit 1
+          fi
+          echo "CODEOWNERS ownership is resolved."
+
       - name: Repository integrity summary
         if: always()
         env:
@@ -168,6 +186,7 @@ jobs:
           CONFLICTS: ${{ steps.conflicts.outcome }}
           WHITESPACE: ${{ steps.whitespace.outcome }}
           NEWLINE: ${{ steps.newline.outcome }}
+          CODEOWNERS: ${{ steps.codeowners.outcome }}
         run: |
           set -euo pipefail
           # Report the real outcome of each step. A step that never ran (because
@@ -191,6 +210,7 @@ jobs:
             echo "- Merge conflict markers: $(label "$CONFLICTS")"
             echo "- Trailing whitespace (non-Markdown): $(label "$WHITESPACE")"
             echo "- Final newline check: $(label "$NEWLINE")"
+            echo "- CODEOWNERS ownership: $(label "$CODEOWNERS")"
           } >> "$GITHUB_STEP_SUMMARY"
 
   structured-data:

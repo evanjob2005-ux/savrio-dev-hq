@@ -2,132 +2,140 @@
 # Savrio Engineering Operating System
 # CODEOWNERS
 # ==========================================================
+#
+# ACTION REQUIRED BEFORE ENABLING CODE-OWNER REVIEWS:
+# Every "@REPLACE-WITH-GITHUB-OWNER" below is an unresolved placeholder and is
+# NOT a valid owner. Replace each one with the real repository owner -- a
+# GitHub @username or an @org/team -- that has write access. Until this is
+# done, GitHub cannot assign code owners and the Continuous Integration
+# "Validate CODEOWNERS ownership" check will fail on purpose.
+# ==========================================================
 
 ############################################################
 # Default Owner
 ############################################################
 
-* @YOUR_GITHUB_USERNAME
+* @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Documentation
 ############################################################
 
-README.md @YOUR_GITHUB_USERNAME
-CONTRIBUTING.md @YOUR_GITHUB_USERNAME
-SECURITY.md @YOUR_GITHUB_USERNAME
+README.md @REPLACE-WITH-GITHUB-OWNER
+CONTRIBUTING.md @REPLACE-WITH-GITHUB-OWNER
+SECURITY.md @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Engineering Standards
 ############################################################
 
-/standards/ @YOUR_GITHUB_USERNAME
+/standards/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # AI Agents
 ############################################################
 
-/agents/ @YOUR_GITHUB_USERNAME
+/agents/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Agent Handbooks
 ############################################################
 
-/handbooks/ @YOUR_GITHUB_USERNAME
+/handbooks/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Workflows
 ############################################################
 
-/workflows/ @YOUR_GITHUB_USERNAME
+/workflows/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Templates
 ############################################################
 
-/templates/ @YOUR_GITHUB_USERNAME
+/templates/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Playbooks
 ############################################################
 
-/playbooks/ @YOUR_GITHUB_USERNAME
+/playbooks/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Checklists
 ############################################################
 
-/checklists/ @YOUR_GITHUB_USERNAME
+/checklists/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Incident Runbooks
 ############################################################
 
-/runbooks/ @YOUR_GITHUB_USERNAME
+/runbooks/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Architecture Decision Records
 ############################################################
 
-/adr/ @YOUR_GITHUB_USERNAME
+/adr/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Metrics
 ############################################################
 
-/metrics/ @YOUR_GITHUB_USERNAME
+/metrics/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Automation
 ############################################################
 
-/automation/ @YOUR_GITHUB_USERNAME
+/automation/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Scripts
 ############################################################
 
-/scripts/ @YOUR_GITHUB_USERNAME
+/scripts/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # GitHub Configuration
 ############################################################
 
-/.github/ @YOUR_GITHUB_USERNAME
+/.github/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # VS Code Configuration
 ############################################################
 
-/.vscode/ @YOUR_GITHUB_USERNAME
+/.vscode/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Application Source
 ############################################################
 
-/app/ @YOUR_GITHUB_USERNAME
-/components/ @YOUR_GITHUB_USERNAME
-/lib/ @YOUR_GITHUB_USERNAME
-/hooks/ @YOUR_GITHUB_USERNAME
-/types/ @YOUR_GITHUB_USERNAME
-/public/ @YOUR_GITHUB_USERNAME
+/app/ @REPLACE-WITH-GITHUB-OWNER
+/components/ @REPLACE-WITH-GITHUB-OWNER
+/lib/ @REPLACE-WITH-GITHUB-OWNER
+/hooks/ @REPLACE-WITH-GITHUB-OWNER
+/types/ @REPLACE-WITH-GITHUB-OWNER
+/public/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Database
 ############################################################
 
-/supabase/ @YOUR_GITHUB_USERNAME
+/supabase/ @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # Configuration Files
 ############################################################
 
-package.json @YOUR_GITHUB_USERNAME
-package-lock.json @YOUR_GITHUB_USERNAME
-tsconfig.json @YOUR_GITHUB_USERNAME
-next.config.ts @YOUR_GITHUB_USERNAME
-tailwind.config.ts @YOUR_GITHUB_USERNAME
-eslint.config.* @YOUR_GITHUB_USERNAME
+package.json @REPLACE-WITH-GITHUB-OWNER
+package-lock.json @REPLACE-WITH-GITHUB-OWNER
+tsconfig.json @REPLACE-WITH-GITHUB-OWNER
+next.config.ts @REPLACE-WITH-GITHUB-OWNER
+tailwind.config.ts @REPLACE-WITH-GITHUB-OWNER
+eslint.config.* @REPLACE-WITH-GITHUB-OWNER
 
 ############################################################
 # End of File
