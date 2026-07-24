@@ -1,8 +1,34 @@
 @import "tailwindcss";
 
+/* Savrio Dev HQ — Mission Control.
+   A dark, layered mission-control surface. The app is dark-first by design;
+   these tokens define the palette used across the dashboard. */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #06070a;
+  --bg-grid: rgba(255, 255, 255, 0.02);
+  --surface-1: #0c0e13; /* cards */
+  --surface-2: #111420; /* raised / inputs */
+  --surface-3: #171b28; /* hover / active */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #e7e9ef;
+  --text-dim: #9aa1ad;
+  /* Raised from #6b7280 to meet WCAG AA (>=4.5:1) for small text on the
+     app's dark surfaces while staying dimmer than --text-dim. */
+  --text-faint: #8a92a0;
+
+  --accent: #f2b84b; /* Savrio gold */
+
+  --ok: #34d399;
+  --run: #60a5fa;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --idle: #6b7280;
+  --wait: #f2b84b;
+
+  --background: var(--bg);
+  --foreground: var(--text);
 }
 
 @theme inline {
@@ -12,15 +38,52 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle active-stage pulse. Neutralized under reduced motion below. */
+@keyframes savrio-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.savrio-pulse {
+  animation: savrio-pulse 1.8s ease-in-out infinite;
+}
+
+/* Custom scrollbars for the dark surfaces. */
+.savrio-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.savrio-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.savrio-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .savrio-pulse {
+    animation: none !important;
+  }
 }
