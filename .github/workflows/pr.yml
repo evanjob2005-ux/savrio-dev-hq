@@ -1,5 +1,10 @@
 name: Pull Request Validation
 
+# Validates pull request quality, metadata, scope, and change risk. This
+# workflow deliberately focuses on pull-request-specific signals (title, body,
+# changed set, prohibited files) and does not repeat the repository-wide checks
+# owned by ci.yml, lint.yml, security.yml, or dependencies.yml.
+
 on:
   pull_request:
     types:
@@ -9,12 +14,15 @@ on:
       - reopened
       - ready_for_review
 
+# Least privilege. This workflow only reads repository content and pull request
+# metadata. It never checks out or executes untrusted head code with elevated
+# rights, and it intentionally does not use pull_request_target.
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: pr-${{ github.event.pull_request.number }}
+  group: pr-${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -22,47 +30,104 @@ jobs:
     name: Validate Pull Request
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Determine changed files
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # All changed paths, including deletions, with rename detection.
+          git diff --name-only --diff-filter=ACMRD -M "$BASE_SHA" "$HEAD_SHA" \
+            > changed-all.txt || true
+          # Only paths that exist at HEAD (added/copied/modified/renamed-to),
+          # used for content validation and prohibited-file checks.
+          git diff --name-only --diff-filter=ACMR -M "$BASE_SHA" "$HEAD_SHA" \
+            > changed-content.txt || true
+
+          total_count=$(wc -l < changed-all.txt | tr -d '[:space:]')
+          content_count=$(wc -l < changed-content.txt | tr -d '[:space:]')
+
+          # Insertions / deletions across the diff.
+          shortstat=$(git diff --shortstat "$BASE_SHA" "$HEAD_SHA" || true)
+          insertions=$(grep -oE '[0-9]+ insertion' <<< "$shortstat" | grep -oE '[0-9]+' || echo 0)
+          deletions=$(grep -oE '[0-9]+ deletion' <<< "$shortstat" | grep -oE '[0-9]+' || echo 0)
+          insertions=${insertions:-0}
+          deletions=${deletions:-0}
+
+          {
+            echo "total_count=${total_count}"
+            echo "content_count=${content_count}"
+            echo "insertions=${insertions}"
+            echo "deletions=${deletions}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Changed files (${total_count}):"
+          cat changed-all.txt
+
+      - name: Reject empty pull requests
+        env:
+          TOTAL_COUNT: ${{ steps.changes.outputs.total_count }}
+        run: |
+          set -euo pipefail
+          if [[ "${TOTAL_COUNT}" -eq 0 ]]; then
+            echo "::error::This pull request does not change any files."
+            exit 1
+          fi
+          echo "Pull request changes ${TOTAL_COUNT} file(s)."
+
       - name: Validate pull request title
-        shell: bash
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          if [ -z "$PR_TITLE" ]; then
+          set -euo pipefail
+
+          if [[ -z "${PR_TITLE// }" ]]; then
             echo "::error::Pull request title cannot be empty."
             exit 1
           fi
 
-          if [ ${#PR_TITLE} -lt 10 ]; then
+          if [[ "${#PR_TITLE}" -lt 10 ]]; then
             echo "::error::Pull request title must be at least 10 characters."
             exit 1
           fi
 
-          if echo "$PR_TITLE" | grep -qiE '^(update|changes|fix|stuff|misc)$'; then
-            echo "::error::Pull request title is too vague."
+          if [[ "${#PR_TITLE}" -gt 100 ]]; then
+            echo "::warning::Pull request title is longer than 100 characters. Consider shortening it."
+          fi
+
+          shopt -s nocasematch
+          if [[ "$PR_TITLE" =~ ^(update|updates|changes|change|fix|fixes|stuff|misc|wip)$ ]]; then
+            echo "::error::Pull request title is too vague: '${PR_TITLE}'."
             exit 1
           fi
+          shopt -u nocasematch
 
           echo "Pull request title is valid."
 
       - name: Validate pull request description
-        shell: bash
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          if [ -z "$PR_BODY" ]; then
+          set -euo pipefail
+
+          if [[ -z "${PR_BODY// }" ]]; then
             echo "::error::Pull request description cannot be empty."
             exit 1
           fi
 
-          if [ ${#PR_BODY} -lt 80 ]; then
-            echo "::error::Pull request description must contain meaningful detail."
+          if [[ "${#PR_BODY}" -lt 80 ]]; then
+            echo "::error::Pull request description must contain meaningful detail (at least 80 characters)."
             exit 1
           fi
 
@@ -74,175 +139,230 @@ jobs:
             "## Checklist"
           )
 
-          missing_sections=0
-
+          missing=0
           for section in "${required_sections[@]}"; do
             if ! grep -Fq "$section" <<< "$PR_BODY"; then
-              echo "::error::Missing pull request section: $section"
-              missing_sections=1
+              echo "::error::Missing required pull request section: ${section}"
+              missing=1
             fi
           done
-
-          if [ "$missing_sections" -ne 0 ]; then
+          if [[ "$missing" -ne 0 ]]; then
             exit 1
+          fi
+
+          # Unresolved placeholders are surfaced as warnings, not failures.
+          if grep -qE '\b(TODO|TBD|FIXME|XXX)\b' <<< "$PR_BODY"; then
+            echo "::warning::Pull request description contains unresolved placeholders (TODO/TBD/FIXME/XXX)."
           fi
 
           echo "Pull request description is valid."
 
-      - name: Determine changed files
-        id: changes
-        shell: bash
+      - name: Warn about pull request size
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TOTAL_COUNT: ${{ steps.changes.outputs.total_count }}
+          INSERTIONS: ${{ steps.changes.outputs.insertions }}
+          DELETIONS: ${{ steps.changes.outputs.deletions }}
         run: |
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > changed-files.txt
+          set -euo pipefail
+          changed_lines=$((INSERTIONS + DELETIONS))
 
-          changed_count=$(wc -l < changed-files.txt | tr -d ' ')
-
-          echo "count=$changed_count" >> "$GITHUB_OUTPUT"
-
-          echo "Changed files:"
-          cat changed-files.txt
-
-      - name: Warn about large pull requests
-        shell: bash
-        env:
-          CHANGED_COUNT: ${{ steps.changes.outputs.count }}
-        run: |
-          if [ "$CHANGED_COUNT" -gt 50 ]; then
-            echo "::warning::This pull request changes more than 50 files. Consider splitting it into smaller pull requests."
-          else
-            echo "Pull request size is within the recommended range."
+          if [[ "${TOTAL_COUNT}" -gt 50 ]]; then
+            echo "::warning::This pull request changes ${TOTAL_COUNT} files. Consider splitting it."
           fi
-
-      - name: Detect sensitive file changes
-        shell: bash
-        run: |
-          sensitive_patterns=(
-            ".github/workflows/"
-            ".github/CODEOWNERS"
-            "SECURITY.md"
-            "supabase/"
-            "migrations/"
-            "package.json"
-            "package-lock.json"
-            "pnpm-lock.yaml"
-            "yarn.lock"
-            ".env"
-            "auth"
-            "middleware"
-          )
-
-          sensitive_changes=0
-
-          while IFS= read -r file; do
-            for pattern in "${sensitive_patterns[@]}"; do
-              if [[ "$file" == *"$pattern"* ]]; then
-                echo "::warning file=$file::Sensitive or high-impact file changed. Additional review may be required."
-                sensitive_changes=1
-                break
-              fi
-            done
-          done < changed-files.txt
-
-          if [ "$sensitive_changes" -eq 0 ]; then
-            echo "No sensitive file changes detected."
+          if [[ "${changed_lines}" -gt 1000 ]]; then
+            echo "::warning::This pull request changes ${changed_lines} lines. Consider splitting it."
           fi
+          echo "Files: ${TOTAL_COUNT}, lines changed: ${changed_lines}."
 
-      - name: Detect documentation-only changes
-        id: documentation
-        shell: bash
+      - name: Classify documentation-only changes
+        id: docs
         run: |
+          set -euo pipefail
           docs_only=true
 
+          if [[ ! -s changed-all.txt ]]; then
+            docs_only=false
+          fi
+
           while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
             case "$file" in
-              *.md|*.txt|docs/*|handbooks/*|standards/*|templates/*|workflows/*|playbooks/*|checklists/*|runbooks/*|adr/*|metrics/*|automation/*)
+              *.md|*.txt|docs/*|handbooks/*|standards/*|templates/*|agents/*|.github/ISSUE_TEMPLATE/*)
                 ;;
               *)
                 docs_only=false
                 break
                 ;;
             esac
-          done < changed-files.txt
+          done < changed-all.txt
 
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-
-          if [ "$docs_only" = "true" ]; then
-            echo "This is a documentation-only pull request."
+          echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
+          if [[ "$docs_only" == "true" ]]; then
+            echo "Documentation-only pull request."
           else
-            echo "This pull request includes non-documentation changes."
+            echo "Pull request includes non-documentation changes."
           fi
 
-      - name: Detect unresolved merge conflict markers
-        shell: bash
+      - name: Detect prohibited files
         run: |
-          if git grep -n \
-            -e '^<<<<<<< ' \
-            -e '^=======$' \
-            -e '^>>>>>>> ' \
-            -- . \
-            ':(exclude).github/workflows/pr.yml'; then
-            echo "::error::Unresolved Git merge conflict markers were found."
+          set -euo pipefail
+
+          # Files that must never be committed. Matching is anchored to the
+          # path so a legitimate ".env.example" is allowed while ".env" is not.
+          prohibited=0
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            base=$(basename -- "$file")
+            reason=""
+
+            case "$file" in
+              */node_modules/*|node_modules/*) reason="committed dependencies (node_modules)";;
+              .next/*|dist/*|out/*|build/*|coverage/*) reason="committed build output";;
+            esac
+
+            case "$base" in
+              .env|.env.*)
+                case "$base" in
+                  .env.example|.env.sample|.env.template) ;;
+                  *) reason="environment file";;
+                esac
+                ;;
+              id_rsa|id_dsa|id_ecdsa|id_ed25519) reason="private key file";;
+              *.pem|*.key|*.p12|*.pfx|*.keystore|*.jks) reason="private key or certificate file";;
+            esac
+
+            if [[ -n "$reason" ]]; then
+              echo "::error file=${file}::Prohibited file (${reason}) must not be committed."
+              prohibited=1
+            fi
+          done < changed-content.txt
+
+          if [[ "$prohibited" -ne 0 ]]; then
             exit 1
           fi
+          echo "No prohibited files detected."
 
-          echo "No unresolved merge conflict markers found."
-
-      - name: Validate changed YAML files
-        shell: bash
+      - name: Detect sensitive file changes
         run: |
-          yaml_files=$(grep -E '\.(yml|yaml)$' changed-files.txt || true)
+          set -euo pipefail
 
-          if [ -z "$yaml_files" ]; then
-            echo "No changed YAML files."
-            exit 0
+          sensitive_patterns=(
+            ".github/workflows/"
+            ".github/CODEOWNERS"
+            "SECURITY.md"
+            "package.json"
+            "package-lock.json"
+            "next.config.ts"
+            "tsconfig.json"
+            "middleware"
+            "auth"
+          )
+
+          flagged=0
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            for pattern in "${sensitive_patterns[@]}"; do
+              if [[ "$file" == *"$pattern"* ]]; then
+                echo "::warning file=${file}::Sensitive or high-impact file changed; extra review recommended."
+                flagged=1
+                break
+              fi
+            done
+          done < changed-all.txt
+
+          if [[ "$flagged" -eq 0 ]]; then
+            echo "No sensitive file changes detected."
           fi
 
-          python3 <<'PYTHON'
-          from pathlib import Path
-          import subprocess
-          import yaml
+      - name: Detect merge conflict markers and whitespace errors
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # git diff --check reports leftover conflict markers and whitespace
+          # errors in the diff, and handles binary and deleted files safely.
+          if ! git diff --check "$BASE_SHA" "$HEAD_SHA"; then
+            echo "::error::Merge conflict markers or whitespace errors were found in the changed lines."
+            exit 1
+          fi
+          echo "No conflict markers or whitespace errors in changed lines."
 
-          changed_files = subprocess.check_output(
-              ["git", "diff", "--name-only", "${{ github.event.pull_request.base.sha }}", "${{ github.event.pull_request.head.sha }}"],
-              text=True,
-          ).splitlines()
+      - name: Validate changed structured and Markdown files
+        run: |
+          set -euo pipefail
+          python3 <<'PYTHON'
+          import json
+          import os
+          import sys
+
+          try:
+              import yaml
+              have_yaml = True
+          except ImportError:
+              have_yaml = False
+
+          with open("changed-content.txt", "r", encoding="utf-8") as handle:
+              files = [line.strip() for line in handle if line.strip()]
 
           failures = []
+          checked = {"yaml": 0, "json": 0, "markdown": 0}
 
-          for filename in changed_files:
-              path = Path(filename)
-
-              if not path.exists():
+          for name in files:
+              if not os.path.isfile(name):
                   continue
-
-              if path.suffix.lower() not in {".yml", ".yaml"}:
-                  continue
-
+              lower = name.lower()
               try:
-                  with path.open("r", encoding="utf-8") as file:
-                      list(yaml.safe_load_all(file))
-                  print(f"Valid: {path}")
-              except Exception as error:
-                  failures.append((path, error))
+                  if lower.endswith((".yml", ".yaml")):
+                      checked["yaml"] += 1
+                      if have_yaml:
+                          with open(name, "r", encoding="utf-8") as handle:
+                              list(yaml.safe_load_all(handle))
+                  elif lower.endswith(".json"):
+                      checked["json"] += 1
+                      with open(name, "r", encoding="utf-8") as handle:
+                          json.load(handle)
+                  elif lower.endswith(".md"):
+                      checked["markdown"] += 1
+                      with open(name, "r", encoding="utf-8") as handle:
+                          text = handle.read()
+                      fences = text.count("\n```")
+                      if fences % 2 != 0:
+                          raise ValueError("Unbalanced Markdown code fences (```).")
+              except Exception as error:  # noqa: BLE001 - report all validation errors
+                  failures.append((name, error))
+
+          for name, error in failures:
+              print(f"::error file={name}::{error}")
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      "## Changed File Validation\n\n"
+                      f"- YAML: {checked['yaml']} | JSON: {checked['json']} | "
+                      f"Markdown: {checked['markdown']}\n"
+                      f"- Invalid files: {len(failures)}\n"
+                  )
 
           if failures:
-              for path, error in failures:
-                  print(f"::error file={path}::{error}")
-
-              raise SystemExit(1)
-
-          print("All changed YAML files are valid.")
+              sys.exit(1)
+          print("Changed structured and Markdown files are valid.")
           PYTHON
 
-      - name: Pull request validation summary
-        shell: bash
+      - name: Pull request summary
+        if: always()
         env:
-          CHANGED_COUNT: ${{ steps.changes.outputs.count }}
-          DOCS_ONLY: ${{ steps.documentation.outputs.docs_only }}
+          TOTAL_COUNT: ${{ steps.changes.outputs.total_count }}
+          INSERTIONS: ${{ steps.changes.outputs.insertions }}
+          DELETIONS: ${{ steps.changes.outputs.deletions }}
+          DOCS_ONLY: ${{ steps.docs.outputs.docs_only }}
         run: |
-          echo "Pull request validation completed."
-          echo "Changed files: $CHANGED_COUNT"
-          echo "Documentation only: $DOCS_ONLY"
+          set -euo pipefail
+          {
+            echo "## Pull Request Validation"
+            echo ""
+            echo "- Files changed: ${TOTAL_COUNT:-unknown}"
+            echo "- Lines: +${INSERTIONS:-0} / -${DELETIONS:-0}"
+            echo "- Documentation only: ${DOCS_ONLY:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
