@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history so scheduled and push scans cover past commits.
           fetch-depth: 0
@@ -54,7 +54,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Scan for credentials, private keys, and committed artifacts
         run: |
@@ -151,17 +151,24 @@ jobs:
         shell: bash
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install actionlint
+      - name: Install actionlint (checksum-verified)
         env:
           ACTIONLINT_VERSION: "1.7.7"
+          # sha256 of actionlint_1.7.7_linux_amd64.tar.gz taken from the
+          # upstream release checksums file. Verified before extraction so a
+          # tampered or truncated download fails closed.
+          ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
         run: |
           set -euo pipefail
+          tarball="${RUNNER_TEMP}/actionlint.tar.gz"
           curl -sSfL \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            -o "${RUNNER_TEMP}/actionlint.tar.gz"
-          tar -xzf "${RUNNER_TEMP}/actionlint.tar.gz" -C "${RUNNER_TEMP}" actionlint
+            -o "$tarball"
+          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum --check --strict -
+          tar -xzf "$tarball" -C "${RUNNER_TEMP}" actionlint
+          "${RUNNER_TEMP}/actionlint" -version
 
       - name: Lint workflows for security issues
         run: |
@@ -178,6 +185,9 @@ jobs:
 
           import yaml
 
+          # GitHub documents full-length commit SHAs as the only immutable
+          # action reference, so every external action -- first-party actions
+          # included -- must be pinned to a 40-character SHA.
           SHA_RE = re.compile(r"^[0-9a-f]{40}$")
           # Contexts an attacker can influence via a pull request. Interpolating
           # them directly into a run script (rather than passing through env)
@@ -185,9 +195,24 @@ jobs:
           INJECTABLE = re.compile(
               r"\$\{\{\s*github\.(event\.(pull_request\.(title|body)"
               r"|issue\.(title|body)|comment\.body|review\.body)|head_ref)")
-          FLOATING = {"main", "master", "latest", "HEAD"}
 
-          def iter_steps(document):
+          def iter_uses(document):
+              """Yield every action reference: step-level and job-level
+              (reusable workflow) uses."""
+              jobs = document.get("jobs") or {}
+              if not isinstance(jobs, dict):
+                  return
+              for job in jobs.values():
+                  if not isinstance(job, dict):
+                      continue
+                  job_uses = job.get("uses")
+                  if isinstance(job_uses, str):
+                      yield job_uses
+                  for step in job.get("steps") or []:
+                      if isinstance(step, dict) and isinstance(step.get("uses"), str):
+                          yield step["uses"]
+
+          def iter_run(document):
               jobs = document.get("jobs") or {}
               if not isinstance(jobs, dict):
                   return
@@ -195,13 +220,17 @@ jobs:
                   if not isinstance(job, dict):
                       continue
                   for step in job.get("steps") or []:
-                      if isinstance(step, dict):
-                          yield step
+                      if isinstance(step, dict) and isinstance(step.get("run"), str):
+                          yield step["run"]
 
           errors = []
           warnings = []
 
-          for path in sorted(glob.glob(".github/workflows/*.yml")):
+          # GitHub executes both .yml and .yaml workflow files.
+          workflows = sorted(set(glob.glob(".github/workflows/*.yml"))
+                             | set(glob.glob(".github/workflows/*.yaml")))
+
+          for path in workflows:
               with open(path, "r", encoding="utf-8") as handle:
                   data = yaml.safe_load(handle)
               if not isinstance(data, dict):
@@ -212,9 +241,7 @@ jobs:
               trigger_names = set()
               if isinstance(triggers, str):
                   trigger_names = {triggers}
-              elif isinstance(triggers, list):
-                  trigger_names = set(triggers)
-              elif isinstance(triggers, dict):
+              elif isinstance(triggers, (list, dict)):
                   trigger_names = set(triggers)
               if "pull_request_target" in trigger_names:
                   errors.append(f"{path}: uses pull_request_target.")
@@ -225,26 +252,23 @@ jobs:
               if perms is None:
                   warnings.append(f"{path}: no top-level permissions declared.")
 
-              # Structural scan of each step avoids matching pattern strings that
-              # appear inside run scripts (such as this auditor itself).
-              for step in iter_steps(data):
-                  uses = step.get("uses")
-                  if isinstance(uses, str):
-                      ref = uses.strip()
-                      if not (ref.startswith("./") or ref.startswith("docker://")):
-                          name, _, version = ref.partition("@")
-                          if not version:
-                              errors.append(f"{path}: action '{ref}' is not pinned.")
-                          elif version in FLOATING:
-                              errors.append(f"{path}: action '{ref}' uses a floating ref.")
-                          elif not name.startswith(("actions/", "github/")) \
-                                  and not SHA_RE.match(version):
-                              errors.append(
-                                  f"{path}: third-party action '{ref}' must be pinned to a commit SHA.")
+              # Structural scan avoids matching pattern strings that appear
+              # inside run scripts (such as this auditor itself).
+              for ref in iter_uses(data):
+                  ref = ref.strip()
+                  if ref.startswith("./") or ref.startswith("docker://"):
+                      continue
+                  _name, sep, version = ref.partition("@")
+                  if not sep or not version:
+                      errors.append(f"{path}: action '{ref}' is not pinned to a commit SHA.")
+                  elif not SHA_RE.match(version):
+                      errors.append(
+                          f"{path}: action '{ref}' must be pinned to a full 40-character "
+                          "commit SHA (the only immutable GitHub action reference).")
 
-                  run = step.get("run")
-                  if isinstance(run, str) and INJECTABLE.search(run):
-                      match = INJECTABLE.search(run)
+              for run in iter_run(data):
+                  match = INJECTABLE.search(run)
+                  if match:
                       errors.append(
                           f"{path}: untrusted context used directly in a run script: {match.group(0)}")
 
@@ -258,6 +282,7 @@ jobs:
               with open(summary, "a", encoding="utf-8") as handle:
                   handle.write(
                       "## GitHub Actions Hardening\n\n"
+                      f"- Workflows scanned: {len(workflows)} (.yml and .yaml)\n"
                       f"- Errors: {len(errors)} | Warnings: {len(warnings)}\n"
                   )
 
