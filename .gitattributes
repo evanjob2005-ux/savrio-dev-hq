@@ -1,0 +1,130 @@
+# ==========================================================
+# Savrio Engineering Operating System
+# .gitattributes
+# ==========================================================
+
+##############################
+# Default Behavior
+##############################
+
+* text=auto eol=lf
+
+##############################
+# Source Code
+##############################
+
+*.js      text
+*.jsx     text
+*.ts      text
+*.tsx     text
+*.css     text
+*.scss    text
+*.html    text
+*.json    text
+*.jsonc   text
+*.md      text
+*.yml     text
+*.yaml    text
+*.xml     text
+*.sql     text
+*.sh      text eol=lf
+*.ps1     text eol=crlf
+
+##############################
+# Config Files
+##############################
+
+.editorconfig text
+.gitignore text
+.gitattributes text
+
+##############################
+# Images
+##############################
+
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.svg     text
+*.ico     binary
+*.webp    binary
+*.avif    binary
+
+##############################
+# Fonts
+##############################
+
+*.ttf     binary
+*.otf     binary
+*.woff    binary
+*.woff2   binary
+
+##############################
+# Audio
+##############################
+
+*.mp3     binary
+*.wav     binary
+*.ogg     binary
+*.flac    binary
+
+##############################
+# Video
+##############################
+
+*.mp4     binary
+*.mov     binary
+*.avi     binary
+*.webm    binary
+
+##############################
+# Documents
+##############################
+
+*.pdf     binary
+*.doc     binary
+*.docx    binary
+*.ppt     binary
+*.pptx    binary
+*.xls     binary
+*.xlsx    binary
+
+##############################
+# Archives
+##############################
+
+*.zip     binary
+*.7z      binary
+*.gz      binary
+*.tar     binary
+*.rar     binary
+
+##############################
+# Certificates / Keys
+##############################
+
+*.pem     binary
+*.crt     binary
+*.key     binary
+*.pfx     binary
+
+##############################
+# Lock Files
+##############################
+
+package-lock.json text
+pnpm-lock.yaml text
+yarn.lock text
+
+##############################
+# GitHub
+##############################
+
+.github/** text
+
+##############################
+# VS Code
+##############################
+
+.vscode/** text
