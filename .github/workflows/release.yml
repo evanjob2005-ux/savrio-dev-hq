@@ -1,0 +1,255 @@
+name: Release
+
+# Controlled release of the Savrio Dev HQ engineering operating system (the
+# repository itself, not the Savrio application). Releases are always manual.
+# All validation happens before any tag or release is created, and the
+# privileged token is scoped to the single job that publishes the release.
+# See VERSIONING_POLICY.md (SemVer, v-prefixed tags) and RELEASE_PROCESS.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version without a leading v (e.g. 1.2.0 or 1.0.0-rc.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark this release as a pre-release"
+        required: false
+        type: boolean
+        default: false
+      title:
+        description: "Release title (defaults to 'Savrio Dev HQ v<version>')"
+        required: false
+        type: string
+        default: ""
+      target:
+        description: "Commit SHA or ref to release from (defaults to the main branch tip)"
+        required: false
+        type: string
+        default: ""
+      draft:
+        description: "Create the release as a draft"
+        required: false
+        type: boolean
+        default: false
+
+# Read-only by default. Only the publish job is granted contents: write.
+permissions:
+  contents: read
+
+# Serialize releases of the same version and never cancel a release in flight.
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+      title: ${{ steps.resolve.outputs.title }}
+    steps:
+      - name: Restrict releases to the main branch
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$REF_NAME" != "main" ]]; then
+            echo "::error::Releases may only be initiated from the 'main' branch (was '${REF_NAME}')."
+            exit 1
+          fi
+          echo "Release initiated from main."
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate version and resolve target
+        id: resolve
+        env:
+          VERSION: ${{ inputs.version }}
+          PRERELEASE_INPUT: ${{ inputs.prerelease }}
+          TARGET: ${{ inputs.target }}
+          TITLE_INPUT: ${{ inputs.title }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Official SemVer 2.0.0 pattern (major.minor.patch with optional
+          # pre-release and build-metadata identifiers).
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if [[ ! "$VERSION" =~ $semver ]]; then
+            echo "::error::Version '${VERSION}' is not a valid semantic version."
+            exit 1
+          fi
+
+          tag="v${VERSION}"
+
+          # A hyphenated version (alpha/beta/rc) is always a pre-release.
+          prerelease="${PRERELEASE_INPUT}"
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease="true"
+          fi
+
+          # Resolve the commit to release. Default to the main tip.
+          if [[ -z "$TARGET" ]]; then
+            target_sha="$HEAD_SHA"
+          elif ! target_sha=$(git rev-parse --verify --quiet "${TARGET}^{commit}"); then
+            echo "::error::Target ref '${TARGET}' could not be resolved to a commit."
+            exit 1
+          fi
+
+          # Refuse to release code that is not part of main's history.
+          if ! git merge-base --is-ancestor "$target_sha" "$HEAD_SHA"; then
+            echo "::error::Target commit '${target_sha}' is not an ancestor of main."
+            exit 1
+          fi
+
+          # Duplicate tag protection (local history and remote).
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::Tag '${tag}' already exists in history."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag '${tag}' already exists on the remote."
+            exit 1
+          fi
+
+          title="$TITLE_INPUT"
+          if [[ -z "$title" ]]; then
+            title="Savrio Dev HQ ${tag}"
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "tag=${tag}"
+            echo "prerelease=${prerelease}"
+            echo "target_sha=${target_sha}"
+            echo "title=${title}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Validated ${tag} at ${target_sha} (prerelease=${prerelease})."
+
+      - name: Check for an existing release
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::A GitHub release for '${TAG}' already exists."
+            exit 1
+          fi
+          echo "No existing release for ${TAG}."
+
+      - name: Release validation summary
+        if: always()
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+          TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          PRERELEASE: ${{ steps.resolve.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release Validation"
+            echo ""
+            echo "- Tag: ${TAG:-unresolved}"
+            echo "- Target commit: ${TARGET_SHA:-unresolved}"
+            echo "- Pre-release: ${PRERELEASE:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish Release
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only job that needs write access, granted narrowly to create the tag
+    # and the GitHub release.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out target commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.target_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Re-verify tag and release absence
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Guard against a race or a rerun creating a duplicate release.
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag '${TAG}' now exists; aborting to avoid a duplicate."
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release '${TAG}' now exists; aborting to avoid a duplicate."
+            exit 1
+          fi
+          echo "Confirmed ${TAG} does not yet exist."
+
+      - name: Create GitHub release
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          TITLE: ${{ needs.validate.outputs.title }}
+          TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          DRAFT: ${{ inputs.draft }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # gh creates the annotated tag at the target commit and the release
+          # atomically, so no tag is ever pushed before validation passes.
+          args=(release create "$TAG"
+                --target "$TARGET_SHA"
+                --title "$TITLE"
+                --generate-notes)
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          if [[ "$DRAFT" == "true" ]]; then
+            args+=(--draft)
+          fi
+
+          gh "${args[@]}"
+          echo "Created release ${TAG}."
+
+      - name: Release summary
+        if: always()
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release Published"
+            echo ""
+            echo "- Tag: ${TAG}"
+            echo "- Target commit: ${TARGET_SHA}"
+            echo "- Pre-release: ${PRERELEASE}"
+            echo "- Draft: ${DRAFT}"
+          } >> "$GITHUB_STEP_SUMMARY"
