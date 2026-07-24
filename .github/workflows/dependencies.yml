@@ -1,0 +1,195 @@
+name: Dependencies
+
+# Validates dependency health for the ecosystems that actually exist in this
+# repository (npm and GitHub Actions). It is the single owner of dependency
+# scanning in the suite: manifest and lockfile consistency, package-manager
+# conflict detection, vulnerability auditing, and pull request dependency
+# review. It degrades gracefully in the documentation-first case where no
+# application manifests are present.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly, Mondays at 07:00 UTC (offset from the security scan).
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependencies-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifest-health:
+    name: Manifest and Lockfile Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Detect ecosystems and validate lockfiles
+        run: |
+          set -euo pipefail
+
+          errors=0
+
+          has() { [[ -f "$1" ]]; }
+
+          npm_manifest=false;  has package.json     && npm_manifest=true
+          npm_lock=false;      has package-lock.json && npm_lock=true
+          pnpm_lock=false;     has pnpm-lock.yaml    && pnpm_lock=true
+          yarn_lock=false;     has yarn.lock         && yarn_lock=true
+
+          python_manifest=false
+          if has requirements.txt || has pyproject.toml || has Pipfile; then
+            python_manifest=true
+          fi
+          docker=false; has Dockerfile && docker=true
+
+          echo "npm manifest:  ${npm_manifest}"
+          echo "npm lockfile:  ${npm_lock}"
+          echo "pnpm lockfile: ${pnpm_lock}"
+          echo "yarn lockfile: ${yarn_lock}"
+          echo "python:        ${python_manifest}"
+          echo "docker:        ${docker}"
+
+          # Multiple JavaScript package managers must not coexist.
+          js_locks=0
+          [[ "$npm_lock" == "true" ]]  && js_locks=$((js_locks + 1))
+          [[ "$pnpm_lock" == "true" ]] && js_locks=$((js_locks + 1))
+          [[ "$yarn_lock" == "true" ]] && js_locks=$((js_locks + 1))
+          if [[ "$js_locks" -gt 1 ]]; then
+            echo "::error::Multiple JavaScript lockfiles detected; use a single package manager."
+            errors=1
+          fi
+
+          # A manifest present with npm should have its lockfile committed.
+          if [[ "$npm_manifest" == "true" && "$npm_lock" == "false" \
+                && "$pnpm_lock" == "false" && "$yarn_lock" == "false" ]]; then
+            echo "::warning::package.json is present but no lockfile was found."
+          fi
+
+          # A lockfile without a manifest is unexpected.
+          if [[ "$npm_lock" == "true" && "$npm_manifest" == "false" ]]; then
+            echo "::error::package-lock.json exists without a package.json."
+            errors=1
+          fi
+
+          {
+            echo "## Dependency Ecosystems"
+            echo ""
+            echo "| Ecosystem | Present |"
+            echo "| --- | --- |"
+            echo "| npm (package.json) | ${npm_manifest} |"
+            echo "| npm lockfile | ${npm_lock} |"
+            echo "| pnpm lockfile | ${pnpm_lock} |"
+            echo "| yarn lockfile | ${yarn_lock} |"
+            echo "| Python | ${python_manifest} |"
+            echo "| Docker | ${docker} |"
+            echo "| GitHub Actions | true |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$errors" -ne 0 ]]; then
+            exit 1
+          fi
+
+  npm-audit:
+    name: npm Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Dependency changes on pull requests are covered by the dependency-review
+    # job; this scheduled/push audit avoids duplicating that work.
+    if: github.event_name != 'pull_request'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Detect npm project
+        id: detect
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then
+            echo "npm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm=false" >> "$GITHUB_OUTPUT"
+            echo "No package-lock.json found. npm audit will be skipped."
+            {
+              echo "## npm Audit"
+              echo ""
+              echo "No npm lockfile present. Skipped."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up Node.js
+        if: steps.detect.outputs.npm == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Run npm audit
+        if: steps.detect.outputs.npm == 'true'
+        run: |
+          set -euo pipefail
+          # Report all severities but only fail the job on critical findings,
+          # so routine upstream advisories do not block unrelated work while a
+          # critical vulnerability still stops the line.
+          npm audit --audit-level=critical --json > audit.json || true
+
+          python <<'PYTHON'
+          import json
+          import os
+
+          with open("audit.json", "r", encoding="utf-8") as handle:
+              report = json.load(handle)
+
+          vulns = report.get("metadata", {}).get("vulnerabilities", {})
+          order = ["critical", "high", "moderate", "low", "info"]
+          counts = {level: vulns.get(level, 0) for level in order}
+
+          for level in order:
+              if counts[level]:
+                  marker = "error" if level == "critical" else "warning"
+                  print(f"::{marker}::npm audit found {counts[level]} {level} vulnerabilities.")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write("## npm Audit\n\n")
+                  handle.write("| Severity | Count |\n| --- | --- |\n")
+                  for level in order:
+                      handle.write(f"| {level} | {counts[level]} |\n")
+
+          raise SystemExit(1 if counts["critical"] else 0)
+          PYTHON
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v5
+        with:
+          # Block pull requests that introduce high or critical vulnerabilities.
+          fail-on-severity: high
+          # No pull-requests: write permission is granted, so do not comment.
+          comment-summary-in-pr: never
