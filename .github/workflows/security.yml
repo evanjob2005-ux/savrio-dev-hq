@@ -1,0 +1,267 @@
+name: Security
+
+# Security-focused validation for a documentation-first repository: secret
+# scanning, credential and artifact hygiene, and GitHub Actions supply-chain
+# hardening. Dependency vulnerability scanning is intentionally owned by
+# dependencies.yml to avoid duplicated scans; this workflow does not repeat it.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly baseline scan, Mondays at 06:00 UTC, to catch newly disclosed
+    # issues and secrets committed outside the pull request flow.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+# Least privilege at the top level; no job requires write access.
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          # Full history so scheduled and push scans cover past commits.
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  credential-and-artifact-audit:
+    name: Credential and Artifact Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Scan for credentials, private keys, and committed artifacts
+        run: |
+          set -euo pipefail
+          python <<'PYTHON'
+          import os
+          import re
+          import subprocess
+          import sys
+
+          # Patterns are assembled from fragments so this scanner never matches
+          # its own source. The security workflow file is skipped as well.
+          SELF = ".github/workflows/security.yml"
+          PEM = "-----BEGIN " + "[A-Z0-9 ]*PRIVATE " + "KEY-----"
+
+          content_rules = [
+              ("Private key block", re.compile(PEM)),
+              ("AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
+              ("Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
+              ("Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}")),
+              ("GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}")),
+              ("Generic secret assignment",
+               re.compile(r"(?i)(secret|password|passwd|api[_-]?key|token)"
+                          r"\s*[:=]\s*['\"][^'\"\s]{16,}['\"]")),
+          ]
+
+          filename_rules = [
+              ("Environment file", lambda b: b == ".env" or (
+                  b.startswith(".env.") and b not in
+                  {".env.example", ".env.sample", ".env.template"})),
+              ("Private key file", lambda b: b in {
+                  "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}),
+              ("Key or certificate file", lambda b: b.endswith(
+                  (".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"))),
+          ]
+
+          artifact_prefixes = ("node_modules/", ".next/", "dist/", "out/",
+                               "build/", "coverage/")
+
+          tracked = subprocess.run(
+              ["git", "ls-files", "-z"],
+              check=True, capture_output=True, text=True,
+          ).stdout.split("\0")
+
+          findings = []
+          for name in tracked:
+              if not name or name == SELF:
+                  continue
+              base = os.path.basename(name)
+
+              for label, matches in filename_rules:
+                  if matches(base):
+                      findings.append((name, label))
+
+              if name.startswith(artifact_prefixes) or "/node_modules/" in name:
+                  findings.append((name, "Committed build or dependency artifact"))
+
+              # Content scan for text files only; skip large and binary files.
+              try:
+                  if os.path.getsize(name) > 2_000_000:
+                      continue
+                  with open(name, "r", encoding="utf-8") as handle:
+                      text = handle.read()
+              except (OSError, UnicodeDecodeError):
+                  continue
+
+              for label, pattern in content_rules:
+                  if pattern.search(text):
+                      findings.append((name, label))
+
+          for name, label in findings:
+              print(f"::error file={name}::{label} detected.")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      "## Credential and Artifact Audit\n\n"
+                      f"- Files scanned: {sum(1 for n in tracked if n)}\n"
+                      f"- Findings: {len(findings)}\n"
+                  )
+
+          if findings:
+              sys.exit(1)
+          print("No credentials, private keys, or committed artifacts found.")
+          PYTHON
+
+  actions-hardening:
+    name: GitHub Actions Hardening
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o "${RUNNER_TEMP}/actionlint.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/actionlint.tar.gz" -C "${RUNNER_TEMP}" actionlint
+
+      - name: Lint workflows for security issues
+        run: |
+          "${RUNNER_TEMP}/actionlint" -color
+
+      - name: Audit workflow permissions and action pinning
+        run: |
+          set -euo pipefail
+          python <<'PYTHON'
+          import glob
+          import os
+          import re
+          import sys
+
+          import yaml
+
+          SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+          # Contexts an attacker can influence via a pull request. Interpolating
+          # them directly into a run script (rather than passing through env)
+          # enables command injection.
+          INJECTABLE = re.compile(
+              r"\$\{\{\s*github\.(event\.(pull_request\.(title|body)"
+              r"|issue\.(title|body)|comment\.body|review\.body)|head_ref)")
+          FLOATING = {"main", "master", "latest", "HEAD"}
+
+          def iter_steps(document):
+              jobs = document.get("jobs") or {}
+              if not isinstance(jobs, dict):
+                  return
+              for job in jobs.values():
+                  if not isinstance(job, dict):
+                      continue
+                  for step in job.get("steps") or []:
+                      if isinstance(step, dict):
+                          yield step
+
+          errors = []
+          warnings = []
+
+          for path in sorted(glob.glob(".github/workflows/*.yml")):
+              with open(path, "r", encoding="utf-8") as handle:
+                  data = yaml.safe_load(handle)
+              if not isinstance(data, dict):
+                  continue
+
+              # PyYAML parses the "on:" key as the boolean True.
+              triggers = data.get(True, data.get("on"))
+              trigger_names = set()
+              if isinstance(triggers, str):
+                  trigger_names = {triggers}
+              elif isinstance(triggers, list):
+                  trigger_names = set(triggers)
+              elif isinstance(triggers, dict):
+                  trigger_names = set(triggers)
+              if "pull_request_target" in trigger_names:
+                  errors.append(f"{path}: uses pull_request_target.")
+
+              perms = data.get("permissions")
+              if perms == "write-all":
+                  errors.append(f"{path}: grants permissions: write-all.")
+              if perms is None:
+                  warnings.append(f"{path}: no top-level permissions declared.")
+
+              # Structural scan of each step avoids matching pattern strings that
+              # appear inside run scripts (such as this auditor itself).
+              for step in iter_steps(data):
+                  uses = step.get("uses")
+                  if isinstance(uses, str):
+                      ref = uses.strip()
+                      if not (ref.startswith("./") or ref.startswith("docker://")):
+                          name, _, version = ref.partition("@")
+                          if not version:
+                              errors.append(f"{path}: action '{ref}' is not pinned.")
+                          elif version in FLOATING:
+                              errors.append(f"{path}: action '{ref}' uses a floating ref.")
+                          elif not name.startswith(("actions/", "github/")) \
+                                  and not SHA_RE.match(version):
+                              errors.append(
+                                  f"{path}: third-party action '{ref}' must be pinned to a commit SHA.")
+
+                  run = step.get("run")
+                  if isinstance(run, str) and INJECTABLE.search(run):
+                      match = INJECTABLE.search(run)
+                      errors.append(
+                          f"{path}: untrusted context used directly in a run script: {match.group(0)}")
+
+          for message in warnings:
+              print(f"::warning::{message}")
+          for message in errors:
+              print(f"::error::{message}")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      "## GitHub Actions Hardening\n\n"
+                      f"- Errors: {len(errors)} | Warnings: {len(warnings)}\n"
+                  )
+
+          if errors:
+              sys.exit(1)
+          print("Workflow permissions and action pinning look sound.")
+          PYTHON
