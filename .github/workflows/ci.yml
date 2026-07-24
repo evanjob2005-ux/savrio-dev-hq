@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify required repository files
+        id: files
         run: |
           set -euo pipefail
 
@@ -72,6 +73,7 @@ jobs:
           fi
 
       - name: Verify required directories
+        id: dirs
         run: |
           set -euo pipefail
 
@@ -98,6 +100,7 @@ jobs:
           fi
 
       - name: Detect unresolved merge conflict markers
+        id: conflicts
         run: |
           set -euo pipefail
 
@@ -114,6 +117,7 @@ jobs:
           echo "No unresolved merge conflict markers found."
 
       - name: Detect trailing whitespace
+        id: whitespace
         run: |
           set -euo pipefail
 
@@ -127,6 +131,7 @@ jobs:
           echo "No trailing whitespace found."
 
       - name: Check files end with a newline
+        id: newline
         run: |
           set -euo pipefail
 
@@ -157,16 +162,35 @@ jobs:
 
       - name: Repository integrity summary
         if: always()
+        env:
+          FILES: ${{ steps.files.outcome }}
+          DIRS: ${{ steps.dirs.outcome }}
+          CONFLICTS: ${{ steps.conflicts.outcome }}
+          WHITESPACE: ${{ steps.whitespace.outcome }}
+          NEWLINE: ${{ steps.newline.outcome }}
         run: |
           set -euo pipefail
+          # Report the real outcome of each step. A step that never ran (because
+          # an earlier step failed) reports as Skipped/Not executed rather than
+          # being claimed as verified.
+          label() {
+            case "$1" in
+              success) echo "Passed" ;;
+              failure) echo "Failed" ;;
+              skipped) echo "Skipped" ;;
+              cancelled) echo "Cancelled" ;;
+              "") echo "Not executed" ;;
+              *) echo "$1" ;;
+            esac
+          }
           {
             echo "## Repository Integrity"
             echo ""
-            echo "- Required files: verified"
-            echo "- Required directories: verified"
-            echo "- Merge conflict markers: none"
-            echo "- Trailing whitespace (non-Markdown): none"
-            echo "- Final newlines: checked (warnings only)"
+            echo "- Required files: $(label "$FILES")"
+            echo "- Required directories: $(label "$DIRS")"
+            echo "- Merge conflict markers: $(label "$CONFLICTS")"
+            echo "- Trailing whitespace (non-Markdown): $(label "$WHITESPACE")"
+            echo "- Final newline check: $(label "$NEWLINE")"
           } >> "$GITHUB_STEP_SUMMARY"
 
   structured-data:

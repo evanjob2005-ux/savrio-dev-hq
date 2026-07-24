@@ -39,6 +39,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install PyYAML
+        run: python -m pip install --disable-pip-version-check "pyyaml==6.0.2"
+
       - name: Determine changed files
         id: changes
         env:
@@ -291,16 +299,18 @@ jobs:
       - name: Validate changed structured and Markdown files
         run: |
           set -euo pipefail
-          python3 <<'PYTHON'
+          python <<'PYTHON'
           import json
           import os
           import sys
 
+          # PyYAML is installed by an earlier step. A missing parser is a hard
+          # failure -- required validation is never silently skipped.
           try:
               import yaml
-              have_yaml = True
           except ImportError:
-              have_yaml = False
+              print("::error::PyYAML is not available; cannot validate changed YAML files.")
+              raise SystemExit(1)
 
           with open("changed-content.txt", "r", encoding="utf-8") as handle:
               files = [line.strip() for line in handle if line.strip()]
@@ -315,9 +325,8 @@ jobs:
               try:
                   if lower.endswith((".yml", ".yaml")):
                       checked["yaml"] += 1
-                      if have_yaml:
-                          with open(name, "r", encoding="utf-8") as handle:
-                              list(yaml.safe_load_all(handle))
+                      with open(name, "r", encoding="utf-8") as handle:
+                          list(yaml.safe_load_all(handle))
                   elif lower.endswith(".json"):
                       checked["json"] += 1
                       with open(name, "r", encoding="utf-8") as handle:
