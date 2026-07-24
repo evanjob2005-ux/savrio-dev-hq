@@ -2,9 +2,22 @@ name: Release
 
 # Controlled release of the Savrio Dev HQ engineering operating system (the
 # repository itself, not the Savrio application). Releases are always manual.
-# All validation happens before any tag or release is created, and the
-# privileged token is scoped to the single job that publishes the release.
-# See VERSIONING_POLICY.md (SemVer, v-prefixed tags) and RELEASE_PROCESS.md.
+#
+# Gate model (see RELEASE_PROCESS.md / VERSIONING_POLICY.md):
+#   validate  -> version, branch, readiness evidence, forward progression
+#   verify    -> required CI checks succeeded for the EXACT target commit
+#   publish   -> annotated tag + GitHub release, under a protected environment
+#
+# REQUIRED GitHub-side configuration that cannot be expressed in this file
+# (see docs: Actions > deployments-and-environments):
+#   * Create an environment named "production-release".
+#   * Add required reviewers to that environment (human release approval).
+#   * Enable "Prevent self-review" so the dispatcher cannot approve themselves.
+#   * Protect main with branch protection + required status checks so the
+#     commits this workflow releases have actually passed CI.
+# Without those settings the publish job still runs its in-workflow gates, but
+# human approval and self-review prevention are enforced only by the
+# environment protection rules configured in repository settings.
 
 on:
   workflow_dispatch:
@@ -13,16 +26,24 @@ on:
         description: "Semantic version without a leading v (e.g. 1.2.0 or 1.0.0-rc.1)"
         required: true
         type: string
-      prerelease:
-        description: "Mark this release as a pre-release"
-        required: false
-        type: boolean
-        default: false
+      changelog:
+        description: "Release notes / changelog (Added, Changed, Fixed, Security, ...)"
+        required: true
+        type: string
+      rollback_plan:
+        description: "Rollback plan if this release must be reverted"
+        required: true
+        type: string
       title:
         description: "Release title (defaults to 'Savrio Dev HQ v<version>')"
         required: false
         type: string
         default: ""
+      prerelease:
+        description: "Mark this release as a pre-release"
+        required: false
+        type: boolean
+        default: false
       target:
         description: "Commit SHA or ref to release from (defaults to the main branch tip)"
         required: false
@@ -30,6 +51,11 @@ on:
         default: ""
       draft:
         description: "Create the release as a draft"
+        required: false
+        type: boolean
+        default: false
+      allow_no_new_commits:
+        description: "Documented exception: allow releasing a commit already carrying the latest release"
         required: false
         type: boolean
         default: false
@@ -59,6 +85,7 @@ jobs:
       prerelease: ${{ steps.resolve.outputs.prerelease }}
       target_sha: ${{ steps.resolve.outputs.target_sha }}
       title: ${{ steps.resolve.outputs.title }}
+      latest_tag: ${{ steps.resolve.outputs.latest_tag }}
     steps:
       - name: Restrict releases to the main branch
         env:
@@ -77,83 +104,146 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Validate version and resolve target
+      - name: Validate version, evidence, and target
         id: resolve
         env:
           VERSION: ${{ inputs.version }}
           PRERELEASE_INPUT: ${{ inputs.prerelease }}
           TARGET: ${{ inputs.target }}
           TITLE_INPUT: ${{ inputs.title }}
+          CHANGELOG: ${{ inputs.changelog }}
+          ROLLBACK: ${{ inputs.rollback_plan }}
+          ALLOW_NO_NEW_COMMITS: ${{ inputs.allow_no_new_commits }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          python <<'PYTHON'
+          import os
+          import re
+          import subprocess
+          import sys
 
-          # Official SemVer 2.0.0 pattern (major.minor.patch with optional
-          # pre-release and build-metadata identifiers).
-          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
-          if [[ ! "$VERSION" =~ $semver ]]; then
-            echo "::error::Version '${VERSION}' is not a valid semantic version."
-            exit 1
-          fi
+          def die(message):
+              print(f"::error::{message}")
+              sys.exit(1)
 
-          tag="v${VERSION}"
+          def git(*args):
+              return subprocess.run(
+                  ["git", *args], capture_output=True, text=True)
 
-          # A hyphenated version (alpha/beta/rc) is always a pre-release.
-          prerelease="${PRERELEASE_INPUT}"
-          if [[ "$VERSION" == *-* ]]; then
-            prerelease="true"
-          fi
+          version = os.environ["VERSION"].strip()
+          title_input = os.environ.get("TITLE_INPUT", "")
+          changelog = os.environ.get("CHANGELOG", "")
+          rollback = os.environ.get("ROLLBACK", "")
+          target = os.environ.get("TARGET", "").strip()
+          head_sha = os.environ["HEAD_SHA"].strip()
+          prerelease_input = os.environ.get("PRERELEASE_INPUT", "false").strip().lower()
+          allow_no_new = os.environ.get("ALLOW_NO_NEW_COMMITS", "false").strip().lower() == "true"
 
-          # Resolve the commit to release. Default to the main tip.
-          if [[ -z "$TARGET" ]]; then
-            target_sha="$HEAD_SHA"
-          elif ! target_sha=$(git rev-parse --verify --quiet "${TARGET}^{commit}"); then
-            echo "::error::Target ref '${TARGET}' could not be resolved to a commit."
-            exit 1
-          fi
+          # Full Semantic Versioning 2.0.0 grammar (semver.org). Rejects empty
+          # identifiers, leading zeroes in numeric identifiers, and invalid
+          # characters (e.g. 1.0.0-01, 1.0.0-alpha..1, 1.0.0-.alpha, 1.0.0+b..1).
+          SEMVER = re.compile(
+              r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+              r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)"
+              r"(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
+              r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$")
+
+          match = SEMVER.match(version)
+          if not match:
+              die(f"Version '{version}' is not valid Semantic Versioning 2.0.0. "
+                  "Check for empty or leading-zero identifiers and invalid characters.")
+
+          # Release-readiness evidence must be present.
+          if not changelog.strip():
+              die("A changelog / release notes value is required.")
+          if not rollback.strip():
+              die("A rollback plan is required.")
+
+          # Reject control characters in the title to prevent workflow-command
+          # or output-file injection (no CR/LF can create extra output records).
+          if title_input and any(ord(ch) < 0x20 for ch in title_input):
+              die("Release title must not contain control characters (including CR/LF).")
+
+          tag = f"v{version}"
+          prerelease = "true" if (prerelease_input == "true" or "-" in version) else "false"
+          title = title_input.strip() or f"Savrio Dev HQ {tag}"
+
+          # Resolve the commit to release; default to the main tip.
+          if not target:
+              target_sha = head_sha
+          else:
+              result = git("rev-parse", "--verify", "--quiet", f"{target}^{{commit}}")
+              if result.returncode != 0 or not result.stdout.strip():
+                  die(f"Target ref '{target}' could not be resolved to a commit.")
+              target_sha = result.stdout.strip()
 
           # Refuse to release code that is not part of main's history.
-          if ! git merge-base --is-ancestor "$target_sha" "$HEAD_SHA"; then
-            echo "::error::Target commit '${target_sha}' is not an ancestor of main."
-            exit 1
-          fi
+          if git("merge-base", "--is-ancestor", target_sha, head_sha).returncode != 0:
+              die(f"Target commit '{target_sha}' is not an ancestor of main.")
 
           # Duplicate tag protection (local history and remote).
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            echo "::error::Tag '${tag}' already exists in history."
-            exit 1
-          fi
-          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
-            echo "::error::Tag '${tag}' already exists on the remote."
-            exit 1
-          fi
+          if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode == 0:
+              die(f"Tag '{tag}' already exists in history.")
+          if git("ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}").returncode == 0:
+              die(f"Tag '{tag}' already exists on the remote.")
 
-          title="$TITLE_INPUT"
-          if [[ -z "$title" ]]; then
-            title="Savrio Dev HQ ${tag}"
-          fi
+          def parse(v):
+              m = SEMVER.match(v)
+              if not m:
+                  return None
+              major, minor, patch, pre, _build = m.groups()
+              return (int(major), int(minor), int(patch), pre)
 
-          {
-            echo "version=${VERSION}"
-            echo "tag=${tag}"
-            echo "prerelease=${prerelease}"
-            echo "target_sha=${target_sha}"
-            echo "title=${title}"
-          } >> "$GITHUB_OUTPUT"
+          def precedence_key(parsed):
+              major, minor, patch, pre = parsed
+              if pre is None:
+                  pre_key = (1,)  # a normal release outranks any pre-release
+              else:
+                  ids = []
+                  for ident in pre.split("."):
+                      if ident.isdigit():
+                          ids.append((0, int(ident), ""))
+                      else:
+                          ids.append((1, 0, ident))
+                  pre_key = (0, tuple(ids))
+              return (major, minor, patch, pre_key)
 
-          echo "Validated ${tag} at ${target_sha} (prerelease=${prerelease})."
+          # Forward progression relative to the latest existing release tag.
+          tags = [t for t in git("tag", "--list", "v*").stdout.split() if t]
+          latest_tag = ""
+          latest_parsed = None
+          for existing in tags:
+              parsed = parse(existing[1:])  # strip leading 'v'
+              if parsed is None:
+                  continue
+              if latest_parsed is None or precedence_key(parsed) > precedence_key(latest_parsed):
+                  latest_parsed = parsed
+                  latest_tag = existing
 
-      - name: Check for an existing release
-        env:
-          TAG: ${{ steps.resolve.outputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::A GitHub release for '${TAG}' already exists."
-            exit 1
-          fi
-          echo "No existing release for ${TAG}."
+          if latest_parsed is not None:
+              if precedence_key(parse(version)) <= precedence_key(latest_parsed):
+                  die(f"Version {tag} does not move forward from the latest release {latest_tag}.")
+
+              # Prevent a release with no new commits unless explicitly allowed.
+              latest_commit = git("rev-list", "-n", "1", latest_tag).stdout.strip()
+              if latest_commit and latest_commit == target_sha and not allow_no_new:
+                  die(f"Target commit already carries {latest_tag}; no new commits to release. "
+                      "Set allow_no_new_commits to override intentionally.")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              # Every value below is derived from validated, control-character-free
+              # data, so single-line key=value output records are safe.
+              out.write(f"version={version}\n")
+              out.write(f"tag={tag}\n")
+              out.write(f"prerelease={prerelease}\n")
+              out.write(f"target_sha={target_sha}\n")
+              out.write(f"title={title}\n")
+              out.write(f"latest_tag={latest_tag}\n")
+
+          print(f"Validated {tag} at {target_sha} (prerelease={prerelease}, "
+                f"previous={latest_tag or 'none'}).")
+          PYTHON
 
       - name: Release validation summary
         if: always()
@@ -161,23 +251,102 @@ jobs:
           TAG: ${{ steps.resolve.outputs.tag }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           PRERELEASE: ${{ steps.resolve.outputs.prerelease }}
+          LATEST_TAG: ${{ steps.resolve.outputs.latest_tag }}
+          OUTCOME: ${{ steps.resolve.outcome }}
         run: |
           set -euo pipefail
           {
             echo "## Release Validation"
             echo ""
+            echo "- Result: ${OUTCOME}"
             echo "- Tag: ${TAG:-unresolved}"
             echo "- Target commit: ${TARGET_SHA:-unresolved}"
+            echo "- Previous release: ${LATEST_TAG:-none}"
             echo "- Pre-release: ${PRERELEASE:-unknown}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  publish:
-    name: Publish Release
+  verify-checks:
+    name: Verify Required Checks
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The only job that needs write access, granted narrowly to create the tag
-    # and the GitHub release.
+    permissions:
+      contents: read
+      checks: read
+      statuses: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Verify CI succeeded for the target commit
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.validate.outputs.target_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Check runs (GitHub Actions and other check-run providers).
+          mapfile -t rows < <(gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate \
+            --jq '.check_runs[] | [.name, .status, (.conclusion // "pending")] | @tsv')
+
+          # Legacy combined commit status (e.g. external status contexts).
+          combined=$(gh api "repos/${REPO}/commits/${SHA}/status" --jq '.state')
+
+          total=0
+          failed=0
+          for row in "${rows[@]:-}"; do
+            [[ -z "$row" ]] && continue
+            total=$((total + 1))
+            name=$(cut -f1 <<< "$row")
+            status=$(cut -f2 <<< "$row")
+            conclusion=$(cut -f3 <<< "$row")
+            if [[ "$status" != "completed" ]]; then
+              echo "::error::Check '${name}' is not completed (status=${status})."
+              failed=1
+            elif [[ "$conclusion" != "success" && "$conclusion" != "neutral" && "$conclusion" != "skipped" ]]; then
+              echo "::error::Check '${name}' did not succeed (conclusion=${conclusion})."
+              failed=1
+            fi
+          done
+
+          if [[ "$combined" == "failure" || "$combined" == "error" ]]; then
+            echo "::error::Combined commit status for ${SHA} is '${combined}'."
+            failed=1
+          fi
+
+          # Fail closed: refuse to publish a commit that has no CI evidence.
+          if [[ "$total" -eq 0 ]]; then
+            echo "::error::No CI check runs found for ${SHA}; refusing to publish without validation."
+            failed=1
+          fi
+
+          {
+            echo "## Required Checks"
+            echo ""
+            echo "- Target commit: ${SHA}"
+            echo "- Check runs evaluated: ${total}"
+            echo "- Combined status: ${combined}"
+            echo "- Result: $([[ "$failed" -eq 0 ]] && echo PASS || echo FAIL)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$failed" -ne 0 ]]; then
+            echo "::error::Required checks did not pass for target commit ${SHA}."
+            exit 1
+          fi
+          echo "All ${total} check run(s) succeeded for ${SHA}."
+
+  publish:
+    name: Publish Release
+    needs:
+      - validate
+      - verify-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Protected environment: human approval and self-review prevention are
+    # enforced by the environment's protection rules (configured in settings).
+    environment: production-release
+    # The only job granted write access, narrowly to create the tag and release.
     permissions:
       contents: write
     defaults:
@@ -208,24 +377,46 @@ jobs:
           fi
           echo "Confirmed ${TAG} does not yet exist."
 
-      - name: Create GitHub release
+      - name: Create annotated tag and GitHub release
         env:
           TAG: ${{ needs.validate.outputs.tag }}
           TITLE: ${{ needs.validate.outputs.title }}
+          VERSION: ${{ needs.validate.outputs.version }}
           TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
           DRAFT: ${{ inputs.draft }}
+          CHANGELOG: ${{ inputs.changelog }}
+          ROLLBACK: ${{ inputs.rollback_plan }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          # gh creates the annotated tag at the target commit and the release
-          # atomically, so no tag is ever pushed before validation passes.
-          args=(release create "$TAG"
-                --target "$TARGET_SHA"
-                --title "$TITLE"
-                --generate-notes)
+          # Assemble release notes from the release-readiness evidence. printf
+          # '%s' is used so user-provided text is never interpreted.
+          notes="${RUNNER_TEMP}/release-notes.md"
+          {
+            printf '## Release %s\n\n' "$TAG"
+            printf -- '- Version: %s\n' "$VERSION"
+            printf -- '- Target commit: %s\n\n' "$TARGET_SHA"
+            printf '### Changelog\n\n'
+            printf '%s\n\n' "$CHANGELOG"
+            printf '### Rollback Plan\n\n'
+            printf '%s\n\n' "$ROLLBACK"
+            printf '### Validation\n\n'
+            printf -- '- Semantic version validated\n'
+            printf -- '- Required CI checks verified for the target commit\n'
+            printf -- '- Release-readiness evidence provided\n'
+          } > "$notes"
 
+          # gh release create would create a lightweight tag; VERSIONING_POLICY
+          # calls for real release tags, so create and push an annotated tag
+          # explicitly first, then attach the release to it.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$TARGET_SHA" -m "$TITLE"
+          git push origin "refs/tags/${TAG}"
+
+          args=(release create "$TAG" --title "$TITLE" --notes-file "$notes")
           if [[ "$PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi
@@ -243,11 +434,13 @@ jobs:
           TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
           DRAFT: ${{ inputs.draft }}
+          OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
           {
             echo "## Release Published"
             echo ""
+            echo "- Job status: ${OUTCOME}"
             echo "- Tag: ${TAG}"
             echo "- Target commit: ${TARGET_SHA}"
             echo "- Pre-release: ${PRERELEASE}"
