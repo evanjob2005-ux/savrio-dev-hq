@@ -7,6 +7,8 @@ const STATUS_COLOR: Record<Project["status"], string> = {
   active: COLORS.ok,
   paused: COLORS.warn,
   blocked: COLORS.err,
+  needs_revision: COLORS.warn,
+  rejected: COLORS.err,
   completed: COLORS.ok,
   archived: COLORS.idle,
 };

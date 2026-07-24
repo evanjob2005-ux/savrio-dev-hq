@@ -11,6 +11,8 @@ export type LifecycleStatus =
   | "active"
   | "paused"
   | "blocked"
+  | "needs_revision"
+  | "rejected"
   | "completed"
   | "archived";
 

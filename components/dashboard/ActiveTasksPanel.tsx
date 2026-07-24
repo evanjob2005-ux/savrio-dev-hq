@@ -8,6 +8,8 @@ const STATUS_COLOR: Record<Task["status"], string> = {
   active: COLORS.run,
   paused: COLORS.warn,
   blocked: COLORS.err,
+  needs_revision: COLORS.warn,
+  rejected: COLORS.err,
   completed: COLORS.ok,
   archived: COLORS.idle,
 };

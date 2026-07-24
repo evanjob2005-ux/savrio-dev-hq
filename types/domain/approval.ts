@@ -11,4 +11,6 @@ export interface Approval {
   decidedByUserId: EntityId | null;
   requestedAt: IsoTimestamp;
   decidedAt: IsoTimestamp | null;
+  /** Trigger.dev wait token id when paused for founder approval. */
+  waitTokenId?: string | null;
 }

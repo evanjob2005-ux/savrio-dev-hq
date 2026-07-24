@@ -35,3 +35,10 @@ export type {
   ConnectedService,
   ConnectedServiceKind,
 } from "./connected-service";
+export type {
+  FounderRequestInput,
+  FounderRequestWorkflowStage,
+  WorkflowDecision,
+  WorkflowRejectionKind,
+  WorkflowRunRecord,
+} from "./founder-request-workflow";
