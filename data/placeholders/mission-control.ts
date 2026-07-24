@@ -1,0 +1,286 @@
+// Typed placeholder data for Sprint 1A Mission Control overview sections.
+// Static only — no business logic, persistence, or orchestration.
+
+import type {
+  Agent,
+  Approval,
+  ConnectedService,
+  Event,
+  Project,
+  Task,
+} from "@/types/domain";
+
+export interface SystemOverviewMetrics {
+  activeProjects: number;
+  activeTasks: number;
+  pendingApprovals: number;
+  connectedServices: number;
+  runningExecutions: number;
+}
+
+export interface MissionControlPlaceholders {
+  overview: SystemOverviewMetrics;
+  projects: Project[];
+  activeTasks: Task[];
+  approvalQueue: Approval[];
+  recentActivity: Event[];
+  agents: Agent[];
+  connectedServices: ConnectedService[];
+}
+
+const TS = "2026-07-24T21:00:00.000Z";
+
+export const MISSION_CONTROL_PLACEHOLDERS: MissionControlPlaceholders = {
+  overview: {
+    activeProjects: 2,
+    activeTasks: 4,
+    pendingApprovals: 2,
+    connectedServices: 3,
+    runningExecutions: 1,
+  },
+  projects: [
+    {
+      id: "proj-savrio-platform",
+      name: "Savrio Platform",
+      slug: "savrio-platform",
+      description: "Core product engineering workspace.",
+      repository: "savrio/platform",
+      defaultBranch: "main",
+      status: "active",
+      ownerId: "user-evan",
+      createdAt: "2026-06-01T12:00:00.000Z",
+      updatedAt: TS,
+    },
+    {
+      id: "proj-dev-hq",
+      name: "Dev HQ",
+      slug: "dev-hq",
+      description: "Engineering operating system and Mission Control.",
+      repository: "savrio/dev-hq",
+      defaultBranch: "main",
+      status: "active",
+      ownerId: "user-evan",
+      createdAt: "2026-05-15T09:30:00.000Z",
+      updatedAt: TS,
+    },
+  ],
+  activeTasks: [
+    {
+      id: "task-1042",
+      projectId: "proj-dev-hq",
+      workflowId: "wf-feature-development",
+      title: "Sprint 1A domain types and contracts",
+      description: "Define shared domain models and service interfaces.",
+      status: "active",
+      priority: "High",
+      assigneeAgentId: "agent-claude",
+      claimedAt: "2026-07-24T18:30:00.000Z",
+      createdAt: "2026-07-24T16:00:00.000Z",
+      updatedAt: TS,
+      dueAt: "2026-07-25T23:59:59.000Z",
+    },
+    {
+      id: "task-1038",
+      projectId: "proj-savrio-platform",
+      workflowId: "wf-feature-development",
+      title: "Billing export CSV validation",
+      description: "Validate export schema and edge cases for enterprise accounts.",
+      status: "active",
+      priority: "Medium",
+      assigneeAgentId: "agent-codex",
+      claimedAt: "2026-07-24T14:10:00.000Z",
+      createdAt: "2026-07-23T11:00:00.000Z",
+      updatedAt: "2026-07-24T20:15:00.000Z",
+      dueAt: null,
+    },
+    {
+      id: "task-1031",
+      projectId: "proj-dev-hq",
+      workflowId: null,
+      title: "Supabase schema draft for work management",
+      description: "Prepare persistence model for Phase 1 orchestration.",
+      status: "draft",
+      priority: "Medium",
+      assigneeAgentId: null,
+      claimedAt: null,
+      createdAt: "2026-07-22T09:00:00.000Z",
+      updatedAt: "2026-07-23T17:45:00.000Z",
+      dueAt: null,
+    },
+    {
+      id: "task-1024",
+      projectId: "proj-savrio-platform",
+      workflowId: "wf-bug-fix",
+      title: "Fix session timeout banner on mobile",
+      description: "QA reported banner overlap on iOS Safari.",
+      status: "blocked",
+      priority: "Critical",
+      assigneeAgentId: "agent-gemini",
+      claimedAt: "2026-07-21T08:00:00.000Z",
+      createdAt: "2026-07-20T19:30:00.000Z",
+      updatedAt: "2026-07-24T12:00:00.000Z",
+      dueAt: "2026-07-24T23:59:59.000Z",
+    },
+  ],
+  approvalQueue: [
+    {
+      id: "appr-501",
+      taskId: "task-1020",
+      executionId: "exec-8891",
+      title: "Merge readiness — onboarding checklist",
+      summary: "Engineering, review, and QA complete. Awaiting founder approval.",
+      status: "pending",
+      requestedByAgentId: "agent-supervisor",
+      decidedByUserId: null,
+      requestedAt: "2026-07-24T19:45:00.000Z",
+      decidedAt: null,
+    },
+    {
+      id: "appr-498",
+      taskId: "task-1015",
+      executionId: "exec-8874",
+      title: "Release scope — analytics dashboard v2",
+      summary: "Product brief approved. Confirm release window for Sprint 12.",
+      status: "pending",
+      requestedByAgentId: "agent-orchestrator",
+      decidedByUserId: null,
+      requestedAt: "2026-07-24T17:20:00.000Z",
+      decidedAt: null,
+    },
+  ],
+  recentActivity: [
+    {
+      id: "evt-9004",
+      type: "task.claimed",
+      entityType: "task",
+      entityId: "task-1042",
+      message: "Claude claimed Sprint 1A domain types and contracts.",
+      actorId: "agent-claude",
+      actorLabel: "Claude",
+      timestamp: "2026-07-24T18:30:00.000Z",
+    },
+    {
+      id: "evt-9003",
+      type: "approval.requested",
+      entityType: "approval",
+      entityId: "appr-501",
+      message: "Supervisor requested founder approval for onboarding checklist.",
+      actorId: "agent-supervisor",
+      actorLabel: "Supervisor",
+      timestamp: "2026-07-24T19:45:00.000Z",
+    },
+    {
+      id: "evt-9002",
+      type: "execution.started",
+      entityType: "execution",
+      entityId: "exec-8891",
+      message: "Review pipeline started for task-1020.",
+      actorId: null,
+      actorLabel: "System",
+      timestamp: "2026-07-24T19:10:00.000Z",
+    },
+    {
+      id: "evt-9001",
+      type: "service.synced",
+      entityType: "service",
+      entityId: "svc-github",
+      message: "GitHub connection healthy. Last sync completed.",
+      actorId: null,
+      actorLabel: "System",
+      timestamp: "2026-07-24T20:00:00.000Z",
+    },
+    {
+      id: "evt-9000",
+      type: "project.updated",
+      entityType: "project",
+      entityId: "proj-dev-hq",
+      message: "Dev HQ project metadata refreshed.",
+      actorId: "user-evan",
+      actorLabel: "Evan",
+      timestamp: TS,
+    },
+  ],
+  agents: [
+    {
+      id: "agent-orchestrator",
+      name: "Orchestrator",
+      role: "AI Agent Orchestrator",
+      provider: "internal",
+      availability: "available",
+      capabilities: ["routing", "sequencing", "escalation"],
+      accentColor: "#34c7a6",
+      initials: "OR",
+      lastActiveAt: TS,
+    },
+    {
+      id: "agent-claude",
+      name: "Claude",
+      role: "Principal Software Engineer",
+      provider: "anthropic",
+      availability: "busy",
+      capabilities: ["implementation", "review"],
+      accentColor: "#e8956b",
+      initials: "CL",
+      lastActiveAt: "2026-07-24T18:30:00.000Z",
+    },
+    {
+      id: "agent-codex",
+      name: "Codex",
+      role: "Implementation Specialist",
+      provider: "openai",
+      availability: "busy",
+      capabilities: ["review", "corrections"],
+      accentColor: "#5cc8ff",
+      initials: "CX",
+      lastActiveAt: "2026-07-24T14:10:00.000Z",
+    },
+    {
+      id: "agent-gemini",
+      name: "Gemini",
+      role: "QA Engineer",
+      provider: "google",
+      availability: "waiting",
+      capabilities: ["qa", "accessibility"],
+      accentColor: "#8b7bf7",
+      initials: "GM",
+      lastActiveAt: "2026-07-24T12:00:00.000Z",
+    },
+    {
+      id: "agent-supervisor",
+      name: "Supervisor",
+      role: "Process Auditor",
+      provider: "internal",
+      availability: "available",
+      capabilities: ["gates", "validation"],
+      accentColor: "#a78bfa",
+      initials: "SV",
+      lastActiveAt: "2026-07-24T19:45:00.000Z",
+    },
+  ],
+  connectedServices: [
+    {
+      id: "svc-github",
+      name: "GitHub",
+      kind: "source_control",
+      status: "connected",
+      endpoint: "github.com/savrio",
+      lastSyncAt: "2026-07-24T20:00:00.000Z",
+    },
+    {
+      id: "svc-trigger",
+      name: "Trigger.dev",
+      kind: "orchestration",
+      status: "connected",
+      endpoint: "cloud.trigger.dev",
+      lastSyncAt: "2026-07-24T21:35:00.000Z",
+    },
+    {
+      id: "svc-supabase",
+      name: "Supabase",
+      kind: "database",
+      status: "pending",
+      endpoint: null,
+      lastSyncAt: null,
+    },
+  ],
+};

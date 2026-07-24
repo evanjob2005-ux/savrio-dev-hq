@@ -17,6 +17,7 @@ import { WorkflowTimeline } from "@/components/workflow/WorkflowTimeline";
 import { ApprovalPanel } from "@/components/workflow/ApprovalPanel";
 import { ValidationResults } from "@/components/workflow/ValidationResults";
 import { ActivityFeed } from "@/components/workflow/ActivityFeed";
+import { MissionControlOverview } from "@/components/dashboard/MissionControlOverview";
 
 export function MissionControl() {
   const engine = useWorkflowEngine();
@@ -76,6 +77,16 @@ export function MissionControl() {
       <AgentStatusRail statuses={agentStatuses} />
 
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-5">
+        <MissionControlOverview />
+
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-[var(--border)]" aria-hidden />
+          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-faint)]">
+            Workflow Simulation
+          </span>
+          <div className="h-px flex-1 bg-[var(--border)]" aria-hidden />
+        </div>
+
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* Left — task queue */}
           <div className="lg:col-span-3">
