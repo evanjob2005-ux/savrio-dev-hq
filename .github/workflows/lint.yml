@@ -1,0 +1,340 @@
+name: Lint
+
+# Dedicated static-quality linting for the repository. Each linter targets a
+# specific file family that actually exists in this documentation-first
+# repository. Style linters that would fail on the large body of pre-existing
+# Markdown are run in advisory mode so the gate reports issues without blocking
+# unrelated work, while structural linters (YAML, GitHub Actions, JSON) block.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  markdown:
+    name: Markdown (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Write markdownlint configuration
+        run: |
+          set -euo pipefail
+          # Relaxed ruleset written outside the working tree so it is neither
+          # linted nor committed. Noisy stylistic rules that the existing
+          # documentation predates are disabled; substantive rules remain on.
+          cat > "${RUNNER_TEMP}/markdownlint.jsonc" <<'JSONC'
+          {
+            "default": true,
+            "MD013": false,
+            "MD024": { "siblings_only": true },
+            "MD026": false,
+            "MD029": false,
+            "MD033": false,
+            "MD036": false,
+            "MD041": false,
+            "MD046": false,
+            "MD048": false
+          }
+          JSONC
+
+      - name: Run markdownlint (advisory)
+        run: |
+          set -euo pipefail
+          npx --yes markdownlint-cli2@0.23.1 \
+            "**/*.md" "!**/node_modules/**" "!**/.next/**" \
+            --config "${RUNNER_TEMP}/markdownlint.jsonc" \
+            2> "${RUNNER_TEMP}/markdownlint.log" || true
+
+          issues=$(grep -cE ' MD[0-9]+' "${RUNNER_TEMP}/markdownlint.log" || true)
+          issues=${issues:-0}
+          # Surface each finding as a GitHub annotation.
+          grep -E ' MD[0-9]+' "${RUNNER_TEMP}/markdownlint.log" | while IFS= read -r line; do
+            echo "::warning::${line}"
+          done || true
+
+          {
+            echo "## Markdown Lint (advisory)"
+            echo ""
+            echo "- markdownlint-cli2 findings: ${issues} (reported as warnings)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "markdownlint reported ${issues} advisory finding(s)."
+
+  yaml:
+    name: YAML
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install yamllint
+        run: python -m pip install --disable-pip-version-check "yamllint==1.38.0"
+
+      - name: Write yamllint configuration
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/yamllint.yaml" <<'YAML'
+          ---
+          extends: default
+          rules:
+            line-length: disable
+            document-start: disable
+            comments-indentation: disable
+            truthy:
+              allowed-values: ["true", "false", "on", "off"]
+            comments:
+              min-spaces-from-content: 1
+            braces:
+              max-spaces-inside: 1
+            brackets:
+              max-spaces-inside: 1
+          YAML
+
+      - name: Run yamllint
+        run: |
+          set -euo pipefail
+          mapfile -t yaml_files < <(git ls-files '*.yml' '*.yaml')
+          if [[ "${#yaml_files[@]}" -eq 0 ]]; then
+            echo "No YAML files found. Skipping."
+            {
+              echo "## YAML Lint"
+              echo ""
+              echo "No YAML files present. Skipped."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python -m yamllint -f github -c "${RUNNER_TEMP}/yamllint.yaml" "${yaml_files[@]}"
+          {
+            echo "## YAML Lint"
+            echo ""
+            echo "- Files linted: ${#yaml_files[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  actions:
+    name: GitHub Actions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o "${RUNNER_TEMP}/actionlint.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/actionlint.tar.gz" -C "${RUNNER_TEMP}" actionlint
+          "${RUNNER_TEMP}/actionlint" -version
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          # Note: ShellCheck is preinstalled on GitHub-hosted runners, so
+          # actionlint also lints the embedded shell scripts automatically.
+          "${RUNNER_TEMP}/actionlint" -color
+          {
+            echo "## GitHub Actions Lint"
+            echo ""
+            echo "- actionlint: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  json:
+    name: JSON
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Validate JSON (parse and duplicate keys)
+        run: |
+          set -euo pipefail
+          python <<'PYTHON'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def reject_duplicates(pairs):
+              seen = {}
+              for key, value in pairs:
+                  if key in seen:
+                      raise ValueError(f"Duplicate key: {key!r}")
+                  seen[key] = value
+              return seen
+
+          tracked = subprocess.run(
+              ["git", "ls-files", "*.json"],
+              check=True, capture_output=True, text=True,
+          ).stdout.splitlines()
+
+          failures = []
+          for name in tracked:
+              try:
+                  with open(name, "r", encoding="utf-8") as handle:
+                      json.load(handle, object_pairs_hook=reject_duplicates)
+              except Exception as error:  # noqa: BLE001 - report all errors
+                  failures.append((name, error))
+
+          for name, error in failures:
+              print(f"::error file={name}::{error}")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      "## JSON Lint\n\n"
+                      f"- Files checked: {len(tracked)} | Invalid: {len(failures)}\n"
+                  )
+          if failures:
+              sys.exit(1)
+          print(f"Validated {len(tracked)} JSON file(s), no duplicate keys.")
+          PYTHON
+
+  formatting-and-naming:
+    name: Formatting and Naming
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Check line endings and filename conventions
+        run: |
+          set -euo pipefail
+          # .gitattributes and .editorconfig require LF line endings for text
+          # files. Detect any tracked text file that contains a CR byte.
+          crlf=0
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              *.png|*.jpg|*.jpeg|*.gif|*.ico|*.webp|*.avif|*.woff|*.woff2|*.ttf|*.otf|*.pdf|*.svg)
+                continue
+                ;;
+            esac
+            if grep -Iq $'\r' "$file"; then
+              echo "::error file=${file}::File contains CRLF line endings; LF is required."
+              crlf=1
+            fi
+          done < <(git ls-files -z)
+
+          # Filenames should avoid spaces and other fragile characters.
+          naming=0
+          while IFS= read -r -d '' file; do
+            base=$(basename -- "$file")
+            if [[ "$base" == *" "* ]]; then
+              echo "::warning file=${file}::Filename contains spaces."
+              naming=1
+            fi
+          done < <(git ls-files -z)
+
+          {
+            echo "## Formatting and Naming"
+            echo ""
+            echo "- CRLF line endings: $([[ "$crlf" -eq 0 ]] && echo none || echo found)"
+            echo "- Filename warnings: ${naming}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$crlf" -ne 0 ]]; then
+            exit 1
+          fi
+
+  scripts:
+    name: Scripts (conditional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Lint shell, PowerShell, and Python when present
+        run: |
+          set -euo pipefail
+
+          mapfile -t shell_files < <(git ls-files '*.sh' '*.bash')
+          mapfile -t ps_files < <(git ls-files '*.ps1' '*.psm1')
+          mapfile -t py_files < <(git ls-files '*.py')
+
+          if [[ "${#shell_files[@]}" -gt 0 ]]; then
+            echo "Linting ${#shell_files[@]} shell script(s) with shellcheck."
+            shellcheck "${shell_files[@]}"
+          else
+            echo "No shell scripts found. Skipping shellcheck."
+          fi
+
+          if [[ "${#ps_files[@]}" -gt 0 ]]; then
+            echo "PowerShell scripts found; validating with PSScriptAnalyzer."
+            # shellcheck disable=SC2016  # PowerShell expands $env: itself.
+            pwsh -NoProfile -Command '
+              Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+              $issues = Invoke-ScriptAnalyzer -Path $env:GITHUB_WORKSPACE -Recurse -Severity Error
+              if ($issues) { $issues | Format-Table; exit 1 }
+            '
+          else
+            echo "No PowerShell scripts found. Skipping PSScriptAnalyzer."
+          fi
+
+          if [[ "${#py_files[@]}" -gt 0 ]]; then
+            echo "Linting ${#py_files[@]} Python file(s) with ruff."
+            pipx run ruff==0.14.0 check "${py_files[@]}"
+          else
+            echo "No Python files found. Skipping ruff."
+          fi
+
+          {
+            echo "## Scripts (conditional)"
+            echo ""
+            echo "- Shell scripts: ${#shell_files[@]}"
+            echo "- PowerShell scripts: ${#ps_files[@]}"
+            echo "- Python files: ${#py_files[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
