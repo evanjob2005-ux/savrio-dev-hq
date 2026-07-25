@@ -5,7 +5,11 @@ import type {
   AgentRequest,
   AgentResult,
 } from "@/types/domain";
-import { getAgent, listAgents } from "@/lib/dev-hq/agent-registry";
+import {
+  evaluateAgentHealth,
+  getAgent,
+  listAgents,
+} from "@/lib/dev-hq/agent-registry";
 import { nowIso } from "@/lib/dev-hq/id";
 
 /**
@@ -42,17 +46,28 @@ export class DevAgentProvider implements AgentProvider {
         agentId,
         healthy: false,
         availability: "offline",
+        health: "unavailable",
         message: "Agent not found in registry.",
         checkedAt,
       };
     }
 
-    const healthy = agent.availability !== "offline";
+    const health = evaluateAgentHealth(agent, checkedAt);
+    const message =
+      health === "healthy"
+        ? null
+        : health === "unavailable"
+          ? "Agent is offline."
+          : agent.lastActiveAt
+            ? "Heartbeat is stale."
+            : "No heartbeat recorded.";
+
     return {
       agentId,
-      healthy,
+      healthy: health === "healthy",
       availability: agent.availability,
-      message: healthy ? null : "Agent is offline.",
+      health,
+      message,
       checkedAt,
     };
   }

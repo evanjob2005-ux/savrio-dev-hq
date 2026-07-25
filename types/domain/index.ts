@@ -21,6 +21,7 @@ export type {
   AgentExecutionStatus,
   AgentFileChange,
   AgentFileChangeKind,
+  AgentHealth,
   AgentHealthCheckResult,
   AgentRequest,
   AgentResult,

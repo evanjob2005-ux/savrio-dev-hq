@@ -6,7 +6,8 @@
 // (Task 1D-3). `selectAgent` chooses a candidate; it does not reserve it.
 
 import type { AgentSelectionPolicy } from "@/types/contracts";
-import type { Agent } from "@/types/domain";
+import type { Agent, AgentHealth, IsoTimestamp } from "@/types/domain";
+import { AGENT_HEALTH_STALE_AFTER_MS } from "@/lib/dev-hq/constants";
 import { getDevHqStore } from "@/lib/dev-hq/store";
 
 export function listAgents(): Agent[] {
@@ -25,6 +26,36 @@ export function hasCapabilities(agent: Agent, required: string[]): boolean {
 /** Phase 1 capacity is one execution per agent, so only `available` is eligible. */
 export function isAvailable(agent: Agent): boolean {
   return agent.availability === "available";
+}
+
+/**
+ * Deterministic agent health from heartbeat freshness (Task 1E-4). Read-only —
+ * it never mutates availability or assignments.
+ *   - `offline` availability → "unavailable" (regardless of freshness)
+ *   - no recorded activity (`lastActiveAt` null) → "stale" (liveness unconfirmed)
+ *   - last activity older than `staleAfterMs` → "stale"
+ *   - otherwise → "healthy"
+ * The threshold boundary is inclusive: an age exactly equal to `staleAfterMs` is
+ * still "healthy"; strictly greater is "stale".
+ */
+export function evaluateAgentHealth(
+  agent: Agent,
+  now: IsoTimestamp,
+  staleAfterMs: number = AGENT_HEALTH_STALE_AFTER_MS,
+): AgentHealth {
+  if (agent.availability === "offline") {
+    return "unavailable";
+  }
+  // Approved fallback policy (ADR-0002): no recorded heartbeat evaluates as
+  // "stale" because liveness is unconfirmed until the first heartbeat is
+  // observed. This is an architectural invariant and should remain stable unless
+  // ADR-0002 is superseded.
+  if (!agent.lastActiveAt) {
+    return "stale";
+  }
+  const ageMs =
+    new Date(now).getTime() - new Date(agent.lastActiveAt).getTime();
+  return ageMs > staleAfterMs ? "stale" : "healthy";
 }
 
 /** Available agents that satisfy the policy's required capabilities. */

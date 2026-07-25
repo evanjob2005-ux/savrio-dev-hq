@@ -71,10 +71,20 @@ export interface AgentResult {
   completedAt: IsoTimestamp | null;
 }
 
+/**
+ * Health derived from heartbeat freshness (Task 1E-4):
+ *   - `healthy`      — available/working and recently active
+ *   - `stale`        — non-offline but its last activity is overdue (or unknown)
+ *   - `unavailable`  — offline or not found, regardless of freshness
+ */
+export type AgentHealth = "healthy" | "stale" | "unavailable";
+
 export interface AgentHealthCheckResult {
   agentId: EntityId;
   healthy: boolean;
   availability: AgentAvailability;
+  /** Freshness-derived health. Additive; `healthy === (health === "healthy")`. */
+  health?: AgentHealth;
   message: string | null;
   checkedAt: IsoTimestamp;
 }

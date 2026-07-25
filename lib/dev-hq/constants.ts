@@ -43,6 +43,14 @@ export const MAX_EXECUTION_ATTEMPTS = 3;
 export const EXECUTION_LEASE_TTL_MS = 60_000;
 
 /**
+ * An agent whose last activity is older than this is reported "stale" by the
+ * health check (Task 1E-4). Matched to the lease TTL: a healthy running agent
+ * heartbeats well within this window, so a lapse beyond it means the agent is no
+ * longer reporting. The boundary is inclusive (age == threshold is still fresh).
+ */
+export const AGENT_HEALTH_STALE_AFTER_MS = EXECUTION_LEASE_TTL_MS;
+
+/**
  * Typed execution lifecycle event names emitted from the service layer
  * (ADR-0002 E3). No event is emitted per heartbeat. `reclaimed` is emitted by the
  * Sprint 1E-3 lease sweeper when it recovers an expired-lease attempt.

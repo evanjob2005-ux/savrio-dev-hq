@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  evaluateAgentHealth,
   findEligibleAgents,
   getAgent,
   hasCapabilities,
@@ -119,5 +120,45 @@ describe("agent registry", () => {
       baseAgent({ id: "agent-aaa", capabilities: ["x"], lastActiveAt: activeAt }),
     );
     expect(selectAgent({ requiredCapabilities: ["x"] })?.id).toBe("agent-aaa");
+  });
+});
+
+describe("evaluateAgentHealth", () => {
+  const NOW = "2026-07-25T12:00:00.000Z";
+  const nowMs = new Date(NOW).getTime();
+  const THRESHOLD = 60_000;
+
+  function activeAgo(ms: number, availability: Agent["availability"] = "available") {
+    return baseAgent({
+      id: "agent-h",
+      availability,
+      lastActiveAt: new Date(nowMs - ms).toISOString(),
+    });
+  }
+
+  it("evaluates a fresh heartbeat as healthy", () => {
+    expect(evaluateAgentHealth(activeAgo(1_000), NOW, THRESHOLD)).toBe("healthy");
+  });
+
+  it("evaluates a stale heartbeat as stale", () => {
+    expect(evaluateAgentHealth(activeAgo(120_000), NOW, THRESHOLD)).toBe("stale");
+  });
+
+  it("evaluates a missing heartbeat as stale (fallback policy)", () => {
+    expect(
+      evaluateAgentHealth(baseAgent({ id: "agent-h", lastActiveAt: null }), NOW, THRESHOLD),
+    ).toBe("stale");
+  });
+
+  it("treats an offline agent as unavailable regardless of freshness", () => {
+    // Fresh heartbeat but offline availability.
+    expect(evaluateAgentHealth(activeAgo(1_000, "offline"), NOW, THRESHOLD)).toBe(
+      "unavailable",
+    );
+  });
+
+  it("applies the threshold boundary deterministically (inclusive)", () => {
+    expect(evaluateAgentHealth(activeAgo(THRESHOLD), NOW, THRESHOLD)).toBe("healthy");
+    expect(evaluateAgentHealth(activeAgo(THRESHOLD + 1), NOW, THRESHOLD)).toBe("stale");
   });
 });
