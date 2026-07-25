@@ -18,6 +18,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       executionId?: string;
+      assignmentId?: string;
       status?: AgentExecutionStatus;
       instructions?: string;
       summary?: string | null;
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
 
     const result = await handleExecutionComplete({
       executionId: body.executionId,
+      assignmentId: body.assignmentId,
       status: body.status,
       instructions: body.instructions ?? "",
       summary: body.summary ?? null,

@@ -21,6 +21,7 @@ import {
 } from "@/lib/dev-hq/store";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import { EXECUTION_EVENT_TYPE } from "@/lib/dev-hq/constants";
+import { getExecution } from "@/lib/dev-hq/execution-manager";
 import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
@@ -77,6 +78,7 @@ describe("agent execution service", () => {
     expect(triggerMock).toHaveBeenCalledWith("agent-execution", {
       executionId: result.executionId,
       agentId: "agent-supervisor",
+      assignmentId: expect.any(String),
       instructions: "do the work",
     });
   });
@@ -297,6 +299,130 @@ describe("agent execution service", () => {
       const evidence =
         await getDevHqAdapters().evidenceStore.listForExecution(executionId);
       expect(evidence).toHaveLength(3); // one per attempt outcome
+    });
+  });
+
+  describe("callback idempotency", () => {
+    async function executionEvents(executionId: string) {
+      return getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        entityId: executionId,
+        limit: 50,
+      });
+    }
+
+    it("ignores a replayed running callback (no double claim or event)", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do work",
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+
+      const first = await handleExecutionRunning(executionId, assignmentId);
+      expect(first.status).toBe("running");
+      const claimedBefore = (await executionEvents(executionId)).filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.claimed,
+      ).length;
+
+      const replay = await handleExecutionRunning(executionId, assignmentId);
+      expect(replay.status).toBe("running");
+      const claimedAfter = (await executionEvents(executionId)).filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.claimed,
+      ).length;
+      expect(claimedAfter).toBe(claimedBefore);
+      expect(getAgent("agent-supervisor")?.availability).toBe("busy");
+    });
+
+    it("ignores a replayed complete callback (no new evidence, event, or re-dispatch)", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do work",
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+
+      await handleExecutionRunning(executionId, assignmentId);
+      await handleExecutionComplete({
+        executionId,
+        assignmentId,
+        status: "succeeded",
+        instructions: "do work",
+      });
+
+      const evidenceBefore = (
+        await getDevHqAdapters().evidenceStore.listForExecution(executionId)
+      ).length;
+      const triggerCallsBefore = triggerMock.mock.calls.length;
+
+      const replay = await handleExecutionComplete({
+        executionId,
+        assignmentId,
+        status: "succeeded",
+        instructions: "do work",
+      });
+      expect(replay.retried).toBe(false);
+      expect(replay.execution.status).toBe("succeeded");
+      expect(
+        (await getDevHqAdapters().evidenceStore.listForExecution(executionId))
+          .length,
+      ).toBe(evidenceBefore);
+      expect(triggerMock.mock.calls.length).toBe(triggerCallsBefore);
+    });
+
+    it("ignores a stale complete from a superseded attempt during a live retry", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "please fail",
+      });
+      const executionId = dispatched.executionId!;
+      const asgn1 = (await getExecution(executionId))!.assignmentId!;
+
+      await handleExecutionRunning(executionId, asgn1);
+      const { retried } = await handleExecutionComplete({
+        executionId,
+        assignmentId: asgn1,
+        status: "failed",
+        instructions: "please fail",
+      });
+      expect(retried).toBe(true);
+
+      const attempt2 = (await getExecution(executionId))!;
+      const asgn2 = attempt2.assignmentId!;
+      expect(asgn2).not.toBe(asgn1);
+
+      // A stale running for attempt 1 must not claim the queued attempt 2.
+      const staleRun = await handleExecutionRunning(executionId, asgn1);
+      expect(staleRun.status).toBe("queued");
+      expect(getAgent(attempt2.agentId!)?.availability).toBe("available");
+
+      // Claim attempt 2, then replay attempt 1's complete — must be a no-op.
+      await handleExecutionRunning(executionId, asgn2);
+      expect((await getExecution(executionId))!.status).toBe("running");
+      const evidenceBefore = (
+        await getDevHqAdapters().evidenceStore.listForExecution(executionId)
+      ).length;
+
+      const stale = await handleExecutionComplete({
+        executionId,
+        assignmentId: asgn1,
+        status: "failed",
+        instructions: "please fail",
+      });
+      expect(stale.retried).toBe(false);
+      const after = (await getExecution(executionId))!;
+      expect(after.status).toBe("running");
+      expect(after.assignmentId).toBe(asgn2);
+      expect(
+        (await getDevHqAdapters().evidenceStore.listForExecution(executionId))
+          .length,
+      ).toBe(evidenceBefore);
     });
   });
 });

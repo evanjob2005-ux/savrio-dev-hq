@@ -23,6 +23,8 @@ export const AGENT_EXECUTION_TASK_ID = "agent-execution";
 export interface AgentExecutionTaskPayload {
   executionId: string;
   agentId: string;
+  /** The attempt's assignment id — the idempotency key for the callbacks. */
+  assignmentId: string;
   instructions: string;
 }
 
@@ -106,9 +108,13 @@ async function triggerRun(
   if (!execution.agentId) {
     throw new Error(`Execution has no agent to dispatch: ${execution.id}`);
   }
+  if (!execution.assignmentId) {
+    throw new Error(`Execution has no assignment to dispatch: ${execution.id}`);
+  }
   const handle = await tasks.trigger(AGENT_EXECUTION_TASK_ID, {
     executionId: execution.id,
     agentId: execution.agentId,
+    assignmentId: execution.assignmentId,
     instructions,
   } satisfies AgentExecutionTaskPayload);
   saveExecution({ ...execution, triggerRunId: handle.id });
@@ -178,10 +184,29 @@ export async function dispatchAgentExecution(
   };
 }
 
-/** Callback: the run has started — claim the assigned agent. */
+/**
+ * Callback: the run has started — claim the assigned agent. Idempotent: a replayed
+ * callback for an already-claimed attempt, or a stale callback naming an assignment
+ * that a later attempt has superseded, is a safe no-op (no double-claim, no
+ * duplicate event). Keyed on the attempt's `assignmentId` (ADR-0002 E3; Task 1E-2).
+ */
 export async function handleExecutionRunning(
   executionId: string,
+  assignmentId?: string,
 ): Promise<Execution> {
+  const existing = await getExecution(executionId);
+  if (!existing) {
+    throw new Error(`Execution not found: ${executionId}`);
+  }
+  // Stale callback: names an assignment that is no longer current.
+  if (assignmentId && existing.assignmentId !== assignmentId) {
+    return existing;
+  }
+  // Already claimed for this attempt (replay), or not in a claimable state.
+  if (existing.status !== "queued") {
+    return existing;
+  }
+
   const execution = await runExecution(executionId);
   await logExecutionEvent(
     EXECUTION_EVENT_TYPE.claimed,
@@ -203,6 +228,8 @@ export interface CompleteExecutionInput {
   executionId: string;
   status: AgentExecutionStatus;
   instructions: string;
+  /** The completing attempt's assignment id — the idempotency key. */
+  assignmentId?: string;
   summary?: string | null;
 }
 
@@ -224,6 +251,17 @@ export async function handleExecutionComplete(
   const current = await getExecution(input.executionId);
   if (!current) {
     throw new Error(`Execution not found: ${input.executionId}`);
+  }
+
+  // Idempotency (Task 1E-2): ignore a replayed or stale callback without
+  // re-recording evidence, re-emitting events, or re-dispatching. A callback is
+  // stale when it names an assignment a later attempt has superseded; a replay
+  // lands when the current attempt is no longer running.
+  if (
+    (input.assignmentId && current.assignmentId !== input.assignmentId) ||
+    current.status !== "running"
+  ) {
+    return { execution: current, retried: false };
   }
 
   // The agent and attempt that actually ran this outcome, captured before release

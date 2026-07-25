@@ -42,6 +42,7 @@ export const agentExecution = task({
     metadata.set("stage", "running");
     await postJson("/api/dev-hq/internal/execution/running", {
       executionId: payload.executionId,
+      assignmentId: payload.assignmentId,
     });
 
     const outcome = simulateOutcome(payload.instructions);
@@ -58,6 +59,7 @@ export const agentExecution = task({
 
     await postJson("/api/dev-hq/internal/execution/complete", {
       executionId: payload.executionId,
+      assignmentId: payload.assignmentId,
       status: outcome,
       instructions: payload.instructions,
       summary: `Simulated agent ${outcome}.`,
