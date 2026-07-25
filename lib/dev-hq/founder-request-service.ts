@@ -1,22 +1,12 @@
 import { tasks, wait } from "@trigger.dev/sdk";
 import {
   DEV_HQ_ACTORS,
-  buildDevHqState,
-  getDevHqStore,
-  getWorkflowRun,
-  saveApproval,
-  saveExecution,
-  saveProject,
-  saveTask,
-  upsertWorkflowRun,
-} from "@/lib/dev-hq/store";
-import {
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_REQUEST_WORKFLOW_ID,
   FOUNDER_USER_ID,
 } from "@/lib/dev-hq/constants";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
-import { nextId, nowIso, slugify } from "@/lib/dev-hq/id";
+import { nowIso, slugify } from "@/lib/dev-hq/id";
 import type { DevHqState } from "@/lib/dev-hq/types";
 import type {
   Approval,
@@ -50,29 +40,6 @@ function deterministicExecutiveReview(task: Task): {
 
 function isWorkflowCompleted(run: WorkflowRunRecord): boolean {
   return run.stage === "completed" || run.stage === "failed";
-}
-
-function findPendingApprovalForExecution(executionId: string): Approval | null {
-  return (
-    [...getDevHqStore().approvals.values()].find(
-      (a) => a.executionId === executionId && a.status === "pending",
-    ) ?? null
-  );
-}
-
-function updateWorkflowRun(
-  executionId: string,
-  patch: Partial<WorkflowRunRecord>,
-): WorkflowRunRecord {
-  const current = getWorkflowRun(executionId);
-  if (!current) {
-    throw new Error(`Workflow run not found: ${executionId}`);
-  }
-  return upsertWorkflowRun({
-    ...current,
-    ...patch,
-    updatedAt: nowIso(),
-  });
 }
 
 function taskStatusForOutcome(
@@ -115,12 +82,17 @@ export async function createFounderRequest(
   execution: Execution;
   triggerRunId: string;
 }> {
-  const { taskRepository, workflowEngine, eventLogger } = getDevHqAdapters();
+  const {
+    projectRepository,
+    taskRepository,
+    workflowEngine,
+    workflowRunRepository,
+    eventLogger,
+  } = getDevHqAdapters();
   const timestamp = nowIso();
   const slug = slugify(input.title) || "founder-request";
 
-  const project: Project = {
-    id: nextId("proj"),
+  const project = await projectRepository.createProject({
     name: input.title.trim(),
     slug,
     description: input.description.trim(),
@@ -128,10 +100,8 @@ export async function createFounderRequest(
     defaultBranch: "main",
     status: "active",
     ownerId: FOUNDER_USER_ID,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-  saveProject(project);
+    at: timestamp,
+  });
 
   const task = await taskRepository.createTask({
     projectId: project.id,
@@ -162,8 +132,11 @@ export async function createFounderRequest(
   });
 
   const triggerRunId = handle.id;
-  saveExecution({ ...execution, triggerRunId, status: "running", startedAt: timestamp });
-  updateWorkflowRun(execution.id, {
+  await workflowEngine.markExecutionRunning(execution.id, {
+    at: timestamp,
+    triggerRunId,
+  });
+  await workflowRunRepository.updateRun(execution.id, {
     triggerRunId,
     stage: "founder_request_received",
     rejectionKind: null,
@@ -184,8 +157,14 @@ export async function runExecutiveReview(executionId: string): Promise<{
   approvalId: string | null;
   idempotent?: boolean;
 }> {
-  const { eventLogger } = getDevHqAdapters();
-  const run = getWorkflowRun(executionId);
+  const {
+    taskRepository,
+    workflowEngine,
+    workflowRunRepository,
+    approvalManager,
+    eventLogger,
+  } = getDevHqAdapters();
+  const run = await workflowRunRepository.getRun(executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${executionId}`);
   }
@@ -200,7 +179,7 @@ export async function runExecutiveReview(executionId: string): Promise<{
   }
 
   if (run.stage === "founder_approval_required") {
-    const approval = findPendingApprovalForExecution(executionId);
+    const approval = await approvalManager.findPendingByExecution(executionId);
     return {
       passed: true,
       summary: run.reviewSummary ?? "Executive review already passed.",
@@ -221,7 +200,7 @@ export async function runExecutiveReview(executionId: string): Promise<{
   // A retry can land here after an earlier attempt created the approval but
   // before the approval gate advanced the stage. Reuse that approval rather
   // than creating a second one that no wait token will ever be attached to.
-  const priorApproval = findPendingApprovalForExecution(executionId);
+  const priorApproval = await approvalManager.findPendingByExecution(executionId);
   if (priorApproval) {
     return {
       passed: true,
@@ -231,17 +210,15 @@ export async function runExecutiveReview(executionId: string): Promise<{
     };
   }
 
-  const task = getDevHqStore().tasks.get(run.taskId);
+  const task = await taskRepository.getTask(run.taskId);
   if (!task) {
     throw new Error(`Task not found: ${run.taskId}`);
   }
 
-  updateWorkflowRun(executionId, { stage: "executive_review" });
-  saveExecution({
-    ...(getDevHqStore().executions.get(executionId) as Execution),
-    status: "running",
-    startedAt: nowIso(),
+  await workflowRunRepository.updateRun(executionId, {
+    stage: "executive_review",
   });
+  await workflowEngine.markExecutionRunning(executionId);
 
   const review = deterministicExecutiveReview(task);
 
@@ -273,21 +250,16 @@ export async function runExecutiveReview(executionId: string): Promise<{
     actorLabel: "Executive Orchestrator",
   });
 
-  const approval: Approval = {
-    id: nextId("appr"),
+  const approval = await approvalManager.createApproval({
     taskId: task.id,
     executionId,
     title: `Founder approval - ${task.title}`,
     summary: review.summary,
-    status: "pending",
     requestedByAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
-    decidedByUserId: null,
-    requestedAt: nowIso(),
-    decidedAt: null,
-    waitTokenId: null,
-  };
-  saveApproval(approval);
-  updateWorkflowRun(executionId, { reviewSummary: review.summary });
+  });
+  await workflowRunRepository.updateRun(executionId, {
+    reviewSummary: review.summary,
+  });
 
   return { passed: true, summary: review.summary, approvalId: approval.id };
 }
@@ -297,13 +269,14 @@ export async function registerApprovalGate(input: {
   approvalId: string;
   waitTokenId: string;
 }): Promise<Approval> {
-  const { eventLogger } = getDevHqAdapters();
-  const run = getWorkflowRun(input.executionId);
+  const { approvalManager, workflowRunRepository, eventLogger } =
+    getDevHqAdapters();
+  const run = await workflowRunRepository.getRun(input.executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${input.executionId}`);
   }
 
-  const approval = getDevHqStore().approvals.get(input.approvalId);
+  const approval = await approvalManager.getApproval(input.approvalId);
   if (!approval) {
     throw new Error(`Approval not found: ${input.approvalId}`);
   }
@@ -320,12 +293,11 @@ export async function registerApprovalGate(input: {
     return approval;
   }
 
-  const updated: Approval = {
-    ...approval,
-    waitTokenId: input.waitTokenId,
-  };
-  saveApproval(updated);
-  updateWorkflowRun(input.executionId, {
+  const updated = await approvalManager.attachWaitToken(
+    input.approvalId,
+    input.waitTokenId,
+  );
+  await workflowRunRepository.updateRun(input.executionId, {
     stage: "founder_approval_required",
     waitTokenId: input.waitTokenId,
   });
@@ -348,8 +320,14 @@ export async function finalizeWorkflowOutcome(input: {
   rejectionKind?: WorkflowRejectionKind | null;
   approvalId?: string;
 }): Promise<WorkflowRunRecord> {
-  const { eventLogger } = getDevHqAdapters();
-  const run = getWorkflowRun(input.executionId);
+  const {
+    taskRepository,
+    workflowEngine,
+    workflowRunRepository,
+    approvalManager,
+    eventLogger,
+  } = getDevHqAdapters();
+  const run = await workflowRunRepository.getRun(input.executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${input.executionId}`);
   }
@@ -358,7 +336,7 @@ export async function finalizeWorkflowOutcome(input: {
     return run;
   }
 
-  const task = getDevHqStore().tasks.get(run.taskId);
+  const task = await taskRepository.getTask(run.taskId);
   if (!task) {
     throw new Error(`Task not found: ${run.taskId}`);
   }
@@ -373,35 +351,33 @@ export async function finalizeWorkflowOutcome(input: {
   // when the token was completed but the decision was not recorded. Validation
   // rejections pass no approvalId and are unaffected.
   if (input.approvalId) {
-    const approval = getDevHqStore().approvals.get(input.approvalId);
-    if (approval && approval.status === "pending") {
-      saveApproval({
-        ...approval,
-        status: input.decision,
-        decidedByUserId: FOUNDER_USER_ID,
-        decidedAt: timestamp,
-      });
-    }
+    await approvalManager.decidePendingApproval({
+      approvalId: input.approvalId,
+      decidedByUserId: FOUNDER_USER_ID,
+      status: input.decision,
+      at: timestamp,
+    });
   }
 
-  saveTask({
-    ...task,
+  await taskRepository.updateTask(task.id, {
     status: taskStatusForOutcome(input.decision, rejectionKind),
-    updatedAt: timestamp,
+    occurredAt: timestamp,
   });
 
-  saveExecution({
-    ...(getDevHqStore().executions.get(input.executionId) as Execution),
-    status: "succeeded",
-    completedAt: timestamp,
+  await workflowEngine.markExecutionSucceeded(input.executionId, {
+    at: timestamp,
   });
 
-  updateWorkflowRun(input.executionId, {
-    stage: penultimateStage,
-    decision: input.decision,
-    rejectionKind,
-    reviewSummary: run.reviewSummary,
-  });
+  await workflowRunRepository.updateRun(
+    input.executionId,
+    {
+      stage: penultimateStage,
+      decision: input.decision,
+      rejectionKind,
+      reviewSummary: run.reviewSummary,
+    },
+    { at: timestamp },
+  );
 
   if (input.decision === "approved") {
     await eventLogger.log({
@@ -432,7 +408,11 @@ export async function finalizeWorkflowOutcome(input: {
     actorLabel: "System",
   });
 
-  return updateWorkflowRun(input.executionId, { stage: "completed" });
+  return workflowRunRepository.updateRun(
+    input.executionId,
+    { stage: "completed" },
+    { at: timestamp },
+  );
 }
 
 /** Marks a workflow as technically failed (infrastructure/code errors only). */
@@ -440,8 +420,9 @@ export async function failWorkflowExecution(
   executionId: string,
   message: string,
 ): Promise<WorkflowRunRecord> {
-  const { eventLogger } = getDevHqAdapters();
-  const run = getWorkflowRun(executionId);
+  const { workflowEngine, workflowRunRepository, eventLogger } =
+    getDevHqAdapters();
+  const run = await workflowRunRepository.getRun(executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${executionId}`);
   }
@@ -450,11 +431,7 @@ export async function failWorkflowExecution(
   }
 
   const timestamp = nowIso();
-  saveExecution({
-    ...(getDevHqStore().executions.get(executionId) as Execution),
-    status: "failed",
-    completedAt: timestamp,
-  });
+  await workflowEngine.markExecutionFailed(executionId, { at: timestamp });
 
   await eventLogger.log({
     type: "workflow.failed",
@@ -465,11 +442,15 @@ export async function failWorkflowExecution(
     actorLabel: "System",
   });
 
-  return updateWorkflowRun(executionId, {
-    stage: "failed",
-    decision: null,
-    rejectionKind: null,
-  });
+  return workflowRunRepository.updateRun(
+    executionId,
+    {
+      stage: "failed",
+      decision: null,
+      rejectionKind: null,
+    },
+    { at: timestamp },
+  );
 }
 
 /**
@@ -487,7 +468,7 @@ async function replayDecisionToken(approval: Approval): Promise<void> {
 }
 
 export async function approveFounderRequest(approvalId: string): Promise<DevHqState> {
-  const { approvalManager, eventLogger } = getDevHqAdapters();
+  const { approvalManager, eventLogger, stateReader } = getDevHqAdapters();
   const approval = await approvalManager.getApproval(approvalId);
   if (!approval) {
     throw new Error(`Approval not found: ${approvalId}`);
@@ -495,7 +476,7 @@ export async function approveFounderRequest(approvalId: string): Promise<DevHqSt
 
   if (approval.status === "approved" || approval.status === "rejected") {
     await replayDecisionToken(approval);
-    return buildDevHqState();
+    return stateReader.getState();
   }
 
   if (!approval.waitTokenId) {
@@ -523,11 +504,11 @@ export async function approveFounderRequest(approvalId: string): Promise<DevHqSt
     actorLabel: "Evan",
   });
 
-  return buildDevHqState();
+  return stateReader.getState();
 }
 
 export async function rejectFounderRequest(approvalId: string): Promise<DevHqState> {
-  const { approvalManager, eventLogger } = getDevHqAdapters();
+  const { approvalManager, eventLogger, stateReader } = getDevHqAdapters();
   const approval = await approvalManager.getApproval(approvalId);
   if (!approval) {
     throw new Error(`Approval not found: ${approvalId}`);
@@ -535,7 +516,7 @@ export async function rejectFounderRequest(approvalId: string): Promise<DevHqSta
 
   if (approval.status === "rejected" || approval.status === "approved") {
     await replayDecisionToken(approval);
-    return buildDevHqState();
+    return stateReader.getState();
   }
 
   if (!approval.waitTokenId) {
@@ -562,9 +543,9 @@ export async function rejectFounderRequest(approvalId: string): Promise<DevHqSta
     actorLabel: "Evan",
   });
 
-  return buildDevHqState();
+  return stateReader.getState();
 }
 
-export function getDevHqStateSnapshot(): DevHqState {
-  return buildDevHqState();
+export async function getDevHqStateSnapshot(): Promise<DevHqState> {
+  return getDevHqAdapters().stateReader.getState();
 }
