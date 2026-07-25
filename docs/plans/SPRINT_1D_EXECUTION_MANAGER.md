@@ -3,7 +3,8 @@
 **Template ID:** TMP-002
 **Owner:** Lead Software Engineer (Claude Code)
 **Authority:** ADR-0001
-**Status:** Approved architecture; implementation not started
+**Status:** Implemented and validated (Task 1D-7). Deferrals recorded in
+`docs/plans/SPRINT_1D_COMPLETION_NOTES.md`.
 **Date:** 2026-07-25
 
 ---
