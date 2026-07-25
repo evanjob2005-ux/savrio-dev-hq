@@ -1,13 +1,17 @@
+import { createDevAgentProvider } from "@/lib/dev-hq/adapters/dev-agent-provider";
 import { createDevApprovalManager } from "@/lib/dev-hq/adapters/dev-approval-manager";
 import { createDevEventLogger } from "@/lib/dev-hq/adapters/dev-event-logger";
+import { createDevExecutionRunner } from "@/lib/dev-hq/adapters/dev-execution-runner";
 import { createDevProjectRepository } from "@/lib/dev-hq/adapters/dev-project-repository";
 import { createDevStateReader } from "@/lib/dev-hq/adapters/dev-state-reader";
 import { createDevTaskRepository } from "@/lib/dev-hq/adapters/dev-task-repository";
 import { createDevWorkflowEngine } from "@/lib/dev-hq/adapters/dev-workflow-engine";
 import { createDevWorkflowRunRepository } from "@/lib/dev-hq/adapters/dev-workflow-run-repository";
 import type {
+  AgentProvider,
   ApprovalManager,
   EventLogger,
+  ExecutionRunner,
   ProjectRepository,
   StateReader,
   TaskRepository,
@@ -23,6 +27,8 @@ export interface DevHqAdapters {
   approvalManager: ApprovalManager;
   eventLogger: EventLogger;
   stateReader: StateReader;
+  agentProvider: AgentProvider;
+  executionRunner: ExecutionRunner;
 }
 
 let cached: DevHqAdapters | null = null;
@@ -41,6 +47,8 @@ export function getDevHqAdapters(): DevHqAdapters {
       approvalManager: createDevApprovalManager(),
       eventLogger: createDevEventLogger(),
       stateReader: createDevStateReader(),
+      agentProvider: createDevAgentProvider(),
+      executionRunner: createDevExecutionRunner(),
     };
   }
   return cached;
