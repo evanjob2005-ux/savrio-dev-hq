@@ -9,6 +9,12 @@ interface ExecutiveReviewResponse {
   idempotent?: boolean;
 }
 
+interface FounderRequestWorkflowPayload {
+  executionId: string;
+  taskId: string;
+  projectId: string;
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${getDevHqBaseUrl()}${path}`, {
     method: "POST",
@@ -25,11 +31,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 /** First real Dev HQ workflow — deterministic, no AI, no code execution. */
 export const founderRequestWorkflow = task({
   id: "founder-request-workflow",
-  run: async (payload: {
-    executionId: string;
-    taskId: string;
-    projectId: string;
-  }) => {
+  // Only runs once the run has exhausted its retries, so Dev HQ is not marked
+  // failed while an attempt could still succeed.
+  onFailure: async ({ payload, error }) => {
+    await postJson("/api/dev-hq/internal/fail", {
+      executionId: payload.executionId,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Workflow failed due to a technical error.",
+    });
+  },
+  run: async (payload: FounderRequestWorkflowPayload) => {
     metadata.set("stage", "founder_request_received");
     metadata.set("executionId", payload.executionId);
 
@@ -50,8 +63,13 @@ export const founderRequestWorkflow = task({
       };
     }
 
+    // Keyed so a retry resumes the original waitpoint instead of minting a
+    // second one that nothing will ever complete. The TTL matches the timeout
+    // so a late retry still resolves to the same token.
     const token = await wait.createToken({
       timeout: "7d",
+      idempotencyKey: `founder-approval-${payload.executionId}`,
+      idempotencyKeyTTL: "7d",
       tags: [`execution-${payload.executionId}`],
     });
 

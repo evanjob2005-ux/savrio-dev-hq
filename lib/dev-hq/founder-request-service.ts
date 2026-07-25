@@ -52,6 +52,14 @@ function isWorkflowCompleted(run: WorkflowRunRecord): boolean {
   return run.stage === "completed" || run.stage === "failed";
 }
 
+function findPendingApprovalForExecution(executionId: string): Approval | null {
+  return (
+    [...getDevHqStore().approvals.values()].find(
+      (a) => a.executionId === executionId && a.status === "pending",
+    ) ?? null
+  );
+}
+
 function updateWorkflowRun(
   executionId: string,
   patch: Partial<WorkflowRunRecord>,
@@ -192,9 +200,7 @@ export async function runExecutiveReview(executionId: string): Promise<{
   }
 
   if (run.stage === "founder_approval_required") {
-    const approval = [...getDevHqStore().approvals.values()].find(
-      (a) => a.executionId === executionId && a.status === "pending",
-    );
+    const approval = findPendingApprovalForExecution(executionId);
     return {
       passed: true,
       summary: run.reviewSummary ?? "Executive review already passed.",
@@ -208,6 +214,19 @@ export async function runExecutiveReview(executionId: string): Promise<{
       passed: false,
       summary: run.reviewSummary ?? "Validation already rejected this request.",
       approvalId: null,
+      idempotent: true,
+    };
+  }
+
+  // A retry can land here after an earlier attempt created the approval but
+  // before the approval gate advanced the stage. Reuse that approval rather
+  // than creating a second one that no wait token will ever be attached to.
+  const priorApproval = findPendingApprovalForExecution(executionId);
+  if (priorApproval) {
+    return {
+      passed: true,
+      summary: run.reviewSummary ?? priorApproval.summary,
+      approvalId: priorApproval.id,
       idempotent: true,
     };
   }
@@ -349,7 +368,11 @@ export async function finalizeWorkflowOutcome(input: {
   const timestamp = nowIso();
   const penultimateStage = terminalStageForOutcome(input.decision, rejectionKind);
 
-  if (input.approvalId && rejectionKind === "founder") {
+  // Converge the approval record on the decision the workflow acted on. In the
+  // normal flow it is already decided and this is a no-op; it only takes effect
+  // when the token was completed but the decision was not recorded. Validation
+  // rejections pass no approvalId and are unaffected.
+  if (input.approvalId) {
     const approval = getDevHqStore().approvals.get(input.approvalId);
     if (approval && approval.status === "pending") {
       saveApproval({
@@ -449,6 +472,20 @@ export async function failWorkflowExecution(
   });
 }
 
+/**
+ * Re-completes the wait token for an already-decided approval. A prior attempt
+ * may have recorded the decision but failed before completing the token, which
+ * would block the run until it times out. Completing an already-completed token
+ * is a no-op, so replaying it is safe and always uses the recorded decision
+ * rather than the one the caller asked for.
+ */
+async function replayDecisionToken(approval: Approval): Promise<void> {
+  if (!approval.waitTokenId) return;
+  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
+    approved: approval.status === "approved",
+  });
+}
+
 export async function approveFounderRequest(approvalId: string): Promise<DevHqState> {
   const { approvalManager, eventLogger } = getDevHqAdapters();
   const approval = await approvalManager.getApproval(approvalId);
@@ -456,16 +493,21 @@ export async function approveFounderRequest(approvalId: string): Promise<DevHqSt
     throw new Error(`Approval not found: ${approvalId}`);
   }
 
-  if (approval.status === "approved") {
-    return buildDevHqState();
-  }
-  if (approval.status === "rejected") {
+  if (approval.status === "approved" || approval.status === "rejected") {
+    await replayDecisionToken(approval);
     return buildDevHqState();
   }
 
   if (!approval.waitTokenId) {
     throw new Error(`Approval is missing wait token: ${approvalId}`);
   }
+
+  // Complete the token before recording the decision. If this throws, the
+  // approval stays pending and the founder can retry; recording first would
+  // leave a decided approval whose run never resumes.
+  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
+    approved: true,
+  });
 
   await approvalManager.approve({
     approvalId,
@@ -481,10 +523,6 @@ export async function approveFounderRequest(approvalId: string): Promise<DevHqSt
     actorLabel: "Evan",
   });
 
-  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
-    approved: true,
-  });
-
   return buildDevHqState();
 }
 
@@ -495,16 +533,20 @@ export async function rejectFounderRequest(approvalId: string): Promise<DevHqSta
     throw new Error(`Approval not found: ${approvalId}`);
   }
 
-  if (approval.status === "rejected") {
-    return buildDevHqState();
-  }
-  if (approval.status === "approved") {
+  if (approval.status === "rejected" || approval.status === "approved") {
+    await replayDecisionToken(approval);
     return buildDevHqState();
   }
 
   if (!approval.waitTokenId) {
     throw new Error(`Approval is missing wait token: ${approvalId}`);
   }
+
+  // Complete the token before recording the decision, for the same reason as
+  // approveFounderRequest.
+  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
+    approved: false,
+  });
 
   await approvalManager.reject({
     approvalId,
@@ -518,10 +560,6 @@ export async function rejectFounderRequest(approvalId: string): Promise<DevHqSta
     message: `Evan rejected ${approval.title}.`,
     actorId: FOUNDER_USER_ID,
     actorLabel: "Evan",
-  });
-
-  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
-    approved: false,
   });
 
   return buildDevHqState();
