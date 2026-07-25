@@ -48,8 +48,13 @@ export function TopBar({
       </div>
 
       <div className="flex items-center gap-3">
-        <Badge color={COLORS.accent}>SIMULATION · MOCK DATA</Badge>
+        <Badge color={COLORS.accent}>LIVE STATE · DEV MODE</Badge>
+        {/* Scoped to the mock engine so this indicator is not read as live
+            operational status now that the badge above says LIVE STATE. */}
         <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-[0.06em] text-[var(--text-faint)]">
+            Simulation
+          </span>
           <StatusDot color={stateColor} pulse={pulse} />
           <span className="text-[12px] font-medium text-[var(--text-dim)]">
             {stateLabel}

@@ -1,143 +1,209 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+// Mission Control command center.
+//
+// Composes the founder-facing operational view over the live Dev HQ state feed:
+// command chain, Executive Orchestrator, projects and their work, approval
+// gates, the audit trail, activity, and system health. All rendering is driven by
+// GET /api/dev-hq/state; sections the backend does not implement are labelled
+// rather than filled with invented values.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
 import type { DevHqState } from "@/lib/dev-hq/types";
-import { SystemOverviewPanel } from "@/components/dashboard/SystemOverviewPanel";
-import { ProjectsPanel } from "@/components/dashboard/ProjectsPanel";
-import { ActiveTasksPanel } from "@/components/dashboard/ActiveTasksPanel";
-import { FounderApprovalQueuePanel } from "@/components/dashboard/FounderApprovalQueuePanel";
-import { RecentActivityPanel } from "@/components/dashboard/RecentActivityPanel";
-import { AgentStatusOverviewPanel } from "@/components/dashboard/AgentStatusOverviewPanel";
-import { ConnectedServicesPanel } from "@/components/dashboard/ConnectedServicesPanel";
+import { useDevHqState } from "@/lib/mission-control/useDevHqState";
+import { buildCommandCenterModel } from "@/lib/mission-control/view-model";
+import { MissionControlStatusBar } from "@/components/mission-control/MissionControlStatusBar";
+import { HierarchyRail } from "@/components/mission-control/HierarchyRail";
+import { ExecutiveOrchestratorPanel } from "@/components/mission-control/ExecutiveOrchestratorPanel";
+import { ApprovalQueuePanel } from "@/components/mission-control/ApprovalQueuePanel";
+import { ProjectHierarchyPanel } from "@/components/mission-control/ProjectHierarchyPanel";
+import { WorkBoardPanel } from "@/components/mission-control/WorkBoardPanel";
+import { AuditTrailPanel } from "@/components/mission-control/AuditTrailPanel";
+import { ActivityStreamPanel } from "@/components/mission-control/ActivityStreamPanel";
+import { AgentRosterPanel } from "@/components/mission-control/AgentRosterPanel";
+import { SystemHealthPanel } from "@/components/mission-control/SystemHealthPanel";
 import { FounderRequestForm } from "@/components/dashboard/FounderRequestForm";
-import { WorkflowStatusPanel } from "@/components/dashboard/WorkflowStatusPanel";
 
-async function fetchState(): Promise<DevHqState> {
-  const response = await fetch("/api/dev-hq/state", { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error("Failed to load Dev HQ state.");
-  }
-  return response.json();
-}
-
-/** Sprint 1B overview — real dev store where available, placeholders elsewhere. */
 export function MissionControlOverview() {
-  const [state, setState] = useState<DevHqState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const feed = useDevHqState();
+  const { state, status, error, updatedAt, refresh, applySnapshot } = feed;
+
   const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await fetchState();
-      setState(next);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load state.");
-    }
-  }, []);
+  const approvalsRegionRef = useRef<HTMLDivElement>(null);
+  const lastAnnouncedEventIdRef = useRef<string | null>(null);
 
+  const model = useMemo(
+    () => (state ? buildCommandCenterModel(state) : null),
+    [state],
+  );
+
+  // Announce new operational events, but never the initial backlog.
+  const latestEvent = state?.events[0] ?? null;
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const next = await fetchState();
-        if (!cancelled) {
-          setState(next);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load state.");
-        }
-      }
+    if (!latestEvent) return;
+    if (lastAnnouncedEventIdRef.current === null) {
+      lastAnnouncedEventIdRef.current = latestEvent.id;
+      return;
     }
-
-    void load();
-    const timer = setInterval(() => {
-      void load();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, []);
+    if (lastAnnouncedEventIdRef.current !== latestEvent.id) {
+      lastAnnouncedEventIdRef.current = latestEvent.id;
+      setAnnouncement(`${latestEvent.actorLabel}: ${latestEvent.message}`);
+    }
+  }, [latestEvent]);
 
   const handleApprovalAction = useCallback(
     async (approvalId: string, action: "approve" | "reject") => {
       setBusyApprovalId(approvalId);
+      setActionError(null);
       try {
         const response = await fetch(`/api/dev-hq/approvals/${approvalId}/${action}`, {
           method: "POST",
         });
-        const data = await response.json();
+        const data: { state?: DevHqState; error?: string } = await response.json();
         if (!response.ok) {
           throw new Error(data.error ?? `Failed to ${action} request.`);
         }
-        setState(data.state);
+        if (data.state) {
+          applySnapshot(data.state);
+        }
+        setAnnouncement(
+          action === "approve"
+            ? `Approval ${approvalId} approved. Workflow resumed.`
+            : `Approval ${approvalId} rejected. Workflow resumed.`,
+        );
       } catch (err) {
-        setError(err instanceof Error ? err.message : `Failed to ${action} request.`);
+        const message =
+          err instanceof Error ? err.message : `Failed to ${action} request.`;
+        setActionError(message);
+        setAnnouncement(message);
       } finally {
         setBusyApprovalId(null);
+        // The action buttons are removed once decided, so move focus to the
+        // approvals region instead of dropping the user to the document start.
+        requestAnimationFrame(() => approvalsRegionRef.current?.focus());
         void refresh();
       }
     },
-    [refresh],
+    [applySnapshot, refresh],
   );
 
-  if (!state) {
+  if (!model || !state) {
     return (
-      <section aria-label="Mission Control overview" className="flex flex-col gap-4">
-        <p className="text-[12px] text-[var(--text-faint)]">Loading Dev HQ state…</p>
-        {error ? (
-          <p className="text-[12px] text-[var(--err)]" role="alert">
-            {error}
+      <section aria-label="Mission Control" className="flex flex-col gap-3">
+        <div
+          className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-4 py-6"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="text-[12.5px] font-medium text-[var(--text-dim)]">
+            {status === "initial"
+              ? "Connecting to the Dev HQ state feed…"
+              : "Waiting for a state snapshot…"}
           </p>
+          <p className="mt-1 text-[11px] text-[var(--text-faint)]">
+            Loading projects, orchestrator status, tasks, approvals, and activity.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5" aria-hidden>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-20 rounded-lg border border-[var(--border)] bg-[var(--surface-2)]"
+              />
+            ))}
+          </div>
+        </div>
+        {error ? (
+          <div
+            className="rounded-lg border border-[var(--err)]/40 bg-[var(--err)]/10 px-3 py-2.5"
+            role="alert"
+          >
+            <p className="text-[12px] leading-relaxed text-[var(--err)]">{error}</p>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="mt-2 rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] outline-none hover:bg-[var(--surface-3)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            >
+              Retry now
+            </button>
+          </div>
         ) : null}
       </section>
     );
   }
 
   return (
-    <section aria-label="Mission Control overview" className="flex flex-col gap-4">
-      <p
-        className="rounded-lg border border-[var(--warn)]/35 bg-[var(--warn)]/10 px-3 py-2 text-[12px] leading-relaxed text-[var(--text-dim)]"
-        role="note"
-      >
-        Development mode: workflow state is stored in a single-process in-memory dev
-        adapter. Data is not durable and will reset when the Next.js process restarts.
-        Not for production use.
-      </p>
-      {error ? (
-        <p className="rounded-lg border border-[var(--err)]/40 bg-[var(--err)]/10 px-3 py-2 text-[12px] text-[var(--err)]" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <FounderRequestForm onSubmitted={refresh} />
-        <WorkflowStatusPanel workflowRuns={state.workflowRuns} />
+    <section aria-label="Mission Control" className="flex flex-col gap-4">
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
       </div>
 
-      <SystemOverviewPanel metrics={state.overview} />
+      <MissionControlStatusBar
+        feedStatus={status}
+        updatedAt={updatedAt}
+        error={actionError ?? error}
+        pendingApprovals={model.counts.pendingApprovals}
+        attentionCount={model.attentionCount}
+      />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <ProjectsPanel projects={state.projects} />
-        <ActiveTasksPanel tasks={state.tasks} />
-        <FounderApprovalQueuePanel
-          approvals={state.approvals}
-          onApprove={(id) => void handleApprovalAction(id, "approve")}
-          onReject={(id) => void handleApprovalAction(id, "reject")}
-          busyApprovalId={busyApprovalId}
-        />
+      <HierarchyRail model={model} />
+
+      {/* Founder-facing controls: intake, decisions, and orchestrator status. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-4">
+          <FounderRequestForm onSubmitted={() => void refresh()} />
+        </div>
+        <div
+          ref={approvalsRegionRef}
+          tabIndex={-1}
+          aria-label="Founder approval gates"
+          className="rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] lg:col-span-4"
+        >
+          <ApprovalQueuePanel
+            approvals={model.approvals}
+            onApprove={(id) => void handleApprovalAction(id, "approve")}
+            onReject={(id) => void handleApprovalAction(id, "reject")}
+            busyApprovalId={busyApprovalId}
+          />
+        </div>
+        <div className="lg:col-span-4">
+          <ExecutiveOrchestratorPanel executive={model.executive} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <RecentActivityPanel events={state.events} />
-        <AgentStatusOverviewPanel agents={MISSION_CONTROL_PLACEHOLDERS.agents} />
-        <ConnectedServicesPanel services={MISSION_CONTROL_PLACEHOLDERS.connectedServices} />
+      <ProjectHierarchyPanel projects={model.projects} />
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <div className="xl:col-span-7">
+          <WorkBoardPanel buckets={model.buckets} projects={state.projects} />
+        </div>
+        <div className="xl:col-span-5">
+          <AuditTrailPanel records={model.auditRecords} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-12">
+        <div className="xl:col-span-4">
+          <ActivityStreamPanel events={state.events} />
+        </div>
+        <div className="xl:col-span-4">
+          <AgentRosterPanel
+            participants={model.participants}
+            declaredRoster={MISSION_CONTROL_PLACEHOLDERS.agents}
+          />
+        </div>
+        <div className="lg:col-span-2 xl:col-span-4">
+          <SystemHealthPanel
+            feedStatus={status}
+            updatedAt={updatedAt}
+            executions={state.executions}
+            executive={model.executive}
+            services={MISSION_CONTROL_PLACEHOLDERS.connectedServices}
+          />
+        </div>
       </div>
     </section>
   );
