@@ -10,6 +10,7 @@ import {
   dispatchAgentExecution,
   handleExecutionComplete,
   handleExecutionHeartbeat,
+  handleExecutionReclaim,
   handleExecutionRunning,
   simulateOutcome,
 } from "@/lib/dev-hq/agent-execution-service";
@@ -25,6 +26,7 @@ import { getExecution } from "@/lib/dev-hq/execution-manager";
 import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
+const FAR_FUTURE = "2999-01-01T00:00:00.000Z";
 
 function seedTask(overrides?: Partial<Task>): Task {
   return saveTask({
@@ -423,6 +425,106 @@ describe("agent execution service", () => {
         (await getDevHqAdapters().evidenceStore.listForExecution(executionId))
           .length,
       ).toBe(evidenceBefore);
+    });
+  });
+
+  describe("lease sweeper", () => {
+    async function executionEvents(executionId: string) {
+      return getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        entityId: executionId,
+        limit: 50,
+      });
+    }
+
+    async function seedRunning(instructions = "do work") {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions,
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, assignmentId);
+      return { executionId, assignmentId };
+    }
+
+    it("reclaims an expired running execution as a new attempt", async () => {
+      const { executionId, assignmentId } = await seedRunning();
+
+      const result = await handleExecutionReclaim(FAR_FUTURE);
+      expect(result.reclaimed).toBe(1);
+
+      const after = (await getExecution(executionId))!;
+      expect(after.status).toBe("queued");
+      expect(after.attempt).toBe(2);
+      expect(after.assignmentId).not.toBe(assignmentId);
+
+      // The reclaim records exactly one append-only log evidence entry.
+      const evidence =
+        await getDevHqAdapters().evidenceStore.listForExecution(executionId);
+      expect(evidence).toHaveLength(1);
+      expect(evidence[0].kind).toBe("log");
+      expect(evidence[0].label).toBe("Execution reclaimed: lease expired");
+    });
+
+    it("does not reclaim an execution whose lease is still valid", async () => {
+      await seedRunning();
+      expect((await handleExecutionReclaim()).reclaimed).toBe(0);
+    });
+
+    it("does not reclaim a terminal execution", async () => {
+      const { executionId, assignmentId } = await seedRunning();
+      await handleExecutionComplete({
+        executionId,
+        assignmentId,
+        status: "succeeded",
+        instructions: "do work",
+      });
+      expect((await handleExecutionReclaim(FAR_FUTURE)).reclaimed).toBe(0);
+    });
+
+    it("does not reclaim the same attempt twice across repeated sweeps", async () => {
+      const { executionId } = await seedRunning();
+
+      expect((await handleExecutionReclaim(FAR_FUTURE)).reclaimed).toBe(1);
+      expect((await handleExecutionReclaim(FAR_FUTURE)).reclaimed).toBe(0);
+
+      const reclaimedEvents = (await executionEvents(executionId)).filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.reclaimed,
+      );
+      expect(reclaimedEvents).toHaveLength(1);
+    });
+
+    it("keeps a stale pre-reclaim callback a safe no-op", async () => {
+      const { executionId, assignmentId: asgn1 } = await seedRunning();
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      const asgn2 = (await getExecution(executionId))!.assignmentId!;
+      expect(asgn2).not.toBe(asgn1);
+
+      const stale = await handleExecutionComplete({
+        executionId,
+        assignmentId: asgn1,
+        status: "succeeded",
+        instructions: "do work",
+      });
+      expect(stale.retried).toBe(false);
+
+      const after = (await getExecution(executionId))!;
+      expect(after.status).toBe("queued");
+      expect(after.assignmentId).toBe(asgn2);
+    });
+
+    it("emits exactly one execution.reclaimed event per reclaim", async () => {
+      const { executionId } = await seedRunning();
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      const reclaimedEvents = (await executionEvents(executionId)).filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.reclaimed,
+      );
+      expect(reclaimedEvents).toHaveLength(1);
     });
   });
 });

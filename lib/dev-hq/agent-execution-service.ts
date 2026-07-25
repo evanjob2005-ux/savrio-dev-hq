@@ -10,6 +10,7 @@ import {
   assignExecution,
   getExecution,
   heartbeat,
+  reclaimStale,
   releaseExecution,
   runExecution,
 } from "@/lib/dev-hq/execution-manager";
@@ -304,4 +305,69 @@ export async function handleExecutionComplete(
   );
 
   return { execution, retried: false };
+}
+
+export interface ReclaimResult {
+  reclaimed: number;
+}
+
+/** Instructions for a lease-recovery re-dispatch: the task's own description. */
+function recoveryInstructions(execution: Execution): string {
+  const task = getDevHqStore().tasks.get(execution.taskId);
+  return (task?.description ?? "").trim() || "Execute the assigned task.";
+}
+
+/**
+ * Append-only log evidence for a lease-expiry reclaim (Task 1E-3, consistency
+ * with the Task 1E-1 evidence pattern). Attributed to the reclaimed execution and
+ * recorded as a system action; purely descriptive — it never drives control flow.
+ */
+async function recordReclaimEvidence(execution: Execution): Promise<void> {
+  const summary =
+    execution.status === "queued"
+      ? `Execution ${execution.id} lease expired and was reclaimed; recovery created a new attempt ${execution.attempt}.`
+      : `Execution ${execution.id} lease expired and was reclaimed; retry budget spent, no new attempt created.`;
+  await getDevHqAdapters().evidenceStore.addEvidence({
+    executionId: execution.id,
+    taskId: execution.taskId,
+    kind: "log",
+    label: "Execution reclaimed: lease expired",
+    summary,
+    createdByAgentId: null,
+  });
+}
+
+/**
+ * Scheduled recovery of expired execution leases (Task 1E-3). Delegates the pure
+ * state transition to the Execution Manager's `reclaimStale`, which moves each
+ * timed-out attempt to a new assignment identity (so pre-reclaim callbacks are
+ * safely ignored by the assignmentId idempotency guard). For each reclaimed
+ * execution this emits exactly one `execution.reclaimed` event and, when a retry
+ * remains, re-dispatches the new attempt. Repeated sweeps do not reclaim the same
+ * attempt twice: a reclaimed attempt is no longer `running`, so `reclaimStale`
+ * skips it. `now` defaults to the time of the call.
+ */
+export async function handleExecutionReclaim(
+  now?: string,
+): Promise<ReclaimResult> {
+  const reclaimed = await reclaimStale(now);
+
+  for (const execution of reclaimed) {
+    // One append-only log evidence entry per reclaim (audit only, no control flow).
+    await recordReclaimEvidence(execution);
+    await logExecutionEvent(
+      EXECUTION_EVENT_TYPE.reclaimed,
+      execution.id,
+      execution.agentId,
+      execution.status === "queued"
+        ? `Execution ${execution.id} lease expired; reclaimed and retrying as attempt ${execution.attempt}.`
+        : `Execution ${execution.id} lease expired; reclaimed and marked ${execution.status} (retry budget spent).`,
+    );
+
+    if (execution.status === "queued" && execution.agentId) {
+      await triggerRun(execution, recoveryInstructions(execution));
+    }
+  }
+
+  return { reclaimed: reclaimed.length };
 }

@@ -44,8 +44,8 @@ export const EXECUTION_LEASE_TTL_MS = 60_000;
 
 /**
  * Typed execution lifecycle event names emitted from the service layer
- * (ADR-0002 E3). No event is emitted per heartbeat. `reclaimed` is reserved for
- * the Sprint 1E-3 sweeper and is not emitted by Task 1E-1.
+ * (ADR-0002 E3). No event is emitted per heartbeat. `reclaimed` is emitted by the
+ * Sprint 1E-3 lease sweeper when it recovers an expired-lease attempt.
  */
 export const EXECUTION_EVENT_TYPE = {
   assigned: "execution.assigned",
@@ -54,7 +54,15 @@ export const EXECUTION_EVENT_TYPE = {
   retried: "execution.retried",
   exhausted: "execution.exhausted",
   cancelled: "execution.cancelled",
+  reclaimed: "execution.reclaimed",
 } as const;
+
+/**
+ * Cron for the scheduled lease sweeper (Task 1E-3). Every minute — the finest
+ * cron granularity — matched to the lease TTL so an expired lease is recovered
+ * within roughly one TTL window.
+ */
+export const EXECUTION_SWEEP_CRON = "* * * * *";
 
 /** Base URL for Trigger.dev worker callbacks into the Next.js dev store. */
 export function getDevHqBaseUrl(): string {
