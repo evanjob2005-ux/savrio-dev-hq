@@ -9,6 +9,26 @@ export const DEV_HQ_ACTORS = {
   executiveAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
 } as const;
 
+/**
+ * Canonical Phase 1 agent capability vocabulary (ADR-0001 O3), frozen from the
+ * existing roster so the UI and the selection engine share one set. A fuller
+ * department-mapped taxonomy is deferred to Phase 2.
+ */
+export const AGENT_CAPABILITIES = [
+  "routing",
+  "sequencing",
+  "escalation",
+  "implementation",
+  "review",
+  "corrections",
+  "qa",
+  "accessibility",
+  "gates",
+  "validation",
+] as const;
+
+export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
+
 /** Base URL for Trigger.dev worker callbacks into the Next.js dev store. */
 export function getDevHqBaseUrl(): string {
   return process.env.DEV_HQ_BASE_URL ?? "http://127.0.0.1:3000";

@@ -25,7 +25,11 @@ export type {
   WorkflowRunRepository,
 } from "./workflow-run-repository";
 export type { StateReader } from "./state-reader";
-export type { ExecutionRunner } from "./execution-runner";
+export type {
+  AgentSelectionPolicy,
+  AssignmentDecision,
+  ExecutionRunner,
+} from "./execution-runner";
 export type {
   CreateEvidenceInput,
   EvidenceStore,

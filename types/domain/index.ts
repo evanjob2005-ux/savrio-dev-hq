@@ -28,6 +28,10 @@ export type {
   RepositoryContext,
 } from "./agent-execution";
 export type { Execution } from "./execution";
+export type {
+  AgentAssignment,
+  AgentAssignmentStatus,
+} from "./agent-assignment";
 export type { Evidence, EvidenceKind } from "./evidence";
 export type { Approval } from "./approval";
 export type { Event, EventEntityType } from "./event";

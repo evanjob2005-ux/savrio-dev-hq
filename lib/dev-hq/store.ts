@@ -6,6 +6,8 @@ import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
 import type { DevHqState, DevHqStoreData } from "@/lib/dev-hq/types";
 import { nowIso } from "@/lib/dev-hq/id";
 import type {
+  Agent,
+  AgentAssignment,
   Approval,
   Event,
   Execution,
@@ -62,6 +64,19 @@ function createSeedWorkflow(): Workflow {
   };
 }
 
+/**
+ * Seeds the canonical Agent Registry from the placeholder roster (ADR-0001 D5),
+ * so Mission Control and the execution engine read one shared set of agents.
+ * Insertion order is preserved to keep the roster display identical.
+ */
+function createSeedAgents(): Map<string, Agent> {
+  const agents = new Map<string, Agent>();
+  for (const agent of MISSION_CONTROL_PLACEHOLDERS.agents) {
+    agents.set(agent.id, { ...agent, capabilities: [...agent.capabilities] });
+  }
+  return agents;
+}
+
 function createEmptyStore(): DevHqStoreData {
   const workflows = new Map<string, Workflow>();
   workflows.set(FOUNDER_REQUEST_WORKFLOW_ID, createSeedWorkflow());
@@ -73,6 +88,8 @@ function createEmptyStore(): DevHqStoreData {
     workflows,
     executions: new Map(),
     workflowRuns: new Map(),
+    agents: createSeedAgents(),
+    agentAssignments: new Map(),
   };
 }
 
@@ -120,6 +137,9 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
   const workflowRuns = [...store.workflowRuns.values()].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt),
   );
+  // Preserve registry seed order so the roster renders identically to the
+  // placeholder source it is seeded from.
+  const agents = [...store.agents.values()];
 
   const pendingApprovals = approvals.filter((a) => a.status === "pending").length;
   const activeTasks = tasks.filter(
@@ -135,6 +155,7 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
     workflows,
     executions,
     workflowRuns,
+    agents,
     overview: {
       activeProjects: projects.filter((p) => p.status === "active").length,
       activeTasks,
@@ -180,4 +201,22 @@ export function saveApproval(approval: Approval): Approval {
 export function saveExecution(execution: Execution): Execution {
   getDevHqStore().executions.set(execution.id, execution);
   return execution;
+}
+
+export function saveAgent(agent: Agent): Agent {
+  getDevHqStore().agents.set(agent.id, agent);
+  return agent;
+}
+
+export function getAgent(agentId: string): Agent | null {
+  return getDevHqStore().agents.get(agentId) ?? null;
+}
+
+export function saveAssignment(assignment: AgentAssignment): AgentAssignment {
+  getDevHqStore().agentAssignments.set(assignment.id, assignment);
+  return assignment;
+}
+
+export function getAssignment(assignmentId: string): AgentAssignment | null {
+  return getDevHqStore().agentAssignments.get(assignmentId) ?? null;
 }

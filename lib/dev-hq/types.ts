@@ -1,5 +1,7 @@
 import type { SystemOverviewMetrics } from "@/data/placeholders/mission-control";
 import type {
+  Agent,
+  AgentAssignment,
   Approval,
   Event,
   Execution,
@@ -18,6 +20,7 @@ export interface DevHqState {
   workflows: Workflow[];
   executions: Execution[];
   workflowRuns: WorkflowRunRecord[];
+  agents: Agent[];
   overview: SystemOverviewMetrics;
 }
 
@@ -29,4 +32,6 @@ export interface DevHqStoreData {
   workflows: Map<string, Workflow>;
   executions: Map<string, Execution>;
   workflowRuns: Map<string, WorkflowRunRecord>;
+  agents: Map<string, Agent>;
+  agentAssignments: Map<string, AgentAssignment>;
 }
