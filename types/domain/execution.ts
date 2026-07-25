@@ -3,7 +3,12 @@ import type { EntityId, ExecutionStatus, IsoTimestamp } from "./common";
 export interface Execution {
   id: EntityId;
   taskId: EntityId;
-  workflowId: EntityId;
+  /**
+   * The founder-request orchestration workflow, or null for agent executions
+   * dispatched from a task that has no workflow. Nullable is additive: the
+   * founder-request path always sets a workflow id.
+   */
+  workflowId: EntityId | null;
   agentId: EntityId | null;
   status: ExecutionStatus;
   triggerRunId: string | null;

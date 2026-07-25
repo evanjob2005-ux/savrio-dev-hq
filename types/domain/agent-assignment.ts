@@ -25,6 +25,11 @@ export interface AgentAssignment {
   status: AgentAssignmentStatus;
   /** Work-Management retry attempt this assignment belongs to (1-based). See D1. */
   attempt: number;
+  /**
+   * Capabilities the task required when this assignment was created. Carried so a
+   * retry can re-select an eligible agent without the original policy in hand.
+   */
+  requiredCapabilities: string[];
   /** When the current lease expires; null before claim. */
   leaseExpiresAt: IsoTimestamp | null;
   /** Last heartbeat received from the running agent; null before first beat. */
