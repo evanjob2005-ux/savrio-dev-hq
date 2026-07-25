@@ -2,11 +2,7 @@
 // Single Next.js process, non-durable, not for production.
 
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
-import {
-  EXECUTIVE_ORCHESTRATOR_AGENT_ID,
-  FOUNDER_REQUEST_WORKFLOW_ID,
-  FOUNDER_USER_ID,
-} from "@/lib/dev-hq/constants";
+import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
 import type { DevHqState, DevHqStoreData } from "@/lib/dev-hq/types";
 import { nowIso } from "@/lib/dev-hq/id";
 import type {
@@ -185,8 +181,3 @@ export function saveExecution(execution: Execution): Execution {
   getDevHqStore().executions.set(execution.id, execution);
   return execution;
 }
-
-export const DEV_HQ_ACTORS = {
-  founderUserId: FOUNDER_USER_ID,
-  executiveAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
-} as const;

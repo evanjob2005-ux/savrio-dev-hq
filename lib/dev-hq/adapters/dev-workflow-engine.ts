@@ -1,8 +1,11 @@
-import type { StartWorkflowInput, WorkflowEngine } from "@/types/contracts";
+import type {
+  MarkExecutionRunningInput,
+  MarkExecutionTerminalInput,
+  StartWorkflowInput,
+  WorkflowEngine,
+} from "@/types/contracts";
 import type { Execution, Workflow } from "@/types/domain";
-import {
-  FOUNDER_REQUEST_WORKFLOW_ID,
-} from "@/lib/dev-hq/constants";
+import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
 import { getDevHqStore, saveExecution, upsertWorkflowRun } from "@/lib/dev-hq/store";
 import { nextId, nowIso } from "@/lib/dev-hq/id";
 
@@ -62,29 +65,69 @@ export class DevWorkflowEngine implements WorkflowEngine {
   }
 
   async pauseExecution(executionId: string): Promise<Execution> {
-    const execution = getDevHqStore().executions.get(executionId);
-    if (!execution) {
-      throw new Error(`Execution not found: ${executionId}`);
-    }
-    const updated: Execution = { ...execution, status: "queued" };
-    return saveExecution(updated);
+    const execution = await this.requireExecution(executionId);
+    return saveExecution({ ...execution, status: "queued" });
   }
 
   async resumeExecution(executionId: string): Promise<Execution> {
-    const execution = getDevHqStore().executions.get(executionId);
-    if (!execution) {
-      throw new Error(`Execution not found: ${executionId}`);
-    }
-    const updated: Execution = {
+    const execution = await this.requireExecution(executionId);
+    return saveExecution({
       ...execution,
       status: "running",
       startedAt: execution.startedAt ?? nowIso(),
-    };
-    return saveExecution(updated);
+    });
   }
 
   async getExecution(executionId: string): Promise<Execution | null> {
     return getDevHqStore().executions.get(executionId) ?? null;
+  }
+
+  async markExecutionRunning(
+    executionId: string,
+    input?: MarkExecutionRunningInput,
+  ): Promise<Execution> {
+    const execution = await this.requireExecution(executionId);
+    return saveExecution({
+      ...execution,
+      status: "running",
+      startedAt: input?.at ?? nowIso(),
+      triggerRunId:
+        input?.triggerRunId !== undefined
+          ? input.triggerRunId
+          : execution.triggerRunId,
+    });
+  }
+
+  async markExecutionSucceeded(
+    executionId: string,
+    input?: MarkExecutionTerminalInput,
+  ): Promise<Execution> {
+    const execution = await this.requireExecution(executionId);
+    return saveExecution({
+      ...execution,
+      status: "succeeded",
+      completedAt: input?.at ?? nowIso(),
+    });
+  }
+
+  async markExecutionFailed(
+    executionId: string,
+    input?: MarkExecutionTerminalInput,
+  ): Promise<Execution> {
+    const execution = await this.requireExecution(executionId);
+    return saveExecution({
+      ...execution,
+      status: "failed",
+      completedAt: input?.at ?? nowIso(),
+    });
+  }
+
+  private async requireExecution(executionId: string): Promise<Execution> {
+    const execution = await this.getExecution(executionId);
+    if (!execution) {
+      throw new Error(`Execution not found: ${executionId}`);
+    }
+    return execution;
   }
 }
 

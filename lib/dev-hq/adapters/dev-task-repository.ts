@@ -52,10 +52,11 @@ export class DevTaskRepository implements TaskRepository {
     if (!existing) {
       throw new Error(`Task not found: ${id}`);
     }
+    const { occurredAt, ...fields } = input;
     const updated: Task = {
       ...existing,
-      ...input,
-      updatedAt: nowIso(),
+      ...fields,
+      updatedAt: occurredAt ?? nowIso(),
     };
     return saveTask(updated);
   }
