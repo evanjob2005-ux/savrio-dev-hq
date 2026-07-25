@@ -19,6 +19,8 @@ import {
   resetDevHqStore,
   saveTask,
 } from "@/lib/dev-hq/store";
+import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
+import { EXECUTION_EVENT_TYPE } from "@/lib/dev-hq/constants";
 import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
@@ -209,5 +211,92 @@ describe("agent execution service", () => {
         instructions: "",
       }),
     ).rejects.toThrow("Execution not found: exec-missing");
+  });
+
+  describe("events and evidence", () => {
+    async function executionEvents(executionId: string) {
+      return getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        entityId: executionId,
+        limit: 50,
+      });
+    }
+
+    it("emits assigned, claimed, and succeeded events plus outcome evidence", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do work",
+      });
+      const executionId = dispatched.executionId!;
+
+      await handleExecutionRunning(executionId);
+      await handleExecutionComplete({
+        executionId,
+        status: "succeeded",
+        instructions: "do work",
+      });
+
+      const types = (await executionEvents(executionId)).map((e) => e.type);
+      expect(types).toContain(EXECUTION_EVENT_TYPE.assigned);
+      expect(types).toContain(EXECUTION_EVENT_TYPE.claimed);
+      expect(types).toContain(EXECUTION_EVENT_TYPE.succeeded);
+
+      const evidence =
+        await getDevHqAdapters().evidenceStore.listForExecution(executionId);
+      expect(evidence.length).toBeGreaterThanOrEqual(1);
+      expect(evidence[0].kind).toBe("log");
+    });
+
+    it("emits a retried event and one evidence per attempt", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "please fail",
+      });
+      const executionId = dispatched.executionId!;
+
+      await handleExecutionRunning(executionId);
+      await handleExecutionComplete({
+        executionId,
+        status: "failed",
+        instructions: "please fail",
+      });
+
+      const types = (await executionEvents(executionId)).map((e) => e.type);
+      expect(types).toContain(EXECUTION_EVENT_TYPE.retried);
+
+      const evidence =
+        await getDevHqAdapters().evidenceStore.listForExecution(executionId);
+      expect(evidence).toHaveLength(1);
+    });
+
+    it("emits an exhausted event when the retry budget is spent", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+      });
+      const executionId = dispatched.executionId!;
+
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await handleExecutionRunning(executionId);
+        await handleExecutionComplete({
+          executionId,
+          status: "failed",
+          instructions: "fail",
+        });
+      }
+
+      const types = (await executionEvents(executionId)).map((e) => e.type);
+      expect(types).toContain(EXECUTION_EVENT_TYPE.exhausted);
+
+      const evidence =
+        await getDevHqAdapters().evidenceStore.listForExecution(executionId);
+      expect(evidence).toHaveLength(3); // one per attempt outcome
+    });
   });
 });

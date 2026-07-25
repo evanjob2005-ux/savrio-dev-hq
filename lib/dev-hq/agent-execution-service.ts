@@ -13,7 +13,9 @@ import {
   releaseExecution,
   runExecution,
 } from "@/lib/dev-hq/execution-manager";
-import { getDevHqStore, saveExecution } from "@/lib/dev-hq/store";
+import { getAgent, getDevHqStore, saveExecution } from "@/lib/dev-hq/store";
+import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
+import { EXECUTION_EVENT_TYPE } from "@/lib/dev-hq/constants";
 import { nowIso } from "@/lib/dev-hq/id";
 
 export const AGENT_EXECUTION_TASK_ID = "agent-execution";
@@ -56,6 +58,44 @@ function buildAgentResult(
     startedAt: execution.startedAt ?? at,
     completedAt: at,
   };
+}
+
+/**
+ * Emit a typed execution lifecycle event from the service layer (ADR-0002 E3).
+ * The Execution Manager stays pure — it never logs events itself.
+ */
+async function logExecutionEvent(
+  type: string,
+  executionId: string,
+  agentId: string | null,
+  message: string,
+): Promise<void> {
+  const agent = agentId ? getAgent(agentId) : null;
+  await getDevHqAdapters().eventLogger.log({
+    type,
+    entityType: "execution",
+    entityId: executionId,
+    message,
+    actorId: agentId,
+    actorLabel: agent?.name ?? "System",
+  });
+}
+
+/** Record one append-only log evidence entry for an execution attempt outcome. */
+async function recordOutcomeEvidence(
+  execution: Execution,
+  attempt: number,
+  status: AgentExecutionStatus,
+  agentId: string | null,
+): Promise<void> {
+  await getDevHqAdapters().evidenceStore.addEvidence({
+    executionId: execution.id,
+    taskId: execution.taskId,
+    kind: "log",
+    label: `Execution attempt ${attempt}: ${status}`,
+    summary: `Agent execution ${execution.id} attempt ${attempt} reported "${status}".`,
+    createdByAgentId: agentId,
+  });
 }
 
 /** Trigger a durable agent-execution run for a queued, agent-assigned execution. */
@@ -120,6 +160,15 @@ export async function dispatchAgentExecution(
     "Execute the assigned task.";
   const triggerRunId = await triggerRun(decision.execution, instructions);
 
+  await logExecutionEvent(
+    EXECUTION_EVENT_TYPE.assigned,
+    decision.execution.id,
+    decision.agentId,
+    `Execution ${decision.execution.id} assigned to ${
+      getAgent(decision.agentId ?? "")?.name ?? "an agent"
+    } for task ${decision.execution.taskId}.`,
+  );
+
   return {
     assigned: true,
     reason: "assigned",
@@ -133,7 +182,14 @@ export async function dispatchAgentExecution(
 export async function handleExecutionRunning(
   executionId: string,
 ): Promise<Execution> {
-  return runExecution(executionId);
+  const execution = await runExecution(executionId);
+  await logExecutionEvent(
+    EXECUTION_EVENT_TYPE.claimed,
+    execution.id,
+    execution.agentId,
+    `Execution ${execution.id} claimed and running.`,
+  );
+  return execution;
 }
 
 /** Callback: extend the lease for a still-running execution. */
@@ -170,15 +226,44 @@ export async function handleExecutionComplete(
     throw new Error(`Execution not found: ${input.executionId}`);
   }
 
+  // The agent and attempt that actually ran this outcome, captured before release
+  // (which may re-queue the execution onto a freshly selected agent).
+  const attemptAgentId = current.agentId;
+  const attempt = current.attempt ?? 1;
+
   const result = buildAgentResult(current, input.status, input.summary ?? null);
   const execution = await releaseExecution(input.executionId, result);
+
+  // One append-only log evidence entry per execution outcome (ADR-0002 E4).
+  await recordOutcomeEvidence(execution, attempt, input.status, attemptAgentId);
 
   // A requeued execution (queued with an agent still assigned) is the next
   // retry attempt; dispatch it. Exhaustion leaves the execution "failed".
   if (execution.status === "queued" && execution.agentId) {
     await triggerRun(execution, input.instructions);
+    await logExecutionEvent(
+      EXECUTION_EVENT_TYPE.retried,
+      execution.id,
+      attemptAgentId,
+      `Execution ${execution.id} attempt ${attempt} ${input.status}; retrying as attempt ${execution.attempt}.`,
+    );
     return { execution, retried: true };
   }
+
+  const terminalType =
+    execution.status === "succeeded"
+      ? EXECUTION_EVENT_TYPE.succeeded
+      : execution.status === "cancelled"
+        ? EXECUTION_EVENT_TYPE.cancelled
+        : EXECUTION_EVENT_TYPE.exhausted;
+  await logExecutionEvent(
+    terminalType,
+    execution.id,
+    attemptAgentId,
+    `Execution ${execution.id} ${execution.status} after ${attempt} attempt${
+      attempt === 1 ? "" : "s"
+    }.`,
+  );
 
   return { execution, retried: false };
 }

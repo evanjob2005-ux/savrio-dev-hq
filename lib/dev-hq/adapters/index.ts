@@ -1,6 +1,7 @@
 import { createDevAgentProvider } from "@/lib/dev-hq/adapters/dev-agent-provider";
 import { createDevApprovalManager } from "@/lib/dev-hq/adapters/dev-approval-manager";
 import { createDevEventLogger } from "@/lib/dev-hq/adapters/dev-event-logger";
+import { createDevEvidenceStore } from "@/lib/dev-hq/adapters/dev-evidence-store";
 import { createDevExecutionRunner } from "@/lib/dev-hq/adapters/dev-execution-runner";
 import { createDevProjectRepository } from "@/lib/dev-hq/adapters/dev-project-repository";
 import { createDevStateReader } from "@/lib/dev-hq/adapters/dev-state-reader";
@@ -11,6 +12,7 @@ import type {
   AgentProvider,
   ApprovalManager,
   EventLogger,
+  EvidenceStore,
   ExecutionRunner,
   ProjectRepository,
   StateReader,
@@ -29,6 +31,7 @@ export interface DevHqAdapters {
   stateReader: StateReader;
   agentProvider: AgentProvider;
   executionRunner: ExecutionRunner;
+  evidenceStore: EvidenceStore;
 }
 
 let cached: DevHqAdapters | null = null;
@@ -49,6 +52,7 @@ export function getDevHqAdapters(): DevHqAdapters {
       stateReader: createDevStateReader(),
       agentProvider: createDevAgentProvider(),
       executionRunner: createDevExecutionRunner(),
+      evidenceStore: createDevEvidenceStore(),
     };
   }
   return cached;

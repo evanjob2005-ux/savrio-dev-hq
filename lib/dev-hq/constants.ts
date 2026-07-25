@@ -42,6 +42,20 @@ export const MAX_EXECUTION_ATTEMPTS = 3;
  */
 export const EXECUTION_LEASE_TTL_MS = 60_000;
 
+/**
+ * Typed execution lifecycle event names emitted from the service layer
+ * (ADR-0002 E3). No event is emitted per heartbeat. `reclaimed` is reserved for
+ * the Sprint 1E-3 sweeper and is not emitted by Task 1E-1.
+ */
+export const EXECUTION_EVENT_TYPE = {
+  assigned: "execution.assigned",
+  claimed: "execution.claimed",
+  succeeded: "execution.succeeded",
+  retried: "execution.retried",
+  exhausted: "execution.exhausted",
+  cancelled: "execution.cancelled",
+} as const;
+
 /** Base URL for Trigger.dev worker callbacks into the Next.js dev store. */
 export function getDevHqBaseUrl(): string {
   return process.env.DEV_HQ_BASE_URL ?? "http://127.0.0.1:3000";

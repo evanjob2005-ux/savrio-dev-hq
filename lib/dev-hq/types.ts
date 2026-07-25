@@ -4,6 +4,7 @@ import type {
   AgentAssignment,
   Approval,
   Event,
+  Evidence,
   Execution,
   Project,
   Task,
@@ -21,6 +22,7 @@ export interface DevHqState {
   executions: Execution[];
   workflowRuns: WorkflowRunRecord[];
   agents: Agent[];
+  evidence: Evidence[];
   overview: SystemOverviewMetrics;
 }
 
@@ -34,4 +36,5 @@ export interface DevHqStoreData {
   workflowRuns: Map<string, WorkflowRunRecord>;
   agents: Map<string, Agent>;
   agentAssignments: Map<string, AgentAssignment>;
+  evidence: Map<string, Evidence>;
 }

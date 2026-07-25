@@ -10,6 +10,7 @@ import type {
   AgentAssignment,
   Approval,
   Event,
+  Evidence,
   Execution,
   Project,
   Task,
@@ -90,6 +91,7 @@ function createEmptyStore(): DevHqStoreData {
     workflowRuns: new Map(),
     agents: createSeedAgents(),
     agentAssignments: new Map(),
+    evidence: new Map(),
   };
 }
 
@@ -140,6 +142,9 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
   // Preserve registry seed order so the roster renders identically to the
   // placeholder source it is seeded from.
   const agents = [...store.agents.values()];
+  const evidence = [...store.evidence.values()].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
 
   const pendingApprovals = approvals.filter((a) => a.status === "pending").length;
   const activeTasks = tasks.filter(
@@ -156,6 +161,7 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
     executions,
     workflowRuns,
     agents,
+    evidence,
     overview: {
       activeProjects: projects.filter((p) => p.status === "active").length,
       activeTasks,
@@ -219,4 +225,13 @@ export function saveAssignment(assignment: AgentAssignment): AgentAssignment {
 
 export function getAssignment(assignmentId: string): AgentAssignment | null {
   return getDevHqStore().agentAssignments.get(assignmentId) ?? null;
+}
+
+export function saveEvidence(evidence: Evidence): Evidence {
+  getDevHqStore().evidence.set(evidence.id, evidence);
+  return evidence;
+}
+
+export function getEvidence(evidenceId: string): Evidence | null {
+  return getDevHqStore().evidence.get(evidenceId) ?? null;
 }

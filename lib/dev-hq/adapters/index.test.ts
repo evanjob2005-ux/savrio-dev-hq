@@ -9,10 +9,11 @@ describe("dev HQ adapters composition root", () => {
     resetDevHqAdapters();
   });
 
-  it("exposes the agent provider and execution runner ports", () => {
+  it("exposes the agent provider, execution runner, and evidence store ports", () => {
     const adapters = getDevHqAdapters();
     expect(adapters.agentProvider).toBeDefined();
     expect(adapters.executionRunner).toBeDefined();
+    expect(adapters.evidenceStore).toBeDefined();
   });
 
   it("serves the seeded roster through the agent provider", async () => {
