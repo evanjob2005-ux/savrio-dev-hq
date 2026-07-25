@@ -18,6 +18,7 @@ import { ApprovalPanel } from "@/components/workflow/ApprovalPanel";
 import { ValidationResults } from "@/components/workflow/ValidationResults";
 import { ActivityFeed } from "@/components/workflow/ActivityFeed";
 import { MissionControlOverview } from "@/components/dashboard/MissionControlOverview";
+import { DispatchAgentPanel } from "@/components/dashboard/DispatchAgentPanel";
 
 export function MissionControl() {
   const engine = useWorkflowEngine();
@@ -82,9 +83,15 @@ export function MissionControl() {
         <div className="my-5 flex items-center gap-3">
           <div className="h-px flex-1 bg-[var(--border)]" aria-hidden />
           <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-faint)]">
-            Workflow Simulation
+            Simulation Lab
           </span>
           <div className="h-px flex-1 bg-[var(--border)]" aria-hidden />
+        </div>
+
+        <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-4">
+            <DispatchAgentPanel />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">

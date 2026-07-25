@@ -192,7 +192,7 @@ export function MissionControlOverview() {
         <div className="xl:col-span-4">
           <AgentRosterPanel
             participants={model.participants}
-            declaredRoster={MISSION_CONTROL_PLACEHOLDERS.agents}
+            roster={state.agents}
           />
         </div>
         <div className="lg:col-span-2 xl:col-span-4">

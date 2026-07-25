@@ -1,12 +1,12 @@
-// Who is actually acting in the system, and who is merely declared.
+// Who is actually acting in the system, and who is on the roster.
 //
 // The top section is derived from real records: any id that appears as a project
 // owner, task assignee, execution runner, approval requester, decision maker, or
-// event actor. The bottom section is the declared roster placeholder — there is
-// no agent registry in the backend yet.
+// event actor. The bottom section is the live Agent Registry from Dev HQ state;
+// availability reflects claims and releases by the Execution Manager.
 
 import { Panel, Avatar, StatusDot } from "@/components/ui/primitives";
-import { DataSourceBadge, NotImplementedNote } from "@/components/mission-control/DataSourceBadge";
+import { DataSourceBadge } from "@/components/mission-control/DataSourceBadge";
 import { EmptyState } from "@/components/mission-control/primitives";
 import { shortStampFromIso } from "@/lib/format";
 import { AVAILABILITY_STATUS, actorAccent, initialsFor } from "@/lib/mission-control/status";
@@ -15,15 +15,15 @@ import type { Agent } from "@/types/domain";
 
 export function AgentRosterPanel({
   participants,
-  declaredRoster,
+  roster,
 }: {
   participants: Participant[];
-  declaredRoster: Agent[];
+  roster: Agent[];
 }) {
   return (
     <Panel
       title="Agents & Participants"
-      subtitle={`${participants.length} recorded in state · ${declaredRoster.length} declared`}
+      subtitle={`${participants.length} recorded in state · ${roster.length} in registry`}
       right={<DataSourceBadge source="derived" />}
     >
       <div className="flex flex-col gap-3">
@@ -87,12 +87,12 @@ export function AgentRosterPanel({
         <div className="border-t border-[var(--border)] pt-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--text-faint)]">
-              Declared roster
+              Agent registry
             </h3>
-            <DataSourceBadge source="preview" />
+            <DataSourceBadge source="live" />
           </div>
           <ul className="mt-1.5 flex flex-col gap-1" role="list">
-            {declaredRoster.map((agent) => {
+            {roster.map((agent) => {
               const token = AVAILABILITY_STATUS[agent.availability];
               return (
                 <li key={agent.id} className="flex items-center gap-2.5 px-1 py-1">
@@ -113,13 +113,10 @@ export function AgentRosterPanel({
               );
             })}
           </ul>
-          <div className="mt-2">
-            <NotImplementedNote>
-              Availability shown for the declared roster is static placeholder data. There is no
-              agent registry or health check in the backend, so these values are not live and
-              must not be used to judge capacity.
-            </NotImplementedNote>
-          </div>
+          <p className="mt-2 px-1 text-[10.5px] leading-relaxed text-[var(--text-faint)]">
+            Live from the Agent Registry via Dev HQ state. Availability reflects claims and
+            releases by the Execution Manager (one execution per agent in this phase).
+          </p>
         </div>
       </div>
     </Panel>
