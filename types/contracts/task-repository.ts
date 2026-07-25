@@ -1,4 +1,4 @@
-import type { Task, TaskDependency } from "@/types/domain";
+import type { IsoTimestamp, Task, TaskDependency } from "@/types/domain";
 
 export interface TaskFilter {
   projectId?: string;
@@ -22,6 +22,12 @@ export interface UpdateTaskInput {
   priority?: Task["priority"];
   assigneeAgentId?: string | null;
   dueAt?: string | null;
+  /**
+   * Stamped as updatedAt rather than the time of the call, so a task updated
+   * as part of a larger operation shares that operation's timestamp. Not
+   * persisted as a field of its own.
+   */
+  occurredAt?: IsoTimestamp;
 }
 
 export interface TaskRepository {
