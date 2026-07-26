@@ -44,3 +44,9 @@ export type {
   EventQuery,
   LogEventInput,
 } from "./event-logger";
+export type {
+  CreateEscalationInput,
+  EscalationStore,
+  ReserveRevisionExecutionInput,
+  ResolveEscalationInput,
+} from "./escalation-store";

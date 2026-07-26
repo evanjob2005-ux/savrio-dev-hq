@@ -8,6 +8,7 @@ vi.mock("@trigger.dev/sdk", () => ({
 
 import {
   dispatchAgentExecution,
+  ensureDispatchForAssignment,
   handleExecutionComplete,
   handleExecutionHeartbeat,
   handleExecutionReclaim,
@@ -18,6 +19,8 @@ import {
   getAgent,
   getAssignment,
   resetDevHqStore,
+  saveAssignment,
+  saveExecution,
   saveTask,
 } from "@/lib/dev-hq/store";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
@@ -77,12 +80,16 @@ describe("agent execution service", () => {
     expect(result.executionId).toBeTruthy();
     expect(result.triggerRunId).toBe("run-1");
     expect(triggerMock).toHaveBeenCalledTimes(1);
-    expect(triggerMock).toHaveBeenCalledWith("agent-execution", {
-      executionId: result.executionId,
-      agentId: "agent-supervisor",
-      assignmentId: expect.any(String),
-      instructions: "do the work",
-    });
+    expect(triggerMock).toHaveBeenCalledWith(
+      "agent-execution",
+      {
+        executionId: result.executionId,
+        agentId: "agent-supervisor",
+        assignmentId: expect.any(String),
+        instructions: "do the work",
+      },
+      { idempotencyKey: expect.any(String) },
+    );
   });
 
   it("does not dispatch when no eligible agent is available", async () => {
@@ -300,7 +307,10 @@ describe("agent execution service", () => {
 
       const evidence =
         await getDevHqAdapters().evidenceStore.listForExecution(executionId);
-      expect(evidence).toHaveLength(3); // one per attempt outcome
+      const outcomeEvidence = evidence.filter((e) =>
+        e.label.startsWith("Execution attempt"),
+      );
+      expect(outcomeEvidence).toHaveLength(3); // one per attempt outcome
     });
   });
 
@@ -525,6 +535,205 @@ describe("agent execution service", () => {
         (e) => e.type === EXECUTION_EVENT_TYPE.reclaimed,
       );
       expect(reclaimedEvents).toHaveLength(1);
+    });
+  });
+
+  describe("dispatch race safety", () => {
+    it("does not roll back a run the worker started before tasks.trigger() returned", async () => {
+      const task = seedTask();
+
+      // Model the race: the worker delivers its running callback (claim + lease)
+      // while tasks.trigger() is still in flight, before the dispatch path records
+      // the run id. The dispatch must stamp only triggerRunId onto the current
+      // records, never write back its stale pre-await snapshots.
+      let runningApplied = false;
+      triggerMock.mockReset();
+      triggerMock.mockImplementationOnce(async (_taskId, payload) => {
+        const p = payload as { executionId: string; assignmentId: string };
+        await handleExecutionRunning(p.executionId, p.assignmentId);
+        runningApplied = true;
+        return { id: "run-race-1" };
+      });
+
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do work",
+      });
+      const executionId = dispatched.executionId!;
+      expect(runningApplied).toBe(true);
+
+      const execution = (await getExecution(executionId))!;
+      const assignment = getAssignment(execution.assignmentId!)!;
+
+      // Never rolled back to queued/assigned by the post-await writeback.
+      expect(execution.status).toBe("running");
+      expect(assignment.status).toBe("claimed");
+      // Claim and lease information from the running callback are preserved.
+      expect(execution.startedAt).toBeTruthy();
+      expect(assignment.claimedAt).toBeTruthy();
+      expect(assignment.leaseExpiresAt).toBeTruthy();
+      expect(getAgent("agent-supervisor")?.availability).toBe("busy");
+      // triggerRunId is still recorded correctly on both records.
+      expect(execution.triggerRunId).toBe("run-race-1");
+      expect(assignment.triggerRunId).toBe("run-race-1");
+    });
+  });
+
+  describe("queued-dispatch reconciliation", () => {
+    it("redispatches a queued execution whose dispatch failed, reusing the assignment", async () => {
+      const task = seedTask();
+      // Initial dispatch succeeds (call 1); the retry dispatch (call 2) fails; any
+      // later dispatch (reconciliation) succeeds again.
+      let n = 0;
+      triggerMock.mockReset();
+      triggerMock.mockImplementation(async () => {
+        n += 1;
+        if (n === 2) throw new Error("injected trigger failure");
+        return { id: `run-${n}` };
+      });
+
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+      });
+      const executionId = dispatched.executionId!;
+      const asgn1 = (await getExecution(executionId))!.assignmentId!;
+      expect(getAssignment(asgn1)?.triggerRunId).toBe("run-1"); // dispatched
+
+      // Attempt 1 fails and re-queues attempt 2; the attempt-2 dispatch throws.
+      await handleExecutionRunning(executionId, asgn1);
+      await expect(
+        handleExecutionComplete({
+          executionId,
+          assignmentId: asgn1,
+          status: "failed",
+          instructions: "fail",
+        }),
+      ).rejects.toThrow("injected trigger failure");
+
+      // The execution is queued on attempt 2 with a current, undispatched assignment.
+      const queued = (await getExecution(executionId))!;
+      const asgn2 = queued.assignmentId!;
+      expect(queued.status).toBe("queued");
+      expect(queued.attempt).toBe(2);
+      expect(asgn2).not.toBe(asgn1);
+      expect(getAssignment(asgn2)?.triggerRunId).toBeNull(); // dispatch was lost
+      // The execution's Trigger run reference was cleared on requeue — it must not
+      // point at the prior attempt's run while undispatched.
+      expect(queued.triggerRunId).toBeNull();
+      // The retry was recorded before the failed dispatch.
+      const retriedBefore = (
+        await getDevHqAdapters().eventLogger.listRecent({
+          entityType: "execution",
+          entityId: executionId,
+          limit: 100,
+        })
+      ).filter((e) => e.type === EXECUTION_EVENT_TYPE.retried);
+      expect(retriedBefore).toHaveLength(1);
+
+      const triggerCallsBefore = triggerMock.mock.calls.length;
+
+      // A reconciliation sweep redispatches the same assignment.
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      const afterReconcile = (await getExecution(executionId))!;
+      expect(afterReconcile.attempt).toBe(2); // no additional attempt consumed
+      expect(afterReconcile.assignmentId).toBe(asgn2); // same assignment
+      expect(getAssignment(asgn2)?.triggerRunId).toBeTruthy(); // now dispatched
+      expect(afterReconcile.triggerRunId).toBeTruthy(); // execution ref set on dispatch
+      expect(triggerMock.mock.calls.length).toBe(triggerCallsBefore + 1); // one logical dispatch
+      // The retry event was not duplicated by reconciliation.
+      expect(
+        (
+          await getDevHqAdapters().eventLogger.listRecent({
+            entityType: "execution",
+            entityId: executionId,
+            limit: 100,
+          })
+        ).filter((e) => e.type === EXECUTION_EVENT_TYPE.retried),
+      ).toHaveLength(1);
+
+      // Repeated reconciliation after a successful dispatch is a no-op.
+      const callsAfter = triggerMock.mock.calls.length;
+      await handleExecutionReclaim(FAR_FUTURE);
+      expect(triggerMock.mock.calls.length).toBe(callsAfter);
+    });
+
+    it("never dispatches a stale or replaced assignment", async () => {
+      seedTask({ id: "task-stale" });
+      // Execution's current assignment is asgn-current; asgn-stale is a released,
+      // superseded assignment for the same execution.
+      saveExecution({
+        id: "exec-stale",
+        taskId: "task-stale",
+        workflowId: null,
+        agentId: "agent-supervisor",
+        status: "queued",
+        triggerRunId: null,
+        startedAt: null,
+        completedAt: null,
+        createdAt: TS,
+        assignmentId: "asgn-current",
+        attempt: 2,
+      });
+      saveAssignment({
+        id: "asgn-stale",
+        executionId: "exec-stale",
+        agentId: "agent-supervisor",
+        taskId: "task-stale",
+        status: "released",
+        attempt: 1,
+        requiredCapabilities: [],
+        triggerRunId: null,
+        leaseExpiresAt: null,
+        lastHeartbeatAt: null,
+        claimedAt: null,
+        releasedAt: TS,
+        createdAt: TS,
+      });
+      triggerMock.mockClear();
+
+      expect(await ensureDispatchForAssignment("asgn-stale", "x")).toBeNull();
+      expect(triggerMock).not.toHaveBeenCalled();
+      expect(getAssignment("asgn-stale")?.triggerRunId).toBeNull();
+    });
+
+    it("never redispatches a terminal execution", async () => {
+      seedTask({ id: "task-terminal" });
+      saveExecution({
+        id: "exec-terminal",
+        taskId: "task-terminal",
+        workflowId: null,
+        agentId: "agent-supervisor",
+        status: "failed",
+        triggerRunId: null,
+        startedAt: null,
+        completedAt: TS,
+        createdAt: TS,
+        assignmentId: "asgn-terminal",
+        attempt: 3,
+      });
+      saveAssignment({
+        id: "asgn-terminal",
+        executionId: "exec-terminal",
+        agentId: "agent-supervisor",
+        taskId: "task-terminal",
+        status: "released",
+        attempt: 3,
+        requiredCapabilities: [],
+        triggerRunId: null,
+        leaseExpiresAt: null,
+        lastHeartbeatAt: null,
+        claimedAt: null,
+        releasedAt: TS,
+        createdAt: TS,
+      });
+      triggerMock.mockClear();
+
+      expect(await ensureDispatchForAssignment("asgn-terminal", "x")).toBeNull();
+      expect(triggerMock).not.toHaveBeenCalled();
     });
   });
 });

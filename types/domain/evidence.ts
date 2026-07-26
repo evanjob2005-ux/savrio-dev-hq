@@ -9,7 +9,8 @@ export type EvidenceKind =
 
 export interface Evidence {
   id: EntityId;
-  executionId: EntityId;
+  /** The execution this evidence records, or null when it is not tied to one. */
+  executionId: EntityId | null;
   taskId: EntityId;
   kind: EvidenceKind;
   label: string;

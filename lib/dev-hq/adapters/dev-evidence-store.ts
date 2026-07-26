@@ -19,7 +19,7 @@ export class DevEvidenceStore implements EvidenceStore {
   async addEvidence(input: CreateEvidenceInput): Promise<Evidence> {
     const evidence: Evidence = {
       id: nextId("evd"),
-      executionId: input.executionId,
+      executionId: input.executionId ?? null,
       taskId: input.taskId,
       kind: input.kind,
       label: input.label,

@@ -27,6 +27,17 @@ describe("DevEvidenceStore", () => {
     expect(await store.getEvidence("evd-missing")).toBeNull();
   });
 
+  it("accepts evidence with no execution reference", async () => {
+    const evidence = await store.addEvidence({
+      taskId: "task-1",
+      kind: "log",
+      label: "System note",
+      summary: "Not tied to an execution.",
+    });
+    expect(evidence.executionId).toBeNull();
+    expect(await store.listForTask("task-1")).toHaveLength(1);
+  });
+
   it("preserves supplied uri and agent id", async () => {
     const evidence = await store.addEvidence({
       executionId: "exec-1",

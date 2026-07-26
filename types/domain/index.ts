@@ -35,6 +35,12 @@ export type {
 } from "./agent-assignment";
 export type { Evidence, EvidenceKind } from "./evidence";
 export type { Approval } from "./approval";
+export type {
+  Escalation,
+  EscalationOrigin,
+  EscalationResolution,
+  EscalationStatus,
+} from "./escalation";
 export type { Event, EventEntityType } from "./event";
 export type {
   ConnectedService,

@@ -30,6 +30,13 @@ export interface AgentAssignment {
    * retry can re-select an eligible agent without the original policy in hand.
    */
   requiredCapabilities: string[];
+  /**
+   * The Trigger.dev run id dispatched for this assignment, or null when it has not
+   * yet been dispatched. This is the dispatch idempotency boundary (Task 1E-5): a
+   * dispatch is confirmed exactly once per assignment, so a failed dispatch can be
+   * repaired without creating a new assignment, attempt, or logical run.
+   */
+  triggerRunId: string | null;
   /** When the current lease expires; null before claim. */
   leaseExpiresAt: IsoTimestamp | null;
   /** Last heartbeat received from the running agent; null before first beat. */

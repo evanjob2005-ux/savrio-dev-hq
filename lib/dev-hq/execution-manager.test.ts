@@ -4,6 +4,8 @@ import {
   assignExecution,
   cancelExecution,
   claimExecution,
+  ensureAssignment,
+  ensureExecution,
   getExecution,
   heartbeat,
   queueExecution,
@@ -14,7 +16,9 @@ import {
 import {
   getAgent,
   getAssignment,
+  getDevHqStore,
   resetDevHqStore,
+  saveAssignment,
   saveTask,
 } from "@/lib/dev-hq/store";
 import type { AgentExecutionStatus, AgentResult, Task } from "@/types/domain";
@@ -336,5 +340,181 @@ describe("execution manager", () => {
 
   it("returns null for a missing execution", async () => {
     expect(await getExecution("exec-missing")).toBeNull();
+  });
+
+  // --- caller-supplied-id creation primitives (Task 1E-5) ---
+  describe("ensureExecution / ensureAssignment", () => {
+    const CANONICAL = "exec-canonical-1";
+
+    it("creates a queued execution at the supplied id, unassigned at attempt 1", async () => {
+      const task = seedTask();
+      const execution = await ensureExecution({
+        executionId: CANONICAL,
+        taskId: task.id,
+      });
+
+      expect(execution.id).toBe(CANONICAL);
+      expect(execution.status).toBe("queued");
+      expect(execution.attempt).toBe(1);
+      expect(execution.agentId).toBeNull();
+      expect(execution.assignmentId).toBeNull();
+      expect(execution.workflowId).toBe(task.workflowId);
+    });
+
+    it("is a keyed get on replay: never a second execution", async () => {
+      const task = seedTask();
+      const first = await ensureExecution({
+        executionId: CANONICAL,
+        taskId: task.id,
+      });
+      // Assign it, then replay creation — the existing record must come back
+      // untouched rather than being recreated or reset.
+      await ensureAssignment(CANONICAL, { requiredCapabilities: ["validation"] });
+      const replayed = await ensureExecution({
+        executionId: CANONICAL,
+        taskId: task.id,
+      });
+
+      expect(replayed.id).toBe(first.id);
+      expect(replayed.assignmentId).toBeTruthy(); // not reset to the fresh shape
+      expect(getDevHqStore().executions.size).toBe(1);
+    });
+
+    it("gives concurrent callers one execution", async () => {
+      const task = seedTask();
+      const results = await Promise.all(
+        [1, 2, 3, 4].map(() =>
+          ensureExecution({ executionId: CANONICAL, taskId: task.id }),
+        ),
+      );
+      expect(new Set(results.map((e) => e.id)).size).toBe(1);
+      expect(getDevHqStore().executions.size).toBe(1);
+    });
+
+    it("refuses to reuse an execution belonging to a different task", async () => {
+      const task = seedTask();
+      seedTask({ id: "task-other" });
+      await ensureExecution({ executionId: CANONICAL, taskId: task.id });
+
+      // Silently returning the other task's execution would go on to assign an
+      // agent and dispatch it against the wrong task.
+      await expect(
+        ensureExecution({ executionId: CANONICAL, taskId: "task-other" }),
+      ).rejects.toThrow(
+        `Execution ${CANONICAL} belongs to task ${task.id}, not task-other`,
+      );
+      expect((await getExecution(CANONICAL))?.taskId).toBe(task.id); // untouched
+      expect(getDevHqStore().executions.size).toBe(1);
+    });
+
+    it("throws creating at an id whose task is missing", async () => {
+      await expect(
+        ensureExecution({ executionId: CANONICAL, taskId: "task-missing" }),
+      ).rejects.toThrow("Task not found: task-missing");
+      expect(getDevHqStore().executions.size).toBe(0); // nothing partially created
+    });
+
+    it("assigns an agent once and reuses the assignment on replay", async () => {
+      const task = seedTask();
+      await ensureExecution({ executionId: CANONICAL, taskId: task.id });
+
+      const first = await ensureAssignment(CANONICAL, {
+        requiredCapabilities: ["validation"],
+      });
+      expect(first.created).toBe(true);
+      expect(first.decision.assigned).toBe(true);
+      expect(first.decision.agentId).toBe("agent-supervisor");
+      expect(first.decision.execution?.assignmentId).toBe(
+        first.decision.assignment?.id,
+      );
+      // Attempt 1 preserved: a revision gets a full retry budget.
+      expect(first.decision.execution?.attempt).toBe(1);
+      // Not reserved until claim, matching assignExecution.
+      expect(getAgent("agent-supervisor")?.availability).toBe("available");
+
+      const second = await ensureAssignment(CANONICAL, {
+        requiredCapabilities: ["validation"],
+      });
+      expect(second.created).toBe(false);
+      expect(second.decision.assignment?.id).toBe(first.decision.assignment?.id);
+      expect(getDevHqStore().agentAssignments.size).toBe(1);
+    });
+
+    it("gives concurrent callers one assignment", async () => {
+      const task = seedTask();
+      await ensureExecution({ executionId: CANONICAL, taskId: task.id });
+      const results = await Promise.all(
+        [1, 2, 3, 4].map(() =>
+          ensureAssignment(CANONICAL, { requiredCapabilities: ["validation"] }),
+        ),
+      );
+      expect(results.filter((r) => r.created)).toHaveLength(1);
+      expect(getDevHqStore().agentAssignments.size).toBe(1);
+    });
+
+    it("leaves the execution untouched when no agent is available", async () => {
+      const task = seedTask();
+      await ensureExecution({ executionId: CANONICAL, taskId: task.id });
+
+      const result = await ensureAssignment(CANONICAL, {
+        requiredCapabilities: ["qa"], // eligible agent exists but is only "waiting"
+      });
+      expect(result.created).toBe(false);
+      expect(result.decision.assigned).toBe(false);
+      expect(result.decision.reason).toBe("no_agent_available");
+
+      // Nothing to unwind — a later call can still assign it.
+      const execution = (await getExecution(CANONICAL))!;
+      expect(execution.status).toBe("queued");
+      expect(execution.agentId).toBeNull();
+      expect(execution.assignmentId).toBeNull();
+      expect(getDevHqStore().agentAssignments.size).toBe(0);
+    });
+
+    it("refuses to assign an execution that has left the queue", async () => {
+      const task = seedTask();
+      await ensureExecution({ executionId: CANONICAL, taskId: task.id });
+      await ensureAssignment(CANONICAL, { requiredCapabilities: ["validation"] });
+      await runExecution(CANONICAL); // now running
+
+      const result = await ensureAssignment(CANONICAL);
+      expect(result.created).toBe(false);
+      expect(result.decision.assigned).toBe(false);
+      expect(result.decision.reason).toBe("execution_not_queued");
+      expect(getDevHqStore().agentAssignments.size).toBe(1);
+    });
+
+    it("replaces a released assignment on a still-queued execution", async () => {
+      const task = seedTask();
+      await ensureExecution({ executionId: CANONICAL, taskId: task.id });
+      const first = await ensureAssignment(CANONICAL, {
+        requiredCapabilities: ["validation"],
+      });
+      // Simulate the prior assignment being released while the execution stayed
+      // queued (e.g. a reclaim); a fresh lease must be issued.
+      saveAssignment({
+        ...first.decision.assignment!,
+        status: "released",
+        releasedAt: TS,
+        leaseExpiresAt: null,
+      });
+
+      const second = await ensureAssignment(CANONICAL, {
+        requiredCapabilities: ["validation"],
+      });
+      expect(second.created).toBe(true);
+      expect(second.decision.assignment?.id).not.toBe(
+        first.decision.assignment?.id,
+      );
+      expect((await getExecution(CANONICAL))?.assignmentId).toBe(
+        second.decision.assignment?.id,
+      );
+    });
+
+    it("throws for a missing execution", async () => {
+      await expect(ensureAssignment("exec-missing")).rejects.toThrow(
+        "Execution not found: exec-missing",
+      );
+    });
   });
 });

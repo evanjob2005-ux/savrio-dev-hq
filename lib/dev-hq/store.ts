@@ -9,6 +9,7 @@ import type {
   Agent,
   AgentAssignment,
   Approval,
+  Escalation,
   Event,
   Evidence,
   Execution,
@@ -92,6 +93,7 @@ function createEmptyStore(): DevHqStoreData {
     agents: createSeedAgents(),
     agentAssignments: new Map(),
     evidence: new Map(),
+    escalations: new Map(),
   };
 }
 
@@ -145,6 +147,9 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
   const evidence = [...store.evidence.values()].sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt),
   );
+  const escalations = [...store.escalations.values()].sort((a, b) =>
+    b.raisedAt.localeCompare(a.raisedAt),
+  );
 
   const pendingApprovals = approvals.filter((a) => a.status === "pending").length;
   const activeTasks = tasks.filter(
@@ -162,6 +167,7 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
     workflowRuns,
     agents,
     evidence,
+    escalations,
     overview: {
       activeProjects: projects.filter((p) => p.status === "active").length,
       activeTasks,
@@ -234,4 +240,13 @@ export function saveEvidence(evidence: Evidence): Evidence {
 
 export function getEvidence(evidenceId: string): Evidence | null {
   return getDevHqStore().evidence.get(evidenceId) ?? null;
+}
+
+export function saveEscalation(escalation: Escalation): Escalation {
+  getDevHqStore().escalations.set(escalation.id, escalation);
+  return escalation;
+}
+
+export function getEscalation(escalationId: string): Escalation | null {
+  return getDevHqStore().escalations.get(escalationId) ?? null;
 }

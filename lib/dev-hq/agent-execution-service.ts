@@ -14,9 +14,19 @@ import {
   releaseExecution,
   runExecution,
 } from "@/lib/dev-hq/execution-manager";
-import { getAgent, getDevHqStore, saveExecution } from "@/lib/dev-hq/store";
+import {
+  getAgent,
+  getAssignment,
+  getDevHqStore,
+  saveAssignment,
+  saveExecution,
+} from "@/lib/dev-hq/store";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
-import { EXECUTION_EVENT_TYPE } from "@/lib/dev-hq/constants";
+import { raiseRetryExhaustionEscalation } from "@/lib/dev-hq/escalation-service";
+import {
+  EXECUTION_EVENT_TYPE,
+  MAX_EXECUTION_ATTEMPTS,
+} from "@/lib/dev-hq/constants";
 import { nowIso } from "@/lib/dev-hq/id";
 
 export const AGENT_EXECUTION_TASK_ID = "agent-execution";
@@ -84,42 +94,172 @@ async function logExecutionEvent(
   });
 }
 
-/** Record one append-only log evidence entry for an execution attempt outcome. */
-async function recordOutcomeEvidence(
+/**
+ * Ensure exactly one append-only log evidence entry for an execution attempt
+ * outcome, deduped by a stable per-attempt uri so a reconciling retry does not
+ * duplicate it.
+ */
+async function ensureOutcomeEvidence(
   execution: Execution,
   attempt: number,
   status: AgentExecutionStatus,
   agentId: string | null,
 ): Promise<void> {
-  await getDevHqAdapters().evidenceStore.addEvidence({
+  const { evidenceStore } = getDevHqAdapters();
+  const ref = `execution:${execution.id}:attempt:${attempt}:outcome`;
+  const existing = await evidenceStore.listForExecution(execution.id);
+  if (existing.some((evidence) => evidence.uri === ref)) {
+    return;
+  }
+  await evidenceStore.addEvidence({
     executionId: execution.id,
     taskId: execution.taskId,
     kind: "log",
     label: `Execution attempt ${attempt}: ${status}`,
     summary: `Agent execution ${execution.id} attempt ${attempt} reported "${status}".`,
+    uri: ref,
     createdByAgentId: agentId,
   });
 }
 
-/** Trigger a durable agent-execution run for a queued, agent-assigned execution. */
-async function triggerRun(
+/**
+ * Ensure exactly one terminal lifecycle event for an execution, deduped by type
+ * (an execution terminates once). Safe to re-run during reconciliation.
+ */
+async function ensureTerminalEvent(
   execution: Execution,
+  type: string,
+  message: string,
+  agentId: string | null,
+): Promise<void> {
+  const recent = await getDevHqAdapters().eventLogger.listRecent({
+    entityType: "execution",
+    entityId: execution.id,
+    limit: 200,
+  });
+  if (recent.some((event) => event.type === type)) {
+    return;
+  }
+  await logExecutionEvent(type, execution.id, agentId, message);
+}
+
+/**
+ * Idempotent terminal finalization for a completed execution: emit the terminal
+ * event once, and — for a retry-exhausted (failed) execution — raise/reconcile the
+ * founder escalation. Re-running this reconciles a finalization that was
+ * interrupted after the terminal transition (agent/assignment release already
+ * happened atomically inside releaseExecution before the terminal status was set).
+ */
+async function finalizeTerminalExecution(
+  execution: Execution,
+  attempt: number,
+  agentId: string | null,
+): Promise<void> {
+  const type =
+    execution.status === "succeeded"
+      ? EXECUTION_EVENT_TYPE.succeeded
+      : execution.status === "cancelled"
+        ? EXECUTION_EVENT_TYPE.cancelled
+        : EXECUTION_EVENT_TYPE.exhausted;
+  await ensureTerminalEvent(
+    execution,
+    type,
+    `Execution ${execution.id} ${execution.status} after ${attempt} attempt${
+      attempt === 1 ? "" : "s"
+    }.`,
+    agentId,
+  );
+  if (execution.status === "failed") {
+    await raiseRetryExhaustionEscalation(execution);
+  }
+}
+
+/**
+ * Idempotently dispatch the durable agent-execution run for a specific assignment
+ * (Task 1E-5). The **assignment is the dispatch idempotency boundary**: a confirmed
+ * dispatch is recorded once on `assignment.triggerRunId`, and Trigger.dev's
+ * idempotency key (the assignment id) collapses concurrent triggers to a single
+ * logical run. Before dispatching it re-reads authoritative state and refuses a
+ * stale, replaced, released, non-current, or non-queued assignment. A failed
+ * dispatch leaves `triggerRunId` unset so a later reconciliation retries the *same*
+ * assignment — never creating a new assignment, attempt, or logical run. Returns
+ * the run id (existing or new), or null when the assignment is not dispatchable.
+ */
+export async function ensureDispatchForAssignment(
+  assignmentId: string,
   instructions: string,
-): Promise<string> {
-  if (!execution.agentId) {
-    throw new Error(`Execution has no agent to dispatch: ${execution.id}`);
+): Promise<string | null> {
+  const assignment = getAssignment(assignmentId);
+  if (!assignment) return null;
+  // Already dispatched for this assignment — idempotent no-op.
+  if (assignment.triggerRunId) return assignment.triggerRunId;
+
+  // Re-read authoritative execution state and verify the assignment is current.
+  const execution =
+    getDevHqStore().executions.get(assignment.executionId) ?? null;
+  if (!execution) return null;
+  if (execution.status !== "queued") return null; // non-terminal, still queued
+  if (execution.assignmentId !== assignmentId) return null; // current, not replaced
+  if (assignment.status === "released") return null; // not released
+  if (!execution.agentId || execution.agentId !== assignment.agentId) {
+    return null; // assignment belongs to this execution's current agent
   }
-  if (!execution.assignmentId) {
-    throw new Error(`Execution has no assignment to dispatch: ${execution.id}`);
+
+  const handle = await tasks.trigger(
+    AGENT_EXECUTION_TASK_ID,
+    {
+      executionId: execution.id,
+      agentId: assignment.agentId,
+      assignmentId,
+      instructions,
+    } satisfies AgentExecutionTaskPayload,
+    { idempotencyKey: assignmentId },
+  );
+
+  // Record the dispatch (the idempotency boundary) on the *current* records, not
+  // the pre-await snapshots. While tasks.trigger() was in flight the worker may
+  // have already delivered its running callback and transitioned the assignment
+  // to claimed and the execution to running (with a claim + lease). Re-read both
+  // and stamp only triggerRunId, so a fast worker's newer lifecycle state is
+  // never rolled back to assigned/queued and its claim/lease is never cleared.
+  const currentAssignment = getAssignment(assignmentId);
+  if (currentAssignment) {
+    saveAssignment({ ...currentAssignment, triggerRunId: handle.id });
   }
-  const handle = await tasks.trigger(AGENT_EXECUTION_TASK_ID, {
-    executionId: execution.id,
-    agentId: execution.agentId,
-    assignmentId: execution.assignmentId,
-    instructions,
-  } satisfies AgentExecutionTaskPayload);
-  saveExecution({ ...execution, triggerRunId: handle.id });
+  const currentExecution =
+    getDevHqStore().executions.get(assignment.executionId) ?? null;
+  // Only stamp the execution while this assignment is still its current attempt;
+  // if it has since been superseded (reclaim/retry created a new assignment), the
+  // run id belongs to the old attempt's assignment record only.
+  if (currentExecution && currentExecution.assignmentId === assignmentId) {
+    saveExecution({ ...currentExecution, triggerRunId: handle.id });
+  }
   return handle.id;
+}
+
+/**
+ * Queued-dispatch reconciliation (Task 1E-5): re-dispatch any queued agent
+ * execution whose current assignment was never dispatched (e.g., a triggerRun that
+ * failed after a requeue). Uses the assignment-keyed idempotent dispatch, so no new
+ * assignment/attempt is created and no additional retry is consumed. Distinct from
+ * lease reclaim (running executions) and escalation reconciliation (terminal
+ * failures).
+ */
+async function reconcileQueuedDispatches(): Promise<void> {
+  for (const execution of [...getDevHqStore().executions.values()]) {
+    if (execution.status !== "queued") continue;
+    if (!execution.agentId || !execution.assignmentId) continue;
+    const attempt = execution.attempt ?? 0;
+    // An authorized attempt is within the retry budget.
+    if (attempt < 1 || attempt > MAX_EXECUTION_ATTEMPTS) continue;
+    const assignment = getAssignment(execution.assignmentId);
+    if (!assignment || assignment.status === "released") continue;
+    if (assignment.triggerRunId) continue; // already dispatched
+    await ensureDispatchForAssignment(
+      execution.assignmentId,
+      recoveryInstructions(execution),
+    );
+  }
 }
 
 export interface DispatchAgentExecutionInput {
@@ -165,7 +305,10 @@ export async function dispatchAgentExecution(
   const instructions =
     (input.instructions ?? task.description ?? "").trim() ||
     "Execute the assigned task.";
-  const triggerRunId = await triggerRun(decision.execution, instructions);
+  const triggerRunId = await ensureDispatchForAssignment(
+    decision.execution.assignmentId!,
+    instructions,
+  );
 
   await logExecutionEvent(
     EXECUTION_EVENT_TYPE.assigned,
@@ -254,57 +397,55 @@ export async function handleExecutionComplete(
     throw new Error(`Execution not found: ${input.executionId}`);
   }
 
-  // Idempotency (Task 1E-2): ignore a replayed or stale callback without
-  // re-recording evidence, re-emitting events, or re-dispatching. A callback is
-  // stale when it names an assignment a later attempt has superseded; a replay
-  // lands when the current attempt is no longer running.
-  if (
-    (input.assignmentId && current.assignmentId !== input.assignmentId) ||
-    current.status !== "running"
-  ) {
+  // Stale callback (Task 1E-2): names an assignment a later attempt superseded.
+  // No-op — the old attempt's callback must not affect the current one.
+  if (input.assignmentId && current.assignmentId !== input.assignmentId) {
     return { execution: current, retried: false };
   }
 
-  // The agent and attempt that actually ran this outcome, captured before release
-  // (which may re-queue the execution onto a freshly selected agent).
-  const attemptAgentId = current.agentId;
-  const attempt = current.attempt ?? 1;
+  // Fresh callback for the current attempt: perform the first finalization.
+  if (current.status === "running") {
+    const attemptAgentId = current.agentId;
+    const attempt = current.attempt ?? 1;
+    const result = buildAgentResult(current, input.status, input.summary ?? null);
+    const execution = await releaseExecution(input.executionId, result);
 
-  const result = buildAgentResult(current, input.status, input.summary ?? null);
-  const execution = await releaseExecution(input.executionId, result);
+    await ensureOutcomeEvidence(execution, attempt, input.status, attemptAgentId);
 
-  // One append-only log evidence entry per execution outcome (ADR-0002 E4).
-  await recordOutcomeEvidence(execution, attempt, input.status, attemptAgentId);
+    // A requeued execution (queued with an agent still assigned) is the next
+    // retry attempt. Record the retry first, then dispatch: a failed dispatch
+    // leaves the execution queued for queued-dispatch reconciliation to redispatch
+    // the same assignment, without consuming another retry.
+    if (execution.status === "queued" && execution.agentId) {
+      await logExecutionEvent(
+        EXECUTION_EVENT_TYPE.retried,
+        execution.id,
+        attemptAgentId,
+        `Execution ${execution.id} attempt ${attempt} ${input.status}; retrying as attempt ${execution.attempt}.`,
+      );
+      await ensureDispatchForAssignment(
+        execution.assignmentId!,
+        input.instructions,
+      );
+      return { execution, retried: true };
+    }
 
-  // A requeued execution (queued with an agent still assigned) is the next
-  // retry attempt; dispatch it. Exhaustion leaves the execution "failed".
-  if (execution.status === "queued" && execution.agentId) {
-    await triggerRun(execution, input.instructions);
-    await logExecutionEvent(
-      EXECUTION_EVENT_TYPE.retried,
-      execution.id,
-      attemptAgentId,
-      `Execution ${execution.id} attempt ${attempt} ${input.status}; retrying as attempt ${execution.attempt}.`,
-    );
-    return { execution, retried: true };
+    await finalizeTerminalExecution(execution, attempt, attemptAgentId);
+    return { execution, retried: false };
   }
 
-  const terminalType =
-    execution.status === "succeeded"
-      ? EXECUTION_EVENT_TYPE.succeeded
-      : execution.status === "cancelled"
-        ? EXECUTION_EVENT_TYPE.cancelled
-        : EXECUTION_EVENT_TYPE.exhausted;
-  await logExecutionEvent(
-    terminalType,
-    execution.id,
-    attemptAgentId,
-    `Execution ${execution.id} ${execution.status} after ${attempt} attempt${
-      attempt === 1 ? "" : "s"
-    }.`,
-  );
-
-  return { execution, retried: false };
+  // Re-entry after the current attempt already terminated. A terminal FAILED
+  // execution may have been finalized incompletely (a failure after the terminal
+  // transition but before the escalation/side effects completed), so reconcile
+  // idempotently rather than exiting merely because the execution is terminal —
+  // this is the fix for the callback re-entry finding. Succeeded/cancelled have no
+  // further reconcilable side effects and remain true no-ops.
+  if (current.status === "failed") {
+    const attempt = current.attempt ?? MAX_EXECUTION_ATTEMPTS;
+    await ensureOutcomeEvidence(current, attempt, "failed", current.agentId);
+    await finalizeTerminalExecution(current, attempt, current.agentId);
+  }
+  return { execution: current, retried: false };
 }
 
 export interface ReclaimResult {
@@ -315,6 +456,26 @@ export interface ReclaimResult {
 function recoveryInstructions(execution: Execution): string {
   const task = getDevHqStore().tasks.get(execution.taskId);
   return (task?.description ?? "").trim() || "Execute the assigned task.";
+}
+
+/**
+ * Self-healing sweep step (Task 1E-5): escalate any terminal-failed agent
+ * execution whose escalation was never created — e.g., a reclaim or completion
+ * interrupted after the terminal transition but before escalation. Idempotent:
+ * executions that already escalated (open or resolved) are skipped, and the raise
+ * itself is idempotent. This gives the reclaim path the same terminal-failure
+ * reconciliation the completion callback gained via re-entry.
+ */
+async function reconcileUnescalatedFailures(): Promise<void> {
+  const { escalationStore } = getDevHqAdapters();
+  for (const execution of [...getDevHqStore().executions.values()]) {
+    if (execution.status !== "failed") continue;
+    // Agent executions only (founder-request executions have no agent/assignment).
+    if (!execution.agentId || !execution.assignmentId) continue;
+    if ((execution.attempt ?? 0) < MAX_EXECUTION_ATTEMPTS) continue;
+    if (await escalationStore.findByExecution(execution.id)) continue;
+    await raiseRetryExhaustionEscalation(execution);
+  }
 }
 
 /**
@@ -365,9 +526,29 @@ export async function handleExecutionReclaim(
     );
 
     if (execution.status === "queued" && execution.agentId) {
-      await triggerRun(execution, recoveryInstructions(execution));
+      await ensureDispatchForAssignment(
+        execution.assignmentId!,
+        recoveryInstructions(execution),
+      );
+    } else if (execution.status === "failed") {
+      // A reclaim that spent the last of the retry budget runs the shared terminal
+      // finalization: it emits the deduped execution.exhausted lifecycle event and
+      // reconciles the escalation. reconcileUnescalatedFailures below is the
+      // self-healing backstop if that escalation step is interrupted.
+      await finalizeTerminalExecution(
+        execution,
+        execution.attempt ?? MAX_EXECUTION_ATTEMPTS,
+        execution.agentId,
+      );
     }
   }
+
+  // Distinct reconciliation responsibilities on the sweep cadence:
+  //   running lease expiry           -> reclaimStale (above, Execution Manager)
+  //   queued but undispatched        -> reconcileQueuedDispatches
+  //   terminal failed w/o escalation -> reconcileUnescalatedFailures
+  await reconcileQueuedDispatches();
+  await reconcileUnescalatedFailures();
 
   return { reclaimed: reclaimed.length };
 }

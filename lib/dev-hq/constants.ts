@@ -72,6 +72,14 @@ export const EXECUTION_EVENT_TYPE = {
  */
 export const EXECUTION_SWEEP_CRON = "* * * * *";
 
+/**
+ * Escalation lifecycle event names, emitted from the service layer (ADR-0002 E2/E3).
+ */
+export const ESCALATION_EVENT_TYPE = {
+  raised: "escalation.raised",
+  resolved: "escalation.resolved",
+} as const;
+
 /** Base URL for Trigger.dev worker callbacks into the Next.js dev store. */
 export function getDevHqBaseUrl(): string {
   return process.env.DEV_HQ_BASE_URL ?? "http://127.0.0.1:3000";

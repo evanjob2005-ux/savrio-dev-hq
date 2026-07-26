@@ -78,6 +78,7 @@ function createAssignment(input: {
     status: "assigned",
     attempt: input.attempt,
     requiredCapabilities: [...input.requiredCapabilities],
+    triggerRunId: null,
     leaseExpiresAt: null,
     lastHeartbeatAt: null,
     claimedAt: null,
@@ -114,23 +115,29 @@ function applyFailedAttempt(
   const nextAgent = selectAgent({ requiredCapabilities });
 
   if (!nextAgent) {
-    // No capacity for the retry right now: re-queue unassigned.
+    // No capacity for the retry right now: re-queue unassigned. Clear the prior
+    // attempt's Trigger run reference so the requeued execution does not point at a
+    // stale run until the next assignment is dispatched.
     return saveExecution({
       ...execution,
       status: "queued",
       agentId: null,
       assignmentId: null,
       attempt: nextAttempt,
+      triggerRunId: null,
       startedAt: null,
       completedAt: null,
     });
   }
 
+  // Clear the prior attempt's Trigger run reference; the new assignment starts
+  // undispatched (assignment.triggerRunId null) until it is dispatched.
   const requeued = saveExecution({
     ...execution,
     status: "queued",
     agentId: nextAgent.id,
     attempt: nextAttempt,
+    triggerRunId: null,
     startedAt: null,
     completedAt: null,
   });
@@ -210,6 +217,150 @@ export async function assignExecution(
     assignment,
     agentId: agent.id,
     requiredCapabilities,
+  };
+}
+
+/**
+ * Create-or-get a queued execution at a caller-supplied canonical id (attempt 1,
+ * no agent, no assignment). The id is **opaque** here — the caller owns its
+ * meaning and its uniqueness; the Execution Manager only guarantees the keyed
+ * create-or-get.
+ *
+ * Idempotent: an existing execution at that id is returned unchanged, and since
+ * the id is the store key a second record at that id is not representable. The
+ * lookup and the insert are synchronous with no await between them, so
+ * concurrent callers cannot both insert.
+ *
+ * **Ownership is verified before reuse.** An existing execution is only returned
+ * when it belongs to the requested task; an id collision across tasks throws
+ * rather than silently handing back another task's execution (which would go on
+ * to be assigned an agent and dispatched against the wrong task). Callers own
+ * the id namespace, so a mismatch is a programming error and fails loudly.
+ *
+ * Pairs with `ensureAssignment`: creation and assignment are deliberately
+ * separate steps so a caller that reserved the id up front can recover a
+ * partially-created execution on replay without generating a new id.
+ */
+export async function ensureExecution(input: {
+  executionId: string;
+  taskId: string;
+}): Promise<Execution> {
+  const store = getDevHqStore();
+  const existing = store.executions.get(input.executionId);
+  if (existing) {
+    if (existing.taskId !== input.taskId) {
+      throw new Error(
+        `Execution ${input.executionId} belongs to task ${existing.taskId}, not ${input.taskId}; refusing to reuse it.`,
+      );
+    }
+    return existing;
+  }
+
+  const task = store.tasks.get(input.taskId);
+  if (!task) {
+    throw new Error(`Task not found: ${input.taskId}`);
+  }
+  return saveExecution({
+    id: input.executionId,
+    taskId: input.taskId,
+    workflowId: task.workflowId,
+    agentId: null,
+    status: "queued",
+    triggerRunId: null,
+    startedAt: null,
+    completedAt: null,
+    createdAt: nowIso(),
+    assignmentId: null,
+    attempt: 1,
+  });
+}
+
+export interface EnsureAssignmentResult {
+  decision: AssignmentDecision;
+  /** True when this call created the assignment; false when one was reused. */
+  created: boolean;
+}
+
+/**
+ * Ensure a queued execution has a current, unreleased assignment, selecting an
+ * agent when it has none. Idempotent: an existing unreleased assignment is
+ * reused and reported with `created: false`, so no second assignment and no
+ * extra retry attempt can be produced by a replay.
+ *
+ * Returns a non-assigned decision and leaves the execution untouched when it is
+ * no longer queued (`execution_not_queued`) or no eligible agent is available
+ * (`no_agent_available`) — either way a later call can retry with no side
+ * effects to unwind. Check and write are synchronous with no await between them.
+ */
+export async function ensureAssignment(
+  executionId: string,
+  policy?: AgentSelectionPolicy,
+): Promise<EnsureAssignmentResult> {
+  const execution = requireExecution(executionId);
+  const requiredCapabilities = policy?.requiredCapabilities ?? [];
+  const notAssigned = (
+    reason: "no_agent_available" | "execution_not_queued",
+  ): EnsureAssignmentResult => ({
+    decision: {
+      assigned: false,
+      reason,
+      execution,
+      assignment: null,
+      agentId: null,
+      requiredCapabilities,
+    },
+    created: false,
+  });
+
+  if (execution.status !== "queued") {
+    return notAssigned("execution_not_queued");
+  }
+
+  // Reuse the execution's current assignment when it still holds the lease.
+  if (execution.assignmentId) {
+    const current = getAssignment(execution.assignmentId);
+    if (current && current.status !== "released") {
+      return {
+        decision: {
+          assigned: true,
+          reason: "assigned",
+          execution,
+          assignment: current,
+          agentId: current.agentId,
+          requiredCapabilities,
+        },
+        created: false,
+      };
+    }
+  }
+
+  const agent = selectAgent(policy);
+  if (!agent) {
+    return notAssigned("no_agent_available");
+  }
+
+  const timestamp = nowIso();
+  const assignment = createAssignment({
+    execution,
+    agentId: agent.id,
+    attempt: execution.attempt ?? 1,
+    requiredCapabilities,
+    timestamp,
+  });
+  return {
+    decision: {
+      assigned: true,
+      reason: "assigned",
+      execution: saveExecution({
+        ...execution,
+        agentId: agent.id,
+        assignmentId: assignment.id,
+      }),
+      assignment,
+      agentId: agent.id,
+      requiredCapabilities,
+    },
+    created: true,
   };
 }
 

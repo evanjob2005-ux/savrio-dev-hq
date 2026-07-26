@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentAssignment,
   Approval,
+  Escalation,
   Event,
   Evidence,
   Execution,
@@ -23,6 +24,7 @@ export interface DevHqState {
   workflowRuns: WorkflowRunRecord[];
   agents: Agent[];
   evidence: Evidence[];
+  escalations: Escalation[];
   overview: SystemOverviewMetrics;
 }
 
@@ -37,4 +39,5 @@ export interface DevHqStoreData {
   agents: Map<string, Agent>;
   agentAssignments: Map<string, AgentAssignment>;
   evidence: Map<string, Evidence>;
+  escalations: Map<string, Escalation>;
 }

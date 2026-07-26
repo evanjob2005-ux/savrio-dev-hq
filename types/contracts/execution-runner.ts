@@ -17,11 +17,13 @@ export interface AgentSelectionPolicy {
 /**
  * Outcome of an assignment attempt. `assigned` is false with
  * reason `"no_agent_available"` when no eligible agent could be selected; the
- * execution then remains queued.
+ * execution then remains queued. `"execution_not_queued"` is reachable only from
+ * `ensureAssignment`, which is asked to assign an already-existing execution that
+ * has since left the queued state; `assignExecution` never returns it.
  */
 export interface AssignmentDecision {
   assigned: boolean;
-  reason: "assigned" | "no_agent_available";
+  reason: "assigned" | "no_agent_available" | "execution_not_queued";
   execution: Execution | null;
   assignment: AgentAssignment | null;
   agentId: string | null;

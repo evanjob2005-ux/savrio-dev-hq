@@ -1,7 +1,8 @@
 import type { Evidence } from "@/types/domain";
 
 export interface CreateEvidenceInput {
-  executionId: string;
+  /** Optional: omit or pass null for evidence not tied to a specific execution. */
+  executionId?: string | null;
   taskId: string;
   kind: Evidence["kind"];
   label: string;

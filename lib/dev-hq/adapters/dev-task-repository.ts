@@ -61,6 +61,29 @@ export class DevTaskRepository implements TaskRepository {
     return saveTask(updated);
   }
 
+  async updateTaskStatusIf(
+    id: string,
+    status: Task["status"],
+    precondition: (current: Task) => boolean,
+  ): Promise<Task | null> {
+    // Read, check and write with no await between them. An async function body
+    // runs synchronously up to its first await, so nothing can interleave inside
+    // this block — the check and the write commit together. Deliberately does
+    // not delegate to getTask/updateTask, both of which await and would reopen
+    // the gap this operation exists to close.
+    const existing = getDevHqStore().tasks.get(id);
+    if (!existing) {
+      return null;
+    }
+    if (!precondition(existing)) {
+      return null;
+    }
+    if (existing.status === status) {
+      return existing;
+    }
+    return saveTask({ ...existing, status, updatedAt: nowIso() });
+  }
+
   async claimTask(id: string, agentId: string): Promise<Task> {
     return this.updateTask(id, {
       assigneeAgentId: agentId,
