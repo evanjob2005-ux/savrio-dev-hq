@@ -355,3 +355,188 @@ This holds regardless of what the sample shows:
    not review its own design rendered as patches.
 5. **An unresponsive specialist is recorded as a workflow failure, never as
    agreement.** Absent analysis is never treated as consent or as a clean result.
+
+---
+
+## 7. SUPERSEDING CORRECTION — the fresh-review gate WAS obtained
+
+**Authority:** Founder authorization, 2026-07-26. **Appended, not rewritten.** Sections 1–6
+stand unaltered as the contemporaneous record. Where §4d and this section conflict, **this
+section is authoritative on the factual question of whether the gate was obtainable.**
+
+### What §4d claims, and why it must be superseded
+
+§4d concludes: *"the fresh independent code review gate cannot be satisfied"*, and commit
+`fe7fab1` carries that conclusion in its subject line — *"fresh-review gate unobtainable"*.
+
+**That conclusion was already false when it was committed.** A fresh independent code review
+was commissioned, completed, and delivered in full **approximately ten minutes before
+`fe7fab1` was authored.**
+
+### Timeline
+
+| Time (EDT, 2026-07-26) | Event |
+|---|---|
+| 10:33:33 | Candidate frozen by the integration coordinator (HEAD `6301c06`, source tree clean) |
+| ~10:34 | **CR-FRESH-1E** commissioned — a freshly-spawned `independent-code-reviewer`, no prior role |
+| 10:34:29–10:36:22 | C1 applied to the working tree by a parallel authorized session |
+| ~10:45 | Coordinator issued a candidate-identity correction (C1 applied, 318 tests) |
+| 10:45:40 | CR-FRESH-1E idle, **no deliverable** |
+| 10:46:52 | CR-FRESH-1E independently ran `npx vitest run` — 22 files, 318 tests passed |
+| 10:47 | Full terminal-deliverable chase issued |
+| 10:50 | Single-line-verdict request issued (minimal deliverable test) |
+| 10:52:35 | CR-FRESH-1E idle again, **no deliverable** |
+| ~10:53 | Coordinator instructed it to **call `SendMessage` explicitly** rather than rely on final-turn output |
+| **~10:54** | **Full certification delivered intact** |
+| **11:04:38** | **`fe7fab1` committed, stating the gate cannot be satisfied** |
+
+### The delivered certification
+
+**Verdict: `PASS WITH NON-BLOCKING FINDINGS`. Unresolved blockers: 0.** Scoped to C1 only;
+the reviewer stated explicitly that it does not certify the full remediation.
+
+Evidence it produced, all independently derived rather than adopted:
+
+- **All eight SHA-256 hashes recomputed and matched** — five per-file, plus the 289-line diff
+  hash `9d56ed51…`, re-verified three times across analysis with no drift.
+- **318 tests / 22 files reproduced independently** on a stable hash-verified tree, plus
+  `tsc` exit 0 and `eslint` exit 0.
+- **All nine C1 change sites diffed against the specification's REPLACE blocks — every one
+  verbatim.** Policy compliance confirmed at all six emitting sites; manager purity preserved.
+- **Found MAJOR-1**, which no other party had found: applying C1 invalidated C4's §4.2
+  insertion anchor so that it now points *inside another test's body*. Nested `it()` is valid
+  TypeScript, so **`tsc` and `eslint` both pass** — only `vitest` catches it. Two of the three
+  specified gate checks would have given a false green.
+- MAJOR-1 was subsequently confirmed independently by the integration coordinator and by
+  SPEC-AMEND-1E.
+- The same reviewer later performed the D-2 anchor verification, returning 3 of 5 criteria
+  passing and finding two further defects (a C3-blocking import instruction, and a false
+  provenance claim introduced during amendment).
+
+This is not a marginal or nominal gate result. It changed what may safely be applied.
+
+### Why the six earlier attempts appeared to fail
+
+**CR-FRESH-1E also appeared to fail** — four consecutive idle cycles with zero content,
+including on a request whose entire deliverable was a single line. It had completed the entire
+review throughout. The report arrived intact the moment explicit `SendMessage` delivery was
+mandated.
+
+Across four agents commissioned in the same round by the integration coordinator:
+
+| Agent | Work completed | Report reached commissioner |
+|---|---|---|
+| FIX-DESIGN-001 | yes | yes — explicit message, first attempt |
+| FIX-1F-PLAN | yes — verified on disk | **no** — went idle silently |
+| FIX-PHASE2-PLAN | yes — verified on disk | **no, then yes** after re-sending |
+| CR-FRESH-1E | yes | **no, then yes** after explicit `SendMessage` mandate |
+
+FIX-PHASE2-PLAN stated the mechanism unprompted: *"I did report at the end of my working turn;
+it evidently did not reach you as a message. Re-sending as message text."*
+
+**Three of four agents completed their deliverable and had it lost in transit.** Inbound
+message delivery worked throughout; outbound final-turn output did not reach the commissioner.
+
+### What this establishes, and what it does not
+
+**Established:**
+
+1. The fresh independent code review gate **is obtainable**. It was obtained, by a freshly
+   spawned agent, and produced findings no other party had.
+2. Terminal-report delivery via final-turn output is unreliable; explicit `SendMessage`
+   recovered it in every case tested.
+3. §4d's hypothesis set — tool boundary, missing deliverable contract, agent type/task shape —
+   **did not include the delivery path.** Its "third and last hypothesis is dead" conclusion
+   therefore does not establish that root cause is unknowable; it establishes that the
+   hypotheses tested were the wrong ones.
+
+**NOT established, and deliberately not claimed:**
+
+1. **That the six earlier failures had this cause.** Their transcripts have not been examined.
+   The mechanism is consistent with their symptoms and is the only one demonstrated to produce
+   exactly that signature, but consistency is not proof. Root cause for those six remains
+   formally **UNKNOWN**.
+2. That the delivery defect is universal, deterministic, or fully characterised. One agent in
+   four delivered normally on its first attempt.
+
+**The six failed spawn attempts recorded in §4b, §4c, and §4d are preserved as accurate
+contemporaneous observations.** What is corrected is the *inference* drawn from them — that a
+required governance gate is structurally unobtainable — not the observations themselves.
+
+### Consequence for the designer ≠ reviewer separation rule
+
+§4c and §4d treat the separation requirement as potentially unsatisfiable, and Phase 2 planning
+(PLAN-P2-001 C-6 / NEW-5 / Q-8) inherited that as a hard blocker on staffing.
+
+**On the evidence above, it is a protocol defect, not a capability limit.** The remedy is a
+delivery requirement in every delegation contract, not a waiver of independence, a human-only
+review model, or a restructuring of Phase 2 staffing.
+
+The Founder has, in the same period, **refused** a general exception permitting the two
+contributing reviewers to self-certify, and commissioned an uninvolved third reviewer instead —
+which succeeded. The separation rule was tested under pressure and upheld at cost.
+
+### Amendment to §6 — standing workflow correction
+
+§6 item 3 requires an explicit terminal deliverable contract with silence defined as failure.
+**That is necessary but insufficient: it specifies what to deliver, not how.** All four agents
+in the round above had explicit contracts; three still lost their reports.
+
+Added as **§6 item 6**:
+
+> 6. **Every delegated agent must deliver its terminal report to the commissioning agent by an
+>    explicit `SendMessage` call**, never by relying on final-turn output alone. **For
+>    read-only reviewers, require both** explicit `SendMessage` delivery **and** a written
+>    review artifact on disk **where the agent's declared tools permit it** — noting that a
+>    read-only role whose definition grants no `Write`/`Edit` cannot satisfy the second, and
+>    must not bypass its tool boundary to do so (§6 item 2). Where the disk artifact is
+>    tool-blocked, record it as blocked rather than skipped.
+>
+>    **Rationale:** a document-editing agent's work can be verified against its file even when
+>    its report is lost. **A read-only reviewer leaves nothing to check** — which is precisely
+>    why the certification gate, and not the three document corrections, appeared to fail.
+>
+>    Silence remains never a pass (§6 item 5). But silence must be diagnosed as a possible
+>    delivery failure before it is recorded as a non-deliverable.
+
+---
+
+## 4e. FINAL TALLY UPDATE — seventh fresh-spawn failure; the review gate remains unobtainable
+
+A third reviewer, **CR-FINAL**, was engaged for the fresh Independent Code Review of the
+complete C1–C4 + MAJOR-1 candidate (`ffc805f6…`). It returned no verdict after one
+equivalent follow-up, under the same equal-treatment standard the two working reviewers met.
+
+| # | Agent | Type | Task | Contract | Delivered |
+|---|---|---|---|---|---|
+| 1 | LSE-1E | lead-software-engineer | reproduce | no | ❌ |
+| 2 | LSE-2 | lead-software-engineer | specify | no | ❌ |
+| 3 | LSE-3 | lead-software-engineer | specify (small) | explicit | ❌ |
+| 4 | ENG-SPEC | general-purpose | specify | explicit | ❌ |
+| 5 | CR-FRESH-C1 | independent-code-reviewer | review | explicit | ❌ |
+| 6 | CR-GATE-C1 | independent-code-reviewer | review | front-loaded | ❌ |
+| 7 | **CR-FINAL** | independent-code-reviewer | review | front-loaded + prioritised fallback | ❌ |
+
+**Seven consecutive freshly-spawned agents, zero deliverables.** CR-FINAL received the
+strongest brief yet: the verdict obligation stated first and last, partial coverage
+explicitly declared acceptable, and a three-item prioritised fallback so a narrow verdict
+would still satisfy the gate. It still produced nothing.
+
+**Contrast that holds throughout:** CR-1E and AR-1E — spawned in the initial batch and
+thereafter *resumed* — produced ten substantive deliverables between them, including
+detailed reviews, a design policy, self-corrections against their own interest, and a
+complete patch specification.
+
+**What the external escalation established.** The C1 review that *did* succeed was
+commissioned from a **separate clean Claude Code session** using the same registered
+`independent-code-reviewer` role. That review was substantive: it found MAJOR-1 by running
+its own probe, a defect this coordinating session's gates provably could not catch. So the
+role and the task are demonstrably viable — **the constraint is specific to spawning fresh
+agents from this coordinating session.**
+
+**Root cause still UNKNOWN.** Three hypotheses were proposed by the coordinator and all
+three eliminated by its own tests (tool boundary, missing deliverable contract, agent
+type/task shape). A fourth is not proposed on this evidence.
+
+**Standing recommendation:** commission fresh independent reviews from a separate clean
+session. That path is proven; in-session fresh spawns are not.

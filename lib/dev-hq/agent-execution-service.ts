@@ -191,6 +191,82 @@ export async function ensureAssignmentEvent(
 }
 
 /**
+ * Ensure the timeline records that an execution could not be given an agent and
+ * remains queued (ADR-0001 O6). This changes no outcome — the queued execution is
+ * the approved behaviour — it supplies the record that was missing, which is what
+ * made a declined dispatch indistinguishable from one never requested.
+ *
+ * Keyed per (execution, attempt): reconciliation retries a stranded execution on
+ * every sweep, and one deferral per attempt is the honest count. A genuinely new
+ * attempt still records its own.
+ *
+ * **Only a capacity decline is a deferral, and the guard below is load-bearing.**
+ * `execution_not_queued` means the execution is running, succeeded, failed or
+ * cancelled — states the timeline already carries via `execution.claimed`,
+ * `execution.succeeded` and `execution.exhausted`. Emitting here would be a late,
+ * redundant signal about state already recorded, and its message would assert
+ * "stays queued" about an execution that had left the queue: an untruth on an
+ * append-only timeline, which is the exact defect class X4 removes from the
+ * reclaim message.
+ *
+ * **Deleting the guard therefore reintroduces X4.** It is stated at this length
+ * because a guard that makes a helper do nothing for some inputs reads like dead
+ * weight to a later simplification pass. It is not: it is the condition the six
+ * call sites share, held in one place so they cannot drift apart.
+ */
+export async function ensureAssignmentDeferredEvent(
+  execution: Execution,
+  reason: AssignmentDecision["reason"],
+): Promise<void> {
+  // Do not remove: see the X4 note above. Sites 1, 4 and 5 can reach here with
+  // `execution_not_queued`; sites 2, 3 and 6 cannot, being enclosed by a queued
+  // check. The guard is what keeps all six uniform at the call site.
+  //
+  // Site 3 is `reconcileQueuedDispatches`' decline path. Its loop opens with
+  // `if (execution.status !== "queued") continue;`, so it is enclosed exactly as
+  // sites 2 and 6 are. It occupies the gap AR-1E's ruling table left between
+  // sites 2 and 4.
+  if (reason !== "no_agent_available") return;
+  const attempt = execution.attempt ?? 1;
+  await getDevHqAdapters().eventLogger.log({
+    type: EXECUTION_EVENT_TYPE.assignmentDeferred,
+    entityType: "execution",
+    entityId: execution.id,
+    message: `Execution ${execution.id} could not be assigned an agent for task ${execution.taskId}; it stays queued at attempt ${attempt} for reconciliation to retry.`,
+    actorId: null,
+    actorLabel: "System",
+    dedupeKey: `${EXECUTION_EVENT_TYPE.assignmentDeferred}:${execution.id}:${attempt}`,
+  });
+}
+
+/**
+ * Ensure the timeline records that a dispatched worker lost the compare-and-set
+ * for its agent and stood down. Keyed on the assignment: an assignment can lose
+ * the claim once, and that run is over.
+ *
+ * Deliberately not exported. Only this module absorbs a lost claim; the review and
+ * escalation services never claim, so widening the surface would suggest otherwise.
+ */
+async function ensureClaimLostEvent(
+  execution: Execution,
+  assignmentId: string,
+  agentId: string | null,
+): Promise<void> {
+  const agent = agentId ? getAgent(agentId) : null;
+  await getDevHqAdapters().eventLogger.log({
+    type: EXECUTION_EVENT_TYPE.claimLost,
+    entityType: "execution",
+    entityId: execution.id,
+    message: `Execution ${execution.id} could not claim ${
+      agent?.name ?? "its assigned agent"
+    } for assignment ${assignmentId}; another attempt held the agent, so this run stood down.`,
+    actorId: agentId,
+    actorLabel: agent?.name ?? "System",
+    dedupeKey: `${EXECUTION_EVENT_TYPE.claimLost}:${assignmentId}`,
+  });
+}
+
+/**
  * Ensure the execution has one `execution.retried` event per retry it has already
  * taken. An execution on attempt N has retried N-1 times; a crash between the
  * requeue transition and the event would otherwise lose that entry permanently.
@@ -496,7 +572,19 @@ async function reconcileQueuedDispatches(now?: string): Promise<void> {
     if (!assignmentId || !agentId) {
       if (!execution.routing) continue;
       const { decision, created } = await ensureAssignment(execution.id);
-      if (!decision.assigned || !decision.assignment) continue;
+      if (!decision.assigned || !decision.assignment) {
+        // X1's surviving path. Without this the sweep re-observes a stranded
+        // execution every cycle and records nothing, leaving it queued with a
+        // null agent, an unchanged attempt, and an empty timeline — the exact
+        // state that made a declined dispatch indistinguishable from one never
+        // requested. Outcome is unchanged: it still stays queued and this still
+        // continues. Only the missing record is supplied.
+        //
+        // Idempotency is the emitter's existing per-(execution, attempt) dedupe
+        // key, so repeat sweeps no-op rather than appending one entry per cycle.
+        await ensureAssignmentDeferredEvent(execution, decision.reason);
+        continue;
+      }
       assignmentId = decision.assignment.id;
       agentId = decision.agentId;
       void created;
@@ -680,6 +768,10 @@ export async function dispatchAgentExecution(
   //    untouched, so a later call can retry with nothing to unwind.
   const { decision, created } = await ensureAssignment(execution.id, policy);
   if (!decision.assigned || !decision.assignment) {
+    // ADR-0001 O6: a declined dispatch is a lifecycle outcome and must reach the
+    // timeline. The execution stays queued — that is the approved behaviour — but
+    // it is no longer silent.
+    await ensureAssignmentDeferredEvent(execution, decision.reason);
     return {
       assigned: false,
       reason: decision.reason,
@@ -735,6 +827,21 @@ export async function handleExecutionRunning(
   }
 
   const execution = await runExecution(executionId);
+  if (!execution) {
+    // The compare-and-set lost: another attempt holds the agent. This is a 200
+    // with the unchanged execution, so the worker reads a non-running status and
+    // stands down cleanly; the claim deadline then recovers this assignment. The
+    // guard avoids a non-null assertion — runExecution cannot return null with a
+    // null assignmentId, but the type does not say so.
+    if (existing.assignmentId) {
+      await ensureClaimLostEvent(
+        existing,
+        existing.assignmentId,
+        existing.agentId,
+      );
+    }
+    return existing;
+  }
   await logExecutionEvent(
     EXECUTION_EVENT_TYPE.claimed,
     execution.id,
@@ -821,6 +928,7 @@ export async function handleExecutionComplete(
       // routing and awaits `reconcileQueuedDispatches`, which assigns and
       // dispatches it when capacity returns — no attempt is consumed by waiting.
       if (!execution.agentId || !execution.assignmentId) {
+        await ensureAssignmentDeferredEvent(execution, "no_agent_available");
         return { execution, retried: false };
       }
 
@@ -854,6 +962,19 @@ export async function handleExecutionComplete(
   // provider's own output. So reconcile the records for every post-`running`
   // state rather than exiting merely because the execution is terminal.
   await reconcileRecordsFor(current);
+  // The review request stays out of reconcileRecordsFor because that function
+  // *reconstructs records a completed transition should already have left*, while
+  // a review request *initiates new work*. Escalation qualifies under the first —
+  // which is why finalizeTerminalExecution may raise one from inside the
+  // reconciliation path — and a review request does not. (The discriminator is
+  // that distinction, not "reaches another subsystem": reconcileRecordsFor does
+  // reach one, via finalizeTerminalExecution -> raiseRetryExhaustionEscalation.)
+  //
+  // But a crash between the terminal transition and the fresh path's request
+  // leaves the review unrequested, and only the sweep would ever notice. Asking
+  // here closes the gap on the very next callback. Idempotent: the canonical
+  // review id makes a repeat a no-op.
+  await requestReviewIfSucceeded(current);
   return { execution: current, retried: false };
 }
 
@@ -993,20 +1114,43 @@ export async function handleExecutionReclaim(
   for (const execution of reclaimed) {
     // One append-only log evidence entry per reclaim (audit only, no control flow).
     await recordReclaimEvidence(execution);
+    // Three outcomes, not two. A reclaim can requeue an attempt that no agent was
+    // free to take: it is neither dispatchable nor terminal, so the original
+    // two-branch shape skipped it entirely (X3) while the message still announced
+    // a retry that nothing was running (X4).
+    const requeuedWithAgent =
+      execution.status === "queued" && Boolean(execution.agentId);
+    const requeuedWithoutAgent =
+      execution.status === "queued" && !execution.agentId;
+
     await logExecutionEvent(
       EXECUTION_EVENT_TYPE.reclaimed,
       execution.id,
       execution.agentId,
-      execution.status === "queued"
+      requeuedWithAgent
         ? `Execution ${execution.id} lease expired; reclaimed and retrying as attempt ${execution.attempt}.`
-        : `Execution ${execution.id} lease expired; reclaimed and marked ${execution.status} (retry budget spent).`,
+        : requeuedWithoutAgent
+          ? `Execution ${execution.id} lease expired; reclaimed as attempt ${execution.attempt}, which is waiting for an available agent.`
+          : `Execution ${execution.id} lease expired; reclaimed and marked ${execution.status} (retry budget spent).`,
     );
 
-    if (execution.status === "queued" && execution.agentId) {
+    if (requeuedWithAgent) {
       await ensureDispatchForAssignment(
         execution.assignmentId!,
         recoveryInstructions(execution),
       );
+    } else if (requeuedWithoutAgent) {
+      // Deliberately redundant with site 3 (`reconcileQueuedDispatches`), which
+      // runs later in this same sweep and would emit for the same
+      // (execution, attempt). Both are kept, and the dedupe key collapses them to
+      // one entry. The reason to keep this one is timeline fidelity (ADR-0002 E5):
+      // emitting here places the deferral *adjacent to this execution's own
+      // `reclaimed` event*, so the audit history reads in true causal order rather
+      // than batching every deferral after every reclaim. That adjacency is the
+      // contract pinned by "emits the requeue deferral from the reclaim loop,
+      // before the sweep runs" — deleting this call inverts the ordering and fails
+      // that test. Do not remove it as a duplicate.
+      await ensureAssignmentDeferredEvent(execution, "no_agent_available");
     } else if (execution.status === "failed") {
       // A reclaim that spent the last of the retry budget runs the shared terminal
       // finalization: it emits the deduped execution.exhausted lifecycle event and

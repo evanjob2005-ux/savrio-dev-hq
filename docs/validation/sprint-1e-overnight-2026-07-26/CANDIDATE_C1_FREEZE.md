@@ -48,8 +48,39 @@ Review → Founder Approval have all completed.
 
 | ID | Defect | Mechanism |
 |---|---|---|
-| **AR2-1** | Declined dispatch logged zero events — ADR-0001 O6 violation | New `execution.assignment_deferred`, emitted at five service-layer sites |
-| **X1** | Execution stranded `queued`/`agentId: null` with no signal | **Subsumed** — the queued execution is the ADR-approved outcome; the missing event was the entire violation |
+| **AR2-1** | Declined dispatch logged zero events — ADR-0001 O6 violation | New `execution.assignment_deferred`, emitted at five service-layer sites. **See the X1 correction below: a sixth site was missing.** |
+| **X1** | Execution stranded `queued`/`agentId: null` with no signal | ~~**Subsumed** — the queued execution is the ADR-approved outcome; the missing event was the entire violation~~ **CORRECTED — see below. This claim was overstated at C1 and X1 was NOT fully resolved by this candidate.** |
+
+> **⟶ CORRECTION (Founder decision, 2026-07-26) — X1 was not fully resolved at C1.**
+>
+> The row above recorded X1 as *"Subsumed"* by AR2-1. **The reasoning was sound but the
+> coverage was not.** The principle is correct — the queued execution *is* the ADR-approved
+> outcome per O6/O2, and adding an escalation would have been the wrong fix — but X1
+> **inherited AR2-1's gap**: the deferral event was emitted at five sites and a **sixth
+> decline path survived without one**.
+>
+> `reconcileQueuedDispatches` declined at `!decision.assigned || !decision.assignment` with a
+> bare `continue`, leaving the execution `status: "queued"`, `agentId: null`, attempt
+> unchanged, and its **event timeline empty** — the precise state that makes a declined
+> dispatch indistinguishable from one never requested, which is the whole of X1.
+>
+> **This was not caught by the C1 gates and could not have been.** The existing assertion
+> `toHaveLength(1)` passes whether or not the sweep emits, so the gap was invisible to the
+> test that appeared to cover it.
+>
+> **Resolved by an authorized narrow follow-up** (Founder decision, 2026-07-26): the canonical
+> `execution.assignment_deferred` event is now emitted at that sixth site, reusing the existing
+> per-`(execution, attempt)` dedupe key so repeat sweeps no-op rather than appending one entry
+> per cycle. Outcome behaviour is unchanged — the execution still stays queued and the loop
+> still continues; only the missing record is supplied.
+>
+> **Fail-before demonstrated by execution, not by reasoning:** with the fix reverted, the new
+> regression test fails with `expected [] to have a length of 1 but got +0` — the timeline was
+> genuinely empty. The file was restored from a hash-verified backup afterwards
+> (`51ebbc2e…`).
+>
+> **Neither AR2-1 nor X1 may be recorded as closed on the strength of the C1 candidate
+> alone.** Both close only with the follow-up included.
 | **X3** | Reclaimed-but-unassigned attempt matched neither branch, recorded nothing | Third branch `requeuedWithoutAgent` |
 | **X4** | Reclaim message asserted "retrying as attempt N" with no agent running | Message branched on `agentId`, not status alone |
 | **X2** | `agent-execution-service.test.ts:110-119` asserted only `assigned === false` | Rewritten; constructs its own no-capacity fixture |
@@ -163,6 +194,78 @@ its next run.
 | Frozen candidate diff | session scratchpad `CANDIDATE_C1.diff` |
 | Foreign-artifact hash baselines | session scratchpad `foreign-hashes.txt` |
 | Scoped-cleanliness check | session scratchpad `scoped-clean.sh` |
+
+---
+
+## ADDENDUM — patch specification amended AFTER the freeze (Founder-authorized)
+
+Recorded per Founder instruction. **This is not a mutation of the frozen C1 candidate.**
+
+### The five facts
+
+1. **The frozen C1 candidate remains byte-identical.** Candidate-only diff
+   (`git diff -- lib/dev-hq/`) hashes `9d56ed51acd566048fab9de54b0e1ec9cde39cd3dda85d80ebeebe0c2b652abe`,
+   matching the freeze. All five per-file hashes match. 177 insertions / 7 deletions,
+   unchanged.
+2. **The patch specification changed after the freeze.**
+3. **That amendment applies only to the unapplied C2/C3/C4 instructions.**
+4. **The external reviewer must review C1 against the specification version actually
+   used for C1** — the committed version, SHA-256 `5e4732f9…` — and treat Amendment 4
+   as **future remediation guidance only**.
+5. **No C2, C3 or C4 patch may be applied** until the amended anchors receive
+   independent verification.
+
+### Change record
+
+| Field | Value |
+|---|---|
+| File | `agents/independent-code-reviewer/outputs/SPRINT_1E_REMEDIATION_PATCH_SPEC.md` (**tracked**) |
+| Previous SHA-256 (committed at `fe7fab1`) | `5e4732f9c413c037b376f6d9a3a22d6b56d54bb059d50dacf22e19bcfd4117b5` |
+| Current SHA-256 (working tree) | `ce7e8c1e1330de08da14dfc968dab907fd894be8dae6afcf5af6e79728bd7fc9` |
+| Modification time | 2026-07-26 11:08:27 |
+| Identifier | **Amendment 4 / SPEC-AMEND-1E**, Founder decision D-2 |
+| Authorized scope | Correcting stale or unsafe C2/C3/C4 anchors identified by MAJOR-1, MAJOR-2, MINOR-1 |
+| Diff size | +41 / −5 lines |
+
+### Sections changed
+
+| Section | Nature of change |
+|---|---|
+| Header (line 3) | Status updated: C1 applied to working tree (uncommitted); C2/C3/C4 not applied |
+| New banner (after line 10) | Amendment 4 notice: all line numbers derived at `6301c06`, before C1 shifted `agent-execution-service.ts` by +48/+49 and `agent-execution-service.test.ts` by +37 |
+| **§1.9** | **Annotation only** — CR-1E's "marked UNCERTAIN" note on `getAgent` scoping replaced by "RESOLVED, not a defect". Matches the independent `tsc` result. **No patch code touched.** |
+| §2.5 / §2.6 | Anchor corrected — `737-744` was true at `6301c06`, now shifted |
+| §2.8 | Anchor corrected — `1474-1476` was true at `6301c06`, now shifted |
+| §3.2 / §3.3 | Import anchors verified; one anchor corrected that was **stale within its own commit** |
+| §4.1 | Anchor corrected — `856-857` was true at `6301c06`, now shifted |
+| **§4.2** | **"ANCHOR WAS UNSAFE. DO NOT APPLY THE STRUCK LINE."** §1.9 consumed the same anchor when C1 was applied |
+
+### Confirmation: C1 implementation sections were NOT altered
+
+Verified by extracting **only fenced code-block content** from the `## COMMIT 1` region
+of both versions and comparing:
+
+| Version | C1 code-block SHA-256 | Lines |
+|---|---|---|
+| Committed (`5e4732f9…`) | `eaadb41e800046a13db9724187ca36460d3342593395792a8685c2bb801563ee` | 309 |
+| Current (`ce7e8c1e…`) | `eaadb41e800046a13db9724187ca36460d3342593395792a8685c2bb801563ee` | 309 |
+
+`diff` of the two extractions is **empty**. Every C1 FIND/REPLACE block is byte-identical.
+The only C1-region change is the §1.9 annotation described above.
+
+### Coordinator note on the substance
+
+Amendment 4 closes a real hazard. Applying C2 with `6301c06`-era anchors after C1 shifted
+those files is exactly how a verbatim patch lands in the wrong place — the same class of
+hazard recorded earlier for the duplicated `if (execution.status !== "running")` guard,
+where `heartbeat` (`:564`) must absorb while `releaseExecution` (`:603`) must keep
+throwing. The §4.2 finding is the sharpest instance: its anchor was **consumed by §1.9**
+during C1, so applying it verbatim would have targeted text that no longer sits where the
+specification expects.
+
+**Not adjudicated here.** Under the current hold the coordinator has not applied,
+verified, or acted on Amendment 4. Point 5 above stands: independent verification of the
+amended anchors is required before any C2/C3/C4 application.
 
 ---
 

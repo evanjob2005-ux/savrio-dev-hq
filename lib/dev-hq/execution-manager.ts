@@ -496,11 +496,17 @@ export async function ensureAssignment(
  * Atomically take ownership of a queued execution for its assigned agent. This is
  * the compare-and-set on availability: it succeeds only while the agent is still
  * available, so two claims on the same agent cannot both win.
+ *
+ * Returns `null` when the compare-and-set loses — the agent was reserved by
+ * another attempt between selection and this call. That is an anticipated
+ * concurrent outcome, not a caller error: this caller was right when it was
+ * dispatched and the world moved. Every other precondition still throws, because
+ * no correct caller could have produced it.
  */
 export async function claimExecution(
   executionId: string,
   agentId: string,
-): Promise<Execution> {
+): Promise<Execution | null> {
   const execution = requireExecution(executionId);
   if (execution.status !== "queued") {
     throw new Error(
@@ -522,10 +528,13 @@ export async function claimExecution(
   if (!agent) {
     throw new Error(`Agent not found: ${agentId}`);
   }
+  // The compare-and-set lost. Absorbed rather than thrown: a throw becomes a 500
+  // at the callback route, which the worker's postJson turns into an exception
+  // before it can read the answer — so the stand-down path it documents could
+  // never run. Do NOT hoist this check into a caller: it and the reservation
+  // below must stay adjacent and synchronous or the race it closes reopens.
   if (agent.availability !== "available") {
-    throw new Error(
-      `Agent ${agentId} is not available to claim (status ${agent.availability}).`,
-    );
+    return null;
   }
 
   const timestamp = nowIso();
@@ -552,6 +561,12 @@ export async function claimExecution(
  * When the caller names an assignment that is no longer the execution's current
  * one, the beat is a stale worker's and is a **no-op**: honouring it would let an
  * abandoned run keep a successor attempt's lease alive and mask its failure.
+ *
+ * A beat that arrives after its own attempt already ended — reclaimed, completed,
+ * or cancelled underneath it — is absorbed for the same reason: the caller was the
+ * right worker and the world moved. There is no lease left to extend, so absorbing
+ * costs nothing, and throwing would fail an otherwise healthy durable run over a
+ * benign race. No event is emitted on any heartbeat path (ADR-0002 E3).
  */
 export async function heartbeat(
   executionId: string,
@@ -561,18 +576,21 @@ export async function heartbeat(
   if (assignmentId && execution.assignmentId !== assignmentId) {
     return execution; // stale worker; the current attempt is someone else's
   }
+  // The attempt already ended while this beat was in flight.
   if (execution.status !== "running") {
-    throw new Error(
-      `Execution is not running; cannot heartbeat: ${executionId}`,
-    );
+    return execution;
   }
+  // A running execution with no assignment is not a state any caller could have
+  // produced. That is a broken invariant and stays loud.
   if (!execution.assignmentId) {
     throw new Error(`Execution has no assignment: ${executionId}`);
   }
 
   const assignment = requireAssignment(execution.assignmentId);
+  // Same reasoning as the terminal case: released underneath a beat that was
+  // legitimate when it was sent.
   if (assignment.status === "released") {
-    throw new Error(`Assignment already released: ${assignment.id}`);
+    return execution;
   }
 
   const timestamp = nowIso();
@@ -745,8 +763,13 @@ export async function queueExecution(
   });
 }
 
-/** Start an already-assigned execution by claiming it for its assigned agent. */
-export async function runExecution(executionId: string): Promise<Execution> {
+/**
+ * Start an already-assigned execution by claiming it for its assigned agent.
+ * Propagates `claimExecution`'s `null` when the compare-and-set loses.
+ */
+export async function runExecution(
+  executionId: string,
+): Promise<Execution | null> {
   const execution = requireExecution(executionId);
   if (execution.status !== "queued") {
     throw new Error(`Execution is not queued; cannot run: ${executionId}`);

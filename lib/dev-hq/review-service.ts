@@ -626,7 +626,13 @@ async function ensureReviewRevision(review: Review): Promise<string | null> {
   if (!decision.assigned || !decision.assignment) {
     // No capacity right now, or the revision already left the queue. The
     // execution keeps its routing and is picked up by queued-dispatch
-    // reconciliation; nothing here needs unwinding.
+    // reconciliation; nothing here needs unwinding — but a capacity decline is a
+    // lifecycle outcome and must reach the timeline (ADR-0001 O6). Imported
+    // dynamically for the same reason as the dispatch helpers below.
+    const { ensureAssignmentDeferredEvent } = await import(
+      "@/lib/dev-hq/agent-execution-service"
+    );
+    await ensureAssignmentDeferredEvent(execution, decision.reason);
     return executionId;
   }
 

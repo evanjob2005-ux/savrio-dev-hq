@@ -23,7 +23,10 @@ export class DevExecutionRunner implements ExecutionRunner {
     return manager.assignExecution(taskId, policy);
   }
 
-  claimExecution(executionId: string, agentId: string): Promise<Execution> {
+  claimExecution(
+    executionId: string,
+    agentId: string,
+  ): Promise<Execution | null> {
     return manager.claimExecution(executionId, agentId);
   }
 
@@ -43,7 +46,7 @@ export class DevExecutionRunner implements ExecutionRunner {
     return manager.queueExecution(taskId, workflowId);
   }
 
-  runExecution(executionId: string): Promise<Execution> {
+  runExecution(executionId: string): Promise<Execution | null> {
     return manager.runExecution(executionId);
   }
 

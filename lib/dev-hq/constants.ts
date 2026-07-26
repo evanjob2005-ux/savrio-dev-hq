@@ -63,10 +63,20 @@ export const EXECUTION_CLAIM_DEADLINE_MS = EXECUTION_LEASE_TTL_MS * 2;
  * Typed execution lifecycle event names emitted from the service layer
  * (ADR-0002 E3). No event is emitted per heartbeat. `reclaimed` is emitted by the
  * Sprint 1E-3 lease sweeper when it recovers an expired-lease attempt.
+ *
+ * `assignmentDeferred` records that an execution could not be given an agent and
+ * stays queued. The queued execution is the approved outcome (ADR-0001 O6); what
+ * was missing was any record that it happened, which made a declined dispatch
+ * indistinguishable from one that was never requested.
+ *
+ * `claimLost` records that a dispatched worker lost the compare-and-set for its
+ * agent and stood down. Both are outcomes of the lifecycle, not errors in it.
  */
 export const EXECUTION_EVENT_TYPE = {
   assigned: "execution.assigned",
+  assignmentDeferred: "execution.assignment_deferred",
   claimed: "execution.claimed",
+  claimLost: "execution.claim_lost",
   succeeded: "execution.succeeded",
   retried: "execution.retried",
   exhausted: "execution.exhausted",

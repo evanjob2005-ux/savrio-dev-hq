@@ -107,15 +107,52 @@ describe("agent execution service", () => {
     );
   });
 
-  it("does not dispatch when no eligible agent is available", async () => {
+  it("records a deferral when no eligible agent is available", async () => {
     const task = seedTask();
+    // The no-capacity condition is constructed here, not inherited from the seed
+    // roster. The previous fixture relied on `gemini` shipping as "waiting"; a
+    // later seeding change would have silently stopped exercising this path while
+    // the test kept passing — the same false assurance this remediation exists to
+    // remove.
+    for (const agent of getDevHqStore().agents.values()) {
+      saveAgent({ ...agent, availability: "busy" });
+    }
+
     const result = await dispatchAgentExecution({
       taskId: task.id,
-      requiredCapabilities: ["qa"], // gemini has qa but is only "waiting"
+      requiredCapabilities: ["validation"],
+      idempotencyKey: "deferral-key-1",
     });
     expect(result.assigned).toBe(false);
     expect(result.reason).toBe("no_agent_available");
     expect(triggerMock).not.toHaveBeenCalled();
+
+    // ADR-0001 O6: the decline is a lifecycle outcome and must be on the timeline.
+    const events = await getDevHqAdapters().eventLogger.listRecent({
+      entityType: "execution",
+      limit: 200,
+    });
+    const deferred = events.filter(
+      (e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred,
+    );
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]?.entityId).toBe(result.executionId);
+
+    // Keyed per (execution, attempt), so a replay adds no second entry — and the
+    // execution stays queued, which is the ADR-approved outcome and unchanged.
+    await dispatchAgentExecution({
+      taskId: task.id,
+      requiredCapabilities: ["validation"],
+      idempotencyKey: "deferral-key-1",
+    });
+    const after = await getDevHqAdapters().eventLogger.listRecent({
+      entityType: "execution",
+      limit: 200,
+    });
+    expect(
+      after.filter((e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred),
+    ).toHaveLength(1);
+    expect((await getExecution(result.executionId!))!.status).toBe("queued");
   });
 
   it("throws for a missing task", async () => {
@@ -1471,9 +1508,37 @@ describe("agent execution service", () => {
         first.executionId!,
         (await getExecution(first.executionId!))!.assignmentId!,
       );
-      await expect(
-        handleExecutionRunning(second.executionId!, loserAssignment),
-      ).rejects.toThrow(/not available to claim/);
+      // The loser absorbs the lost compare-and-set and returns 200 with the
+      // unchanged execution, so the worker's holdsClaim check reads a non-running
+      // status and stands down. It must NOT throw: a throw becomes a 500, which
+      // postJson raises before the worker can read the answer — and with
+      // retries.enabledInDev false that kills the durable run outright.
+      const lost = await handleExecutionRunning(
+        second.executionId!,
+        loserAssignment,
+      );
+      expect(lost.status).toBe("queued");
+      expect(lost.assignmentId).toBe(loserAssignment);
+      // The worker's own predicate, transcribed from trigger/agent-execution.ts
+      // (`claimed.execution?.status === "running" && claimed.execution
+      // ?.assignmentId === payload.assignmentId`) and evaluated against what this
+      // callback actually returns — the route serialises exactly this object as
+      // `{ execution }`.
+      //
+      // `false` here is the whole behavioural win of F1: the stood_down branch
+      // guarded by this predicate was unreachable while the callback threw,
+      // because postJson raised on the resulting 500 before the worker could
+      // evaluate it. With retries.enabledInDev false the run then died outright.
+      const holdsClaim =
+        lost.status === "running" && lost.assignmentId === loserAssignment;
+      expect(holdsClaim).toBe(false);
+      const lostEvents = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      expect(
+        lostEvents.filter((e) => e.type === EXECUTION_EVENT_TYPE.claimLost),
+      ).toHaveLength(1);
 
       // The loser is now the stranding case: queued, dispatched, never claimed,
       // and holding no lease for reclaim to find.
@@ -1505,6 +1570,133 @@ describe("agent execution service", () => {
       expect([...getDevHqStore().executions.values()]).toHaveLength(2);
     });
 
+    it("records a reclaimed attempt that no agent could take", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do the work",
+        idempotencyKey: "reclaim-nocap-1",
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, assignmentId);
+
+      // Construct the no-capacity condition explicitly rather than leaning on the
+      // roster. Reclaim frees the claimed agent, so occupying everyone is not
+      // enough on its own: the freed agent must also stop satisfying the
+      // execution's persisted provider pin, which models the agent leaving or
+      // changing provider (the case releaseAssignmentForReassignment documents).
+      for (const agent of getDevHqStore().agents.values()) {
+        saveAgent({ ...agent, availability: "busy" });
+      }
+      const claimedAgent = getAgent("agent-supervisor")!;
+      saveAgent({ ...claimedAgent, provider: "provider-withdrawn" });
+
+      triggerMock.mockClear();
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      const requeued = (await getExecution(executionId))!;
+      expect(requeued.status).toBe("queued");
+      expect(requeued.agentId).toBeNull();
+      expect(requeued.attempt).toBe(2);
+      expect(triggerMock).not.toHaveBeenCalled();
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      // X3: this attempt is neither dispatchable nor terminal, so both original
+      // branches skipped it and it recorded nothing at all.
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred),
+      ).toHaveLength(1);
+      // X4: the reclaim event must not assert a retry that nothing is running.
+      const reclaimed = events.filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.reclaimed,
+      );
+      expect(reclaimed).toHaveLength(1);
+      expect(reclaimed[0]?.message).toContain("waiting for an available agent");
+      expect(reclaimed[0]?.message).not.toContain("retrying as attempt");
+    });
+
+    it("emits the requeue deferral from the reclaim loop, before the sweep runs", async () => {
+      // MAJOR-2. The test above asserts `toHaveLength(1)` after a sweep that runs
+      // BOTH the reclaim loop and `reconcileQueuedDispatches`. Both emit for the
+      // same (execution, attempt); the dedupe key collapses them to one event, so
+      // the assertion is satisfied by EITHER source and deleting the reclaim loop's
+      // emission leaves it green. It stopped detecting the defect it pins.
+      //
+      // The two sites cannot be separated by capacity — they decline for the same
+      // reason in the same sweep. They CAN be separated by ORDER: the reclaim loop
+      // processes every reclaimed execution, emitting as it goes, and only then
+      // does `handleExecutionReclaim` call `reconcileQueuedDispatches`. So with two
+      // stranded executions, the first one's deferral is emitted BEFORE the second
+      // one's `reclaimed` event if and only if the reclaim loop emitted it. If that
+      // call is deleted, both deferrals come from the sweep — after both `reclaimed`
+      // events — and the ordering assertion below fails.
+      // Two executions running at once, on different capabilities so each holds its
+      // own agent — `agent-supervisor` is the only "validation" agent.
+      const strand = async (
+        taskId: string,
+        capability: string,
+        key: string,
+      ) => {
+        const task = seedTask({ id: taskId });
+        const dispatched = await dispatchAgentExecution({
+          taskId: task.id,
+          requiredCapabilities: [capability],
+          instructions: "do the work",
+          idempotencyKey: key,
+        });
+        const executionId = dispatched.executionId!;
+        const assignmentId = (await getExecution(executionId))!.assignmentId!;
+        await handleExecutionRunning(executionId, assignmentId);
+        return executionId;
+      };
+
+      await strand("task-strand-a", "validation", "reclaim-order-a");
+      await strand("task-strand-b", "routing", "reclaim-order-b");
+
+      // Remove all capacity and withdraw the provider both are pinned to, so each
+      // reclaim requeues without an agent (the X3 shape) rather than retrying.
+      for (const agent of getDevHqStore().agents.values()) {
+        saveAgent({ ...agent, availability: "busy", provider: "withdrawn" });
+      }
+
+      triggerMock.mockClear();
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      // `listRecent` is newest-first; reverse for true append order.
+      const appended = (
+        await getDevHqAdapters().eventLogger.listRecent({
+          entityType: "execution",
+          limit: 200,
+        })
+      )
+        .slice()
+        .reverse();
+
+      const deferralIdx = appended
+        .map((e, i) => (e.type === EXECUTION_EVENT_TYPE.assignmentDeferred ? i : -1))
+        .filter((i) => i >= 0);
+      const reclaimedIdx = appended
+        .map((e, i) => (e.type === EXECUTION_EVENT_TYPE.reclaimed ? i : -1))
+        .filter((i) => i >= 0);
+
+      // Both were reclaimed, and both recorded a deferral.
+      expect(reclaimedIdx).toHaveLength(2);
+      expect(deferralIdx).toHaveLength(2);
+
+      // The discriminator, and it does not depend on which execution the sweep
+      // happens to process first. The reclaim loop emits each deferral immediately
+      // after that execution's own `reclaimed` event, so the deferrals INTERLEAVE:
+      // the first deferral precedes the last reclaim. If the reclaim loop's call is
+      // deleted, both deferrals are written later by `reconcileQueuedDispatches` —
+      // after every `reclaimed` event — and this inverts.
+      expect(Math.min(...deferralIdx)).toBeLessThan(Math.max(...reclaimedIdx));
+    });
+
     it("leaves a dispatched assignment alone inside its claim deadline", async () => {
       const task = seedTask();
       const dispatched = await dispatchAgentExecution({
@@ -1524,6 +1716,61 @@ describe("agent execution service", () => {
       );
       expect(getAssignment(assignmentId)!.status).toBe("assigned");
       expect(triggerMock).not.toHaveBeenCalled();
+    });
+
+    it("records the deferral when a claim-deadline release finds no agent", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do the work",
+        idempotencyKey: "claim-deadline-deferral-1",
+      });
+      const executionId = dispatched.executionId!;
+      const before = (await getExecution(executionId))!;
+      const attemptBefore = before.attempt;
+
+      // Dispatched but never claimed. Past the deadline the sweep releases the
+      // assignment for re-assignment — which costs no business attempt — and
+      // then finds nothing to re-assign it to, because every agent is occupied.
+      for (const agent of getDevHqStore().agents.values()) {
+        saveAgent({ ...agent, availability: "busy" });
+      }
+
+      triggerMock.mockClear();
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      // The stranded state the old code produced silently: still queued, no
+      // agent, attempt untouched.
+      const stranded = (await getExecution(executionId))!;
+      expect(stranded.status).toBe("queued");
+      expect(stranded.agentId).toBeNull();
+      expect(stranded.attempt).toBe(attemptBefore);
+      expect(triggerMock).not.toHaveBeenCalled();
+
+      // X1's surviving path: the timeline used to be empty here, so this was
+      // indistinguishable from a dispatch that was never requested.
+      const deferralsOf = async () =>
+        (
+          await getDevHqAdapters().eventLogger.listRecent({
+            entityType: "execution",
+            limit: 200,
+          })
+        ).filter(
+          (e) =>
+            e.type === EXECUTION_EVENT_TYPE.assignmentDeferred &&
+            e.entityId === executionId,
+        );
+
+      expect(await deferralsOf()).toHaveLength(1);
+
+      // Reconciliation re-observes a stranded execution on every sweep. The
+      // per-(execution, attempt) dedupe key must make the repeat a no-op rather
+      // than appending one entry per cycle.
+      await handleExecutionReclaim(FAR_FUTURE);
+      await handleExecutionReclaim(FAR_FUTURE);
+      expect(await deferralsOf()).toHaveLength(1);
+      expect((await getExecution(executionId))!.attempt).toBe(attemptBefore);
     });
 
     it("does not sweep founder-request executions", async () => {
@@ -1548,6 +1795,41 @@ describe("agent execution service", () => {
       expect(after.agentId).toBeNull();
       expect(after.assignmentId).toBeNull();
       expect(triggerMock).not.toHaveBeenCalled();
+    });
+
+    it("requests the review on a re-entered completion callback", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do the work",
+        idempotencyKey: "reentry-review-1",
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, assignmentId);
+
+      // Model a crash between the terminal transition and the review request:
+      // the execution is succeeded, but no review was ever asked for.
+      const running = (await getExecution(executionId))!;
+      saveExecution({ ...running, status: "succeeded", completedAt: TS });
+      expect(
+        await getDevHqAdapters().reviewStore.findByExecution(executionId),
+      ).toBeNull();
+
+      // The re-entry path must close that on the next callback, without waiting
+      // for the sweep.
+      await handleExecutionComplete({
+        executionId,
+        assignmentId,
+        status: "succeeded",
+        instructions: "do the work",
+      });
+
+      const review =
+        await getDevHqAdapters().reviewStore.findByExecution(executionId);
+      expect(review).not.toBeNull();
+      expect(review?.executionId).toBe(executionId);
     });
   });
 });

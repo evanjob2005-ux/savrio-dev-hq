@@ -91,7 +91,35 @@ and evict the timeline E5 depends on.
 | 5 | `escalation-service.ts:285-290` | `assignment_deferred` | **highest priority** |
 | 6 | `agent-execution-service.ts:1005-1020` | `assignment_deferred` | **newly found — see X3** |
 | — | `handleExecutionRunning`, claim lost | `claim_lost` | the F1 absorption point |
-| — | `reconcileQueuedDispatches:499` | **NO** | sweep re-observing; key no-ops it |
+| — | `reconcileQueuedDispatches:499` | ~~**NO**~~ **SUPERSEDED — now emits. See below.** | ~~sweep re-observing; key no-ops it~~ **Rationale did not hold on every path.** |
+
+> **⟶ SUPERSEDED by Founder decision, 2026-07-26 — this row's `NO` ruling is no longer
+> operative, and the reason it gave was incomplete.**
+>
+> The rationale *"sweep re-observing; key no-ops it"* holds **only when site 1 already fired**
+> at that attempt. It does not hold on the **claim-deadline-release** path: there the execution
+> was **successfully assigned at dispatch**, so site 1 never fired and **no dedupe key exists to
+> no-op**. The release deliberately costs no attempt, so the key stays at the same
+> `(execution, attempt)` — and the timeline is genuinely **empty**. That is precisely the X1
+> state this matrix exists to eliminate: a declined dispatch indistinguishable from one never
+> requested.
+>
+> **Verified by execution, not argued.** With the emission reverted, the regression test fails
+> `expected [] to have a length of 1 but got +0` — the timeline really was empty. The
+> Architecture Review independently re-derived the counterexample and **ratified the departure**
+> (Q1), noting the same shape is also reachable via the F1 stand-down, where the loser is left
+> with a dispatched-but-never-claimed assignment.
+>
+> **Now operative:** `reconcileQueuedDispatches` emits the canonical
+> `execution.assignment_deferred` at its `!decision.assigned || !decision.assignment` decline,
+> reusing the existing per-`(execution, attempt)` dedupe key. It is **Site 3** in AR-1E's
+> emitting-site scheme — the gap that scheme left between sites 2 and 4. Specified at
+> Amendment 6 §5 of `SPRINT_1E_REMEDIATION_PATCH_SPEC.md`.
+>
+> **Numbering caution.** Row 3 of *this* table (`execution-manager.ts:172-186`, marked `NO` for
+> manager purity) is **not** the same "Site 3". This is a six-row **candidate** table; AR-1E's
+> scheme counts **emitting** sites only. The two collide on the number 3 and have already
+> caught two readers.
 
 **Site 5 is worst:** the founder has just made an explicit `revise` decision.
 `ensureReviseDispatch` returns the queued execution, so `activateTaskForLiveRevision`

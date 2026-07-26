@@ -54,8 +54,14 @@ export interface ExecutionRunner {
     taskId: string,
     policy?: AgentSelectionPolicy,
   ): Promise<AssignmentDecision>;
-  /** Atomically take ownership of an execution for an available agent. */
-  claimExecution(executionId: string, agentId: string): Promise<Execution>;
+  /**
+   * Atomically take ownership of an execution for an available agent. Resolves
+   * `null` when the compare-and-set loses to a concurrent claim.
+   */
+  claimExecution(
+    executionId: string,
+    agentId: string,
+  ): Promise<Execution | null>;
   /** Extend the lease of a running execution. */
   heartbeat(executionId: string): Promise<Execution>;
   /** Record a terminal agent result and free the agent. */
@@ -65,7 +71,7 @@ export interface ExecutionRunner {
 
   // Retained from the original contract.
   queueExecution(taskId: string, workflowId: string): Promise<Execution>;
-  runExecution(executionId: string): Promise<Execution>;
+  runExecution(executionId: string): Promise<Execution | null>;
   cancelExecution(executionId: string): Promise<Execution>;
   getExecution(executionId: string): Promise<Execution | null>;
 }

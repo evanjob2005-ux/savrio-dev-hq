@@ -285,7 +285,12 @@ async function ensureReviseDispatch(
   if (!decision.assigned || !decision.assignment) {
     // Not dispatchable right now (no agent free) or no longer dispatchable at
     // all (the revision already terminated). Either way, report the canonical
-    // execution's authoritative state so the caller can decide about the task.
+    // execution's authoritative state so the caller can decide about the task —
+    // and record the decline, which is a lifecycle outcome (ADR-0001 O6).
+    const { ensureAssignmentDeferredEvent } = await import(
+      "@/lib/dev-hq/agent-execution-service"
+    );
+    await ensureAssignmentDeferredEvent(execution, decision.reason);
     return getExecution(executionId);
   }
 

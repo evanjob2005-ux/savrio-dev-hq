@@ -20,8 +20,10 @@ import {
   resetDevHqStore,
   saveAgent,
   saveAssignment,
+  saveExecution,
   saveTask,
 } from "@/lib/dev-hq/store";
+import { MAX_EXECUTION_ATTEMPTS } from "@/lib/dev-hq/constants";
 import type { AgentExecutionStatus, AgentResult, Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
@@ -106,7 +108,7 @@ describe("execution manager", () => {
       requiredCapabilities: ["validation"],
     });
 
-    const running = await claimExecution(execution!.id, "agent-supervisor");
+    const running = (await claimExecution(execution!.id, "agent-supervisor"))!;
     expect(running.status).toBe("running");
     expect(running.startedAt).toBeTruthy();
     expect(getAgent("agent-supervisor")?.availability).toBe("busy");
@@ -117,7 +119,7 @@ describe("execution manager", () => {
     expect(assignment?.leaseExpiresAt).toBeTruthy();
   });
 
-  it("rejects a second claim on the same agent (compare-and-set)", async () => {
+  it("refuses a second claim on the same agent (compare-and-set)", async () => {
     seedTask({ id: "task-a" });
     seedTask({ id: "task-b" });
     const a = await assignExecution("task-a", {
@@ -131,9 +133,17 @@ describe("execution manager", () => {
     expect(b.agentId).toBe("agent-supervisor");
 
     await claimExecution(a.execution!.id, "agent-supervisor");
-    await expect(
-      claimExecution(b.execution!.id, "agent-supervisor"),
-    ).rejects.toThrow(/not available to claim/);
+    // Still exactly one winner; the loser now reports that by returning null
+    // instead of throwing. The reservation itself is unchanged.
+    expect(await claimExecution(b.execution!.id, "agent-supervisor")).toBeNull();
+    expect((await getExecution(b.execution!.id))!.status).toBe("queued");
+    expect(getAgent("agent-supervisor")?.availability).toBe("busy");
+    //
+    // This is the capacity-1 claim race at the manager boundary, and it proves
+    // only the precondition. That the losing *worker* can now reach its
+    // stood_down branch is a property of the callback chain and is pinned in
+    // agent-execution-service.test.ts, "recovers the loser of a pre-claim race
+    // for a capacity-one agent".
   });
 
   it("validates claim preconditions", async () => {
@@ -169,9 +179,58 @@ describe("execution manager", () => {
     expect(assignment?.lastHeartbeatAt).toBeTruthy();
     expect(assignment?.leaseExpiresAt).toBeTruthy();
 
-    // Cannot heartbeat a non-running execution.
+    // A beat that lands after the attempt already finished is absorbed, not an
+    // error — and it must be a *silent* no-op: no lease extended, no heartbeat
+    // recorded, no status moved. Asserting only that it resolves would swap one
+    // weak test for another, which is the X2 failure mode.
     await releaseExecution(execution!.id, makeResult("succeeded"));
-    await expect(heartbeat(execution!.id)).rejects.toThrow(/not running/);
+
+    // Pin a recognisable stamp on the released assignment first. Comparing
+    // `lastHeartbeatAt` against its previous value would not be sound on its own:
+    // nowIso() is millisecond-resolution, so a wrongly-written stamp inside the
+    // same millisecond would compare equal and pass vacuously. A sentinel makes
+    // any write detectable regardless of clock resolution.
+    const releasedAssignment = getAssignment(execution!.assignmentId!)!;
+    saveAssignment({
+      ...releasedAssignment,
+      lastHeartbeatAt: "2026-07-24T20:00:00.000Z",
+    });
+
+    const late = await heartbeat(execution!.id);
+    expect(late.status).toBe("succeeded");
+
+    const afterLate = getAssignment(execution!.assignmentId!);
+    // The two assertions a real write could not survive: heartbeat() sets status
+    // to "running" and stamps a fresh lease.
+    expect(afterLate?.status).toBe("released");
+    expect(afterLate?.leaseExpiresAt).toBeNull();
+    // And the field itself, unchanged.
+    expect(afterLate?.lastHeartbeatAt).toBe("2026-07-24T20:00:00.000Z");
+  });
+
+  it("absorbs a heartbeat for an attempt reclaimed underneath it", async () => {
+    const task = seedTask();
+    const { execution } = await assignExecution(task.id, {
+      requiredCapabilities: ["validation"],
+    });
+    const claimed = (await claimExecution(execution!.id, "agent-supervisor"))!;
+    const assignmentId = claimed.assignmentId!;
+
+    // Spend the retry budget so the reclaim is terminal rather than a requeue.
+    // That is the shape that used to throw: the execution goes to `failed` while
+    // KEEPING this assignment id, so the stale-worker guard does not catch the
+    // beat and the terminal check used to raise.
+    saveExecution({ ...claimed, attempt: MAX_EXECUTION_ATTEMPTS });
+    await reclaimStale(FAR_FUTURE);
+
+    const reclaimed = (await getExecution(execution!.id))!;
+    expect(reclaimed.status).toBe("failed");
+    expect(reclaimed.assignmentId).toBe(assignmentId);
+
+    const late = await heartbeat(execution!.id, assignmentId);
+    expect(late.status).toBe("failed");
+    expect(getAssignment(assignmentId)?.status).toBe("released");
+    expect(getAssignment(assignmentId)?.leaseExpiresAt).toBeNull();
   });
 
   it("releases a succeeded execution and frees the agent", async () => {
@@ -322,7 +381,7 @@ describe("execution manager", () => {
     const { execution } = await assignExecution(task.id, {
       requiredCapabilities: ["validation"],
     });
-    const running = await runExecution(execution!.id);
+    const running = (await runExecution(execution!.id))!;
     expect(running.status).toBe("running");
     expect(getAgent("agent-supervisor")?.availability).toBe("busy");
 

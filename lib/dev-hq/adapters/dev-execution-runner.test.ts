@@ -56,7 +56,7 @@ describe("DevExecutionRunner", () => {
 
     const executionId = decision.execution!.id;
     const claimed = await runner.claimExecution(executionId, "agent-supervisor");
-    expect(claimed.status).toBe("running");
+    expect(claimed?.status).toBe("running");
 
     await runner.heartbeat(executionId);
     const done = await runner.releaseExecution(executionId, succeeded());
