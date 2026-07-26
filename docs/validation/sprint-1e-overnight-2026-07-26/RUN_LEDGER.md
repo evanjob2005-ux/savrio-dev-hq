@@ -117,13 +117,13 @@ Full report: `agents/independent-code-reviewer/outputs/SPRINT_1E_OVERNIGHT_CR_RE
 |---|---|---|---|---|---|---|
 | F1 | Major | Dead recovery path (claim-race loser hard-fails) | AWAITING_REPRO | 0 | raised | pending |
 | F2 | Major | Lost reclaim audit records (unkeyed, unreconciled) | AWAITING_REPRO | 0 | raised | pending |
-| F3 | Minor | Dev-only unauthenticated escalation routes | **DOWNGRADED — see below** | 0 | raised | pending |
+| F3 | Minor | Dev-only unauthenticated escalation routes | **CLOSED — refuted, accepted by CR-1E** | — | withdrawn | concurs |
 | F4 | Major | Heartbeat throws where siblings no-op | AWAITING_REPRO | 0 | raised | pending |
 | F5 | Minor | Lost update on task status | AWAITING_REPRO | 0 | raised | pending |
 | F6 | Minor | Full read-model rebuild per event list | AWAITING_REPRO | 0 | raised | pending |
 | F7 | Minor | `AssignmentDecision` permits invalid states | AWAITING_REPRO | 0 | raised | pending |
 | F8 | Minor | Unsound non-null assertion (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
-| F9 | Minor | Module-local id sequence vs global store (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
+| F9 | Obs. | Module-local id sequence vs global store | **DOWNGRADED by CR-1E to observation** | 0 | self-downgraded | corroborated (AR2-3) |
 | F10 | Minor | `eventKeys` unbounded growth | AWAITING_REPRO | 0 | raised | pending |
 | F11 | Minor | Unvalidated enum, `internal/finalize` (pre-1E) | AWAITING_REPRO | 0 | raised | pending |
 | F12 | Minor | Unbounded recovery cycling (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
@@ -190,6 +190,56 @@ rejecting `/api/other/thing`.
 run, so runtime enforcement remains unexecuted. AR-1E's surviving recommendations
 stand and are carried forward: no test anywhere exercises `proxy.ts`, and it is the
 single control for the most privileged founder-decision surface.
+
+---
+
+## CR-1E method audit and self-correction
+
+CR-1E accepted the F3 refutation without contest, after **independently verifying the
+refutation against source rather than deferring to the coordinator** (`proxy.ts`
+present in the baseline tree via `git ls-tree 62f6291 -- proxy.ts`; `next@16.2.11`
+confirms the rename applies). It then completed the check the coordinator had not:
+Server Actions post to the page route and are **not** covered by the proxy matcher,
+but the sole `"use server"` file (`lib/dev-hq/actions.ts:44-52`) carries its own
+production rejection. The gap the matcher leaves is independently closed. This
+strengthens the refutation.
+
+CR-1E then audited its own search method and classified all 12 findings by the error
+class that produced F3 — *asserting a framework fact from memory instead of checking
+the version in use.*
+
+| Class | Description | Items | Outcome |
+|---|---|---|---|
+| A | Absence established by name/pattern search | Cleared #9 ×2, Cleared #7, F2 | **All four re-verified — all hold** |
+| B | Inference about framework behavior, unverified | **F9** | **Self-downgraded to observation** |
+| C | Absence by exhaustive read within a boundary | F8, F10, F11, Cleared #1, #10 | Sound; escapes only a writer outside the boundary |
+| D | Pure positive trace, no absence claim | **F1**, F4, F5, F6, F7, F12, Cleared #3/#5/#6/#11/#12 | Unaffected by the error class |
+
+**Two outcomes matter more than the rest:**
+
+1. **CR-1E found its own broken regex.** Its non-null-assertion scan required a `.`
+   after the `!` and therefore missed `agent-execution-service.ts:1007`; it had caught
+   that case only by luck from an earlier read. Corrected scan returns the same figure
+   — exactly four in non-test source. *The number was right for the wrong reason,* and
+   CR-1E reported that distinction rather than resting on the matching count. The
+   highest-risk item in its report was a **cleared** item, not a finding; it noted
+   correctly that a false clear is worse than a false finding.
+
+2. **F2 is now stronger than filed.** `evidenceStore.addEvidence(` at
+   `agent-execution-service.ts:968` is the **only unkeyed evidence write in the entire
+   non-test tree**; every other site uses keyed `ensureEvidence` (`:124`,
+   `escalation-service.ts:152`, `review-service.ts:210`). An outlier against a
+   codebase-wide convention, not merely a missing key.
+
+**Revised CR-1E gating recommendation:** F1, F2, F4 before Sprint 1F extends the
+execution surface. F3 → Minor/known-accepted. **F9 → observation**, pending
+verification of Next 16 module-instance behavior; explicitly deprioritised below
+F1/F2/F4 for reproduction time.
+
+**Minor doc note (not a finding):** `proxy.ts` was added in `6a9536a` and its comment
+names only the founder approve/reject endpoints; the Sprint 1E escalation routes
+arrived later in `395e778`. The matcher covers them correctly — only the comment is
+under-inclusive. Documentation accuracy, no severity.
 
 ---
 
