@@ -203,6 +203,47 @@ to add them. Two words turn purity-verified-by-reading into purity-enforced-by-b
 
 ---
 
+## Part 2b — ⚠️ SCOPE DISCLOSURE: this remediation amends a PORT, not only internals
+
+Raised by AR-1E in pre-gate review, verified by the coordinator. **The Founder should
+approve knowing this, rather than believing the change is confined to service
+internals.**
+
+Fixing F1 requires widening `claimExecution`'s return type from `Promise<Execution>` to
+`Promise<Execution | null>`, and that propagates into the **contract**, not just the
+implementation:
+
+| File | Change |
+|---|---|
+| `types/contracts/execution-runner.ts:58` | `claimExecution` return type |
+| `types/contracts/execution-runner.ts:68` | `runExecution` return type |
+| `lib/dev-hq/adapters/dev-execution-runner.ts:26,46` | adapter conformance |
+| `lib/dev-hq/execution-manager.ts` | implementation |
+
+**Why it matters.** ADR-0001 D7 states: *"The compare-and-set claim semantics are
+specified now so a future Supabase adapter has a concurrency contract to meet."* The
+`ExecutionRunner` port is therefore not an internal interface — it is the designated
+concurrency contract for durable persistence that has not been built yet. Amending it
+is a decision with reach beyond this branch.
+
+**AR-1E's position, and the coordinator's:** support the change. It is required by F1,
+and it makes the contract *more* honest — the same direction as AR2-6, which found the
+port understating an invariant. A contract that promises an `Execution` from an
+operation that can legitimately lose a race is a contract a future adapter cannot
+truthfully implement.
+
+**This is a disclosure, not an objection.** Neither reviewer opposes it. It is recorded
+here so the approval is informed.
+
+**Related, and deliberately NOT in this package:** AR-1E ruled that making
+`assignmentId` required on the three callback handlers — which would remove the need
+for the guard in §2.6 — belongs with AR2-6 as **one coherent port revision**
+(`claimExecution`'s return type, `heartbeat`'s missing `assignmentId`, and the handlers'
+optional parameter), not split across two packages. Splitting contract changes is how
+contracts drift.
+
+---
+
 ## Part 3 — Scope questions for the Founder
 
 ### Q1 — F4: in or out?
