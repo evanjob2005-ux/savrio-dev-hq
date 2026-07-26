@@ -139,7 +139,7 @@ Verdict: **PASS WITH NON-BLOCKING FOLLOW-UPS — 0 blockers.**
 | AR2-2 | Lifecycle violation — Task/Execution decoupled both directions | AWAITING_REPRO | 0 | pending | raised |
 | AR2-3 | Id generation process-local vs `globalThis` store | AWAITING_REPRO | 0 | pending | raised |
 | AR2-4 | Review handoff recovery path not the one the callback replays | AWAITING_REPRO | 0 | pending | raised |
-| AR2-5 | Authorization depth asymmetry | **RESOLVED — registration confirmed** | — | pending | raised |
+| AR2-5 | Authorization depth asymmetry | **PARTIALLY resolved — registration question closed; two recommendations OPEN** | 0 | endorses | raised |
 | AR2-6 | `ExecutionRunner` port omits `assignmentId` | AWAITING_REPRO | 0 | pending | raised |
 
 ### Independent convergence between reviewers
@@ -187,9 +187,22 @@ escalation routes plus `/escalations` and the internal dispatch route, while cor
 rejecting `/api/other/thing`.
 
 **Limit:** this confirms registration from build artifacts. No production server was
-run, so runtime enforcement remains unexecuted. AR-1E's surviving recommendations
-stand and are carried forward: no test anywhere exercises `proxy.ts`, and it is the
-single control for the most privileged founder-decision surface.
+run, so runtime enforcement remains unexecuted.
+
+**AR2-5 is NOT closed outright — correction applied at AR-1E's request.** The
+resolution settled only the *registration* question. Two recommendations remain open,
+and AR-1E rates the first **higher** now than when filed, not lower:
+
+1. **No test anywhere exercises `proxy.ts`** (verified against the full 22-file
+   inventory). Registration turned out to depend on a manifest whose canonical
+   location **moved between Next major versions** — which is precisely the mechanism
+   by which a future upgrade could silently un-register the only control on the most
+   privileged founder surface, with nothing failing to signal it. The untested
+   boundary is the finding; the resolution raised its priority.
+2. **Add per-route production disabling** to the three escalation-resolution routes
+   for defence in depth. **CR-1E independently endorses this**, noting the current
+   posture makes the whole Dev HQ surface depend on a single root-level file whose
+   comment predates and does not name the Sprint 1E routes it now protects.
 
 ---
 

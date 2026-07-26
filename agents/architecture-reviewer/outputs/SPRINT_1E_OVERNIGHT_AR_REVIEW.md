@@ -141,15 +141,90 @@ production server was run, so runtime enforcement remains unexecuted.
 ## Blockers
 
 **None.** AR-1E: every finding degrades to "work silently stalls" or "a record is
-missing", never to corrupted or contradictory state. No finding produces a duplicate
-execution, a double-spent budget, a second founder decision, or a falsified audit
-record.
+missing", never to corrupted or contradictory state.
+
+> **Amended by AR-1E after reading CR-1E's F2** (applied at AR-1E's own request; the
+> amendment weakens its original phrasing):
+>
+> "No finding produces a duplicate execution, a double-spent budget, a second founder
+> decision, or **a record that asserts an untruth**. F2 shows the timeline cannot
+> distinguish a lease-expiry reclaim from a reported failure — the absence of the
+> unkeyed `reclaimed` record **is not neutral**."
+>
+> AR-1E's reason: CR-1E's F2 made the original phrasing sound stronger than the
+> property actually established, and leaving the stronger claim in the permanent
+> record would overstate the verdict *in the baseline's favour*.
 
 Prioritisation from AR-1E:
 - **Constrains Sprint 1F materially:** AR2-1, AR2-2
 - **Before running anywhere but a developer machine:** AR2-3, AR2-5, plus carried NB-1, CR-1
 - **Before the persistence abstraction is designed:** AR2-3's NB-3 row, AR2-6, NB-3
 - **Cheap and high value now:** AR2-4 (one call), AR2-3 (one line)
+
+---
+
+## AR-1E architectural read on CR-1E's F1, F2, F4
+
+Filed after cross-brief. **Verdict unchanged: PASS, none of the three is a blocker.**
+
+### Synthesis — AR2-1, F1 and F4 are one pattern
+
+AR-1E's most actionable output for Sprint 1F. The Work Management Layer has **no
+consistent representation for "this is a normal negative outcome."** Three designed-for
+conditions are represented three different ways, and a fourth shows the correct shape:
+
+| Condition | Representation | Site |
+|---|---|---|
+| No capability-matching agent free | silent early return, **no event at all** | `agent-execution-service.ts:682-690`, `execution-manager.ts:461-464` |
+| Lost a capacity-1 claim race | **thrown Error → HTTP 500** | `execution-manager.ts:525-529` → `running/route.ts` |
+| Beat arrives after the attempt ended | **thrown Error → HTTP 500** | `execution-manager.ts:564-568` |
+| Stale/superseded callback | **absorbed, returns current state** ← correct shape | `agent-execution-service.ts:729-735, 790-791` |
+
+The module demonstrably knows the right answer — the fourth row absorbs "already moved
+on" deliberately and documents why. **Treat AR2-1 + F1 + F4 as one Sprint 1F
+workstream, not three tickets:** define what a normal negative outcome is at this
+boundary, give it one representation (a returned decision plus a keyed event, never a
+throw), and apply it at all three sites.
+
+### F1 — confirmed, with a severity correction *downward*
+
+`ensureAssignment` explicitly does not reserve the agent (`execution-manager.ts:220-222`),
+so two executions can hold assignments naming the same capacity-1 agent. Worker B's
+`postJson` raises on `!response.ok` before the `holdsClaim` check at
+`trigger/agent-execution.ts:66-72` is evaluated, so **the stand-down branch is dead code
+for the race its own comment names** (`:55-59`).
+
+**Correction to CR-1E's framing.** "Permanently fails its durable run" is accurate in
+dev (`trigger.config.ts:8`, `enabledInDev: false`) but only partial in a deployed
+environment, where `maxAttempts: 3` retries the whole run. Either way the **execution**
+recovers: assignment B has `triggerRunId` set and `claimedAt` null, so
+`isClaimDeadlineExpired` fires at 120s and `reconcileQueuedDispatches` releases and
+re-assigns it, costing no business attempt. **The lost run is real; the lost work is
+not.** That is why F1 is not a blocker.
+
+### F4 — confirmed, same class
+
+Reachable today via a Trigger-retried heartbeat landing after `/complete` committed the
+terminal transition: `releaseExecution` leaves `assignmentId` intact
+(`execution-manager.ts:622-637`), so the beat passes the stale-worker guard and hits the
+throw. The reclaim and retry paths do **not** produce this — `applyFailedAttempt`
+replaces the assignment id and `releaseAssignmentForReassignment` clears it. The
+aliasing is specific to terminal release. No retry-budget attempt is consumed.
+
+### F2 — confirmed, and it sharpens AR-1E's own claim
+
+F2 is AR-001's NB-2 composed with NB-4; both verified still present. The sharpened
+property: `ensureRetryEvents` still reconstructs `execution.retried` from the attempt
+counter, and `reconcileRecordsFor` deliberately writes no outcome evidence for a
+requeued execution. So the timeline renders "attempt 1 did not succeed; retrying as
+attempt 2" **with no cause recorded** — a lease-expiry reclaim and a worker-reported
+failure become **indistinguishable to any reader of the timeline.** Two operationally
+different causes, one appearance.
+
+Not a blocker (state remains authoritative and repairable; the founder is not shown
+something false), but **the sharpest argument yet for keying `reclaimed`** — it is the
+only lifecycle transition whose entire signal lives in an unkeyed record. AR-1E moves
+NB-2 up the Sprint 1F ordering on this basis.
 
 ---
 
