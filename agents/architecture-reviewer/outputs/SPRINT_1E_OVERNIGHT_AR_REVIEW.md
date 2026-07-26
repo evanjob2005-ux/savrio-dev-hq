@@ -140,8 +140,12 @@ production server was run, so runtime enforcement remains unexecuted.
 
 ## Blockers
 
-**None.** AR-1E: every finding degrades to "work silently stalls" or "a record is
-missing", never to corrupted or contradictory state.
+**None.** Amended by AR-1E after the coordinator reproduced AR2-1/X1 — its original
+"work silently stalls" understated the property:
+
+> "Every finding degrades to a stall or a missing record rather than corrupted state
+> — **though AR2-1's stall is the deterministic outcome of a normal dispatch, not an
+> edge case, and produces no founder-facing signal at all.**"
 
 > **Amended by AR-1E after reading CR-1E's F2** (applied at AR-1E's own request; the
 > amendment weakens its original phrasing):
@@ -155,8 +159,31 @@ missing", never to corrupted or contradictory state.
 > property actually established, and leaving the stronger claim in the permanent
 > record would overstate the verdict *in the baseline's favour*.
 
+**AR2-1 reclassified after reproduction.** AR-1E moved it out of "constrains Sprint
+1F" on the strength of X1 being reachable with no crash and no race:
+
+> **Must land before this subsystem is used by anyone other than the developer who
+> wrote it.** Not because it is unsafe, but because a founder-facing surface that
+> fails half its advertised vocabulary with no explanation is not usable by a second
+> person. Non-blocking for the commit gate; gating for first non-developer use.
+
+**Why X1 is nonetheless not a blocker** (AR-1E, and this distinction is load-bearing):
+ADR-0001 O6 says a capability-unmatched execution is *left `queued` with a logged
+event*. **The queued execution is the approved outcome; the missing event is the whole
+violation.** Anyone reading X1 as "executions leak" will fix the wrong thing. The
+condition self-heals the moment an eligible agent exists, costs no business attempt,
+and the record is internally truthful. AR-1E's stated threshold: *committing does not
+make it harder to fix* — the remediation is purely additive.
+
+**Scope note, which cuts in the baseline's favour.** The seeded-availability half of
+AR2-1 traces to ADR-0001 **D5 in Sprint 1D**, over Sprint 1A placeholder data. This is
+a **Sprint 1E** gate; failing it for a property fixed by an approved 1D decision would
+apply the gate at the wrong sprint. The missing-event half spans 1D-5 and 1E-5 and is
+fairly in scope.
+
 Prioritisation from AR-1E:
-- **Constrains Sprint 1F materially:** AR2-1, AR2-2
+- **Must land before non-developer use:** AR2-1 (reclassified), AR2-3, CR-1
+- **Constrains Sprint 1F materially:** AR2-2
 - **Before running anywhere but a developer machine:** AR2-3, AR2-5, plus carried NB-1, CR-1
 - **Before the persistence abstraction is designed:** AR2-3's NB-3 row, AR2-6, NB-3
 - **Cheap and high value now:** AR2-4 (one call), AR2-3 (one line)
