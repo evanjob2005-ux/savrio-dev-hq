@@ -136,11 +136,30 @@ Verdict: **PASS WITH NON-BLOCKING FOLLOW-UPS — 0 blockers.**
 | ID | Dimension | Status | Attempts | CR | AR |
 |---|---|---|---|---|---|
 | AR2-1 | ADR-0001 O6 violation — 5/10 capabilities unassignable, no decline event | **REPRODUCED** | 0 | confirmed | raised |
-| AR2-2 | Lifecycle violation — Task/Execution decoupled both directions | AWAITING_REPRO | 0 | pending | raised |
+| AR2-2 | Lifecycle violation — Task/Execution decoupled | **NARROWED by CR-1E — as stated absolutely it is wrong** | 0 | corrected | raised |
 | AR2-3 | Id generation process-local vs `globalThis` store | AWAITING_REPRO | 0 | pending | raised |
 | AR2-4 | Review handoff recovery path not the one the callback replays | **REPRODUCED** | 0 | confirmed as Minor | raised |
 | AR2-5 | Authorization depth asymmetry | **PARTIALLY resolved — registration question closed; two recommendations OPEN** | 0 | endorses | raised |
 | AR2-6 | `ExecutionRunner` port omits `assignmentId` | AWAITING_REPRO | 0 | pending | raised |
+
+### CR-1E correction to AR2-2 — reviewers correcting each other
+
+AR-1E claimed "nothing marks a task `completed`." **CR-1E refuted that as stated:**
+the founder-request path *does* — `founder-request-service.ts:362-365` via
+`taskStatusForOutcome` (`:45-52`) writes `"completed"` on approval.
+
+**The true, narrower statement:** *no agent-execution or review path ever writes task
+status.* Exhaustive grep returns three task-status writers only —
+`dev-task-repository`, `escalation-service` (`:86-95`, `:119-136`), and
+`founder-request-service` (`:362`). Neither `agent-execution-service` nor
+`review-service` imports `taskRepository` at all. Scoped that way, AR2-2 holds and is
+a genuine gap: a task whose agent execution succeeds and whose review passes is never
+marked `completed`, and the only terminal status on that path comes from an escalation
+`accept`/`abandon`.
+
+Corrections ran in **both** directions this run: AR-1E corrected CR-1E's F1 severity
+downward, and CR-1E corrected AR-1E's AR2-2 scope. Neither deferred to the other, and
+neither deferred to the coordinator.
 
 ### Independent convergence between reviewers
 
