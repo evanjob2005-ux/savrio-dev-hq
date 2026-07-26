@@ -193,6 +193,76 @@ single control for the most privileged founder-decision surface.
 
 ---
 
+## REPRODUCED BY EXECUTION — AR2-1 and X1
+
+**First executed reproduction of the run.** Performed by the coordinator after
+LSE-1E did not deliver (see coordinator error note below). A temporary diagnostic
+harness was written at `lib/dev-hq/__diagnostic__/ar2-1-repro.test.ts`, run against
+the validation branch, and **deleted immediately**. It was never committed. Assertions
+were written to FAIL if the defect is real, so a failing run is a positive
+reproduction.
+
+Raw log: scratchpad `logs/repro-ar2-1.log`.
+
+| Check | Assertion | Result |
+|---|---|---|
+| REPRO-A | Unassignable capabilities exist in the seeded roster | passed (arithmetic confirmed) |
+| REPRO-B | A decline logs an event | **FAILED — `expected 0 to be greater than 0`** |
+| REPRO-C | A declined dispatch leaves no stranded execution | **FAILED — 1 stranded execution** |
+
+**REPRO-B — AR2-1 confirmed by execution.** Dispatching with
+`requiredCapabilities: ["implementation"]` (held only by `agent-claude`, seeded
+`busy`) returns `assigned: false, reason: "no_agent_available"` and logs **zero
+events** — event count 0 before and 0 after. **ADR-0001 O6 requires a logged event on
+no-match. It is violated, and the violation is now demonstrated rather than argued.**
+
+**REPRO-C — X1 confirmed by execution.** The same decline leaves a stranded record:
+
+```
+{ id: 'exec-dispatch-dsp-1785057217829-2', status: 'queued', agentId: null }
+```
+
+The canonical execution is created *before* assignment is attempted, then stranded
+`queued` with no agent, no terminal state, no escalation, and no founder-facing
+signal. `reclaimStale` only touches `running`, so nothing reclaims it.
+
+**Why the existing suite misses this.** `agent-execution-service.test.ts:110-119`
+covers the same decline path and asserts only `assigned === false` and
+`reason === "no_agent_available"`. It never asserts the event or the stranding, so it
+passes green while both properties fail — the same "green test that pins the wrong
+thing" pattern CR-1E identified in F1.
+
+**Attribution.** AR2-1 raised by AR-1E. The stranded-execution consequence (X1) was
+identified by CR-1E while cross-checking AR-1E, in CR-1E's own assigned dimension,
+which it credited to AR-1E explicitly. Reproduced by the coordinator.
+
+### Registered as X1
+
+| ID | Sev | Category | Status | Attempts | CR | AR |
+|---|---|---|---|---|---|---|
+| X1 | Major | Declined dispatch strands an execution `queued` forever | **REPRODUCED** | 0 | raised | raised (as AR2-1 consequence) |
+
+CR-1E recommends folding F12 (unbounded recovery cycling) under X1 — same family, but
+X1 is reachable with the shipped roster whereas F12 is not.
+
+---
+
+## Coordinator error — LSE-1E assignment was structurally impossible
+
+Recorded against the coordinator, not the specialist. LSE-1E was assigned to
+*reproduce* defects, but its role grants `Read, Glob, Grep, Bash, WebFetch, Skill` —
+no `Write`, no `Edit`. Reproduction requires authoring a harness, so the assignment
+could not be executed as written. Four idle cycles followed.
+
+Corrected by moving to the Founder-approved arrangement (LSE specifies, coordinator
+acts as its hands) and, when that produced no reply either, by the coordinator
+performing the reproduction directly. **Phase 2's behavioral probing was therefore
+never performed by the Lead Software Engineer role.** The reproductions above are
+coordinator work and are attributed as such; the ten embedded validation categories
+remain **unverified by systematic probing**, not passed.
+
+---
+
 ## CR-1E method audit and self-correction
 
 CR-1E accepted the F3 refutation without contest, after **independently verifying the
