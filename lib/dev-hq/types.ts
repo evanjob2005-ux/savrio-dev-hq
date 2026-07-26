@@ -40,4 +40,9 @@ export interface DevHqStoreData {
   agentAssignments: Map<string, AgentAssignment>;
   evidence: Map<string, Evidence>;
   escalations: Map<string, Escalation>;
+  /**
+   * Events already recorded under an idempotency key. Keyed lookup rather than a
+   * scan of `events`, which is trimmed and would silently forget older keys.
+   */
+  eventKeys: Map<string, Event>;
 }

@@ -94,6 +94,7 @@ function createEmptyStore(): DevHqStoreData {
     agentAssignments: new Map(),
     evidence: new Map(),
     escalations: new Map(),
+    eventKeys: new Map(),
   };
 }
 
@@ -188,8 +189,21 @@ export function getWorkflowRun(executionId: string): WorkflowRunRecord | null {
   return getDevHqStore().workflowRuns.get(executionId) ?? null;
 }
 
-export function appendEvent(event: Event): Event {
+/**
+ * Append an event, optionally at most once per `dedupeKey`.
+ *
+ * The keyed check and the insert are synchronous with no await between them, so
+ * concurrent writers cannot both append — which is what makes "one event per
+ * transition" hold under reconciliation, without anyone matching on message text.
+ * The already-recorded event is returned so callers see what is on the timeline.
+ */
+export function appendEvent(event: Event, dedupeKey?: string): Event {
   const store = getDevHqStore();
+  if (dedupeKey) {
+    const existing = store.eventKeys.get(dedupeKey);
+    if (existing) return existing;
+    store.eventKeys.set(dedupeKey, event);
+  }
   store.events.unshift(event);
   store.events = store.events.slice(0, 200);
   return event;

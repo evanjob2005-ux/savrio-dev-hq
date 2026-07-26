@@ -111,6 +111,38 @@ describe("agent registry", () => {
     ).toBe("agent-supervisor");
   });
 
+  it("treats a required provider as a hard filter, applied before ordering", () => {
+    const older = "2020-01-01T00:00:00.000Z";
+    saveAgent(
+      baseAgent({
+        id: "agent-sim",
+        provider: "internal",
+        capabilities: ["review"],
+        lastActiveAt: older, // most idle, so it wins unpinned selection
+      }),
+    );
+    saveAgent(
+      baseAgent({
+        id: "agent-vendor",
+        provider: "vendor-x",
+        capabilities: ["review"],
+        lastActiveAt: "2026-07-24T21:00:00.000Z",
+      }),
+    );
+
+    expect(selectAgent({ requiredCapabilities: ["review"] })?.id).toBe("agent-sim");
+    // Pinned: the same-provider agent is found even though it is not the most idle.
+    expect(
+      selectAgent({ requiredCapabilities: ["review"], requiredProvider: "vendor-x" })
+        ?.id,
+    ).toBe("agent-vendor");
+    expect(
+      findEligibleAgents({ requiredProvider: "vendor-x" }).map((a) => a.id),
+    ).toEqual(["agent-vendor"]);
+    // No substitution when the pinned provider has nothing eligible.
+    expect(selectAgent({ requiredProvider: "vendor-absent" })).toBeNull();
+  });
+
   it("breaks exact idle ties deterministically by id", () => {
     const activeAt = "2026-07-24T10:00:00.000Z";
     saveAgent(

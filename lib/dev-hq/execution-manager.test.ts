@@ -18,6 +18,7 @@ import {
   getAssignment,
   getDevHqStore,
   resetDevHqStore,
+  saveAgent,
   saveAssignment,
   saveTask,
 } from "@/lib/dev-hq/store";
@@ -515,6 +516,171 @@ describe("execution manager", () => {
       await expect(ensureAssignment("exec-missing")).rejects.toThrow(
         "Execution not found: exec-missing",
       );
+    });
+  });
+
+  // The routing policy an execution was assigned under is authoritative for every
+  // later attempt, so a retry cannot drift onto a different provider.
+  describe("routing policy", () => {
+    /** A provider-backed agent and a simulated look-alike, both eligible. */
+    function seedProviderAndDecoy(): void {
+      saveAgent({
+        id: "agent-vendor",
+        name: "Vendor",
+        role: "External reviewer",
+        provider: "vendor-x",
+        availability: "available",
+        capabilities: ["review"],
+        accentColor: "#111111",
+        initials: "VD",
+        lastActiveAt: TS,
+      });
+      saveAgent({
+        id: "agent-sim",
+        name: "Sim",
+        role: "Simulated reviewer",
+        provider: "internal",
+        availability: "available",
+        capabilities: ["review"],
+        accentColor: "#222222",
+        initials: "SM",
+        // Most idle, so plain selection prefers it.
+        lastActiveAt: "2020-01-01T00:00:00.000Z",
+      });
+    }
+
+    it("records the routing policy and the routed provider on assignment", async () => {
+      const task = seedTask();
+      seedProviderAndDecoy();
+
+      const decision = await assignExecution(task.id, {
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+      });
+
+      expect(decision.agentId).toBe("agent-vendor");
+      expect(decision.execution?.routing).toEqual({
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+        provider: "vendor-x",
+      });
+    });
+
+    it("keeps a retry on the routed provider instead of a simulated substitute", async () => {
+      const task = seedTask();
+      seedProviderAndDecoy();
+      const decision = await assignExecution(task.id, {
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+      });
+      const executionId = decision.execution!.id;
+      await claimExecution(executionId, "agent-vendor");
+
+      const retried = await releaseExecution(executionId, makeResult("failed"));
+
+      expect(retried.status).toBe("queued");
+      expect(retried.attempt).toBe(2);
+      expect(retried.agentId).toBe("agent-vendor");
+      expect(retried.routing?.provider).toBe("vendor-x");
+    });
+
+    it("re-queues unassigned when no agent of the routed provider is eligible", async () => {
+      const task = seedTask();
+      seedProviderAndDecoy();
+      const decision = await assignExecution(task.id, {
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+      });
+      const executionId = decision.execution!.id;
+      await claimExecution(executionId, "agent-vendor");
+      getDevHqStore().agents.delete("agent-vendor");
+
+      const retried = await releaseExecution(executionId, makeResult("failed"));
+
+      expect(retried.status).toBe("queued");
+      expect(retried.attempt).toBe(2);
+      expect(retried.agentId).toBeNull();
+      expect(retried.assignmentId).toBeNull();
+      // The policy is preserved for a later attempt rather than discarded.
+      expect(retried.routing?.provider).toBe("vendor-x");
+    });
+
+    it("does not let a later policy widen the persisted routing", async () => {
+      const task = seedTask();
+      seedProviderAndDecoy();
+      const decision = await assignExecution(task.id, {
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+      });
+      const executionId = decision.execution!.id;
+      await claimExecution(executionId, "agent-vendor");
+      getDevHqStore().agents.delete("agent-vendor");
+      await releaseExecution(executionId, makeResult("failed"));
+
+      // A caller asking for the simulated agent on a routed execution is refused.
+      const result = await ensureAssignment(executionId, {
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-sim",
+      });
+
+      expect(result.decision.assigned).toBe(false);
+      expect(result.decision.reason).toBe("no_agent_available");
+      expect((await getExecution(executionId))?.agentId).toBeNull();
+    });
+
+    it("records an intended policy at creation without pinning a provider", async () => {
+      const task = seedTask();
+      const execution = await ensureExecution({
+        executionId: "exec-intent-1",
+        taskId: task.id,
+        policy: { requiredCapabilities: ["validation"] },
+      });
+
+      // Present, so the execution is recognizable as agent-backed work awaiting
+      // assignment, but unpinned: nothing has run yet.
+      expect(execution.routing).toEqual({
+        requiredCapabilities: ["validation"],
+        preferredAgentId: null,
+        provider: null,
+      });
+    });
+
+    it("lets a caller refine the policy until the execution is routed", async () => {
+      const task = seedTask();
+      seedProviderAndDecoy();
+      await ensureExecution({
+        executionId: "exec-intent-2",
+        taskId: task.id,
+        policy: { requiredCapabilities: [] },
+      });
+
+      // Before routing, the caller's policy governs.
+      const assigned = await ensureAssignment("exec-intent-2", {
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+      });
+      expect(assigned.decision.agentId).toBe("agent-vendor");
+
+      // After routing, it does not: the execution is pinned to what it ran on.
+      const execution = (await getExecution("exec-intent-2"))!;
+      expect(execution.routing).toEqual({
+        requiredCapabilities: ["review"],
+        preferredAgentId: "agent-vendor",
+        provider: "vendor-x",
+      });
+    });
+
+    it("leaves unrouted executions on the existing selection behaviour", async () => {
+      const task = seedTask();
+      const decision = await assignExecution(task.id, {
+        requiredCapabilities: ["validation"],
+      });
+
+      expect(decision.execution?.routing).toEqual({
+        requiredCapabilities: ["validation"],
+        preferredAgentId: null,
+        provider: "internal",
+      });
     });
   });
 });

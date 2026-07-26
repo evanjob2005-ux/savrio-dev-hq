@@ -28,7 +28,11 @@ export type {
   AgentUsageMetadata,
   RepositoryContext,
 } from "./agent-execution";
-export type { Execution } from "./execution";
+export type {
+  Execution,
+  ExecutionRequest,
+  ExecutionRouting,
+} from "./execution";
 export type {
   AgentAssignment,
   AgentAssignmentStatus,

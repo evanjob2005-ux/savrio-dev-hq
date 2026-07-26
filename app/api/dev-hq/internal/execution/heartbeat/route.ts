@@ -7,11 +7,17 @@ export async function POST(request: Request) {
   if (rejected) return rejected;
 
   try {
-    const body = (await request.json()) as { executionId?: string };
+    const body = (await request.json()) as {
+      executionId?: string;
+      assignmentId?: string;
+    };
     if (!body.executionId) {
       return NextResponse.json({ error: "executionId is required." }, { status: 400 });
     }
-    const execution = await handleExecutionHeartbeat(body.executionId);
+    const execution = await handleExecutionHeartbeat(
+      body.executionId,
+      body.assignmentId,
+    );
     return NextResponse.json({ execution });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

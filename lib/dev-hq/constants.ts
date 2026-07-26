@@ -51,6 +51,15 @@ export const EXECUTION_LEASE_TTL_MS = 60_000;
 export const AGENT_HEALTH_STALE_AFTER_MS = EXECUTION_LEASE_TTL_MS;
 
 /**
+ * How long a dispatched assignment may go unclaimed before recovery treats its
+ * Trigger run as dead. Such an assignment holds no lease — it never became
+ * running — so nothing else can see it: this is the only deadline that makes a
+ * worker which lost a race for a capacity-one agent recoverable. Generous
+ * relative to dispatch latency, and recovery costs no business attempt.
+ */
+export const EXECUTION_CLAIM_DEADLINE_MS = EXECUTION_LEASE_TTL_MS * 2;
+
+/**
  * Typed execution lifecycle event names emitted from the service layer
  * (ADR-0002 E3). No event is emitted per heartbeat. `reclaimed` is emitted by the
  * Sprint 1E-3 lease sweeper when it recovers an expired-lease attempt.

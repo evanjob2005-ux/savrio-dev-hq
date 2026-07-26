@@ -12,6 +12,8 @@ import type {
   AgentAssignment,
   AgentResult,
   Execution,
+  ExecutionRequest,
+  ExecutionRouting,
   IsoTimestamp,
   Task,
 } from "@/types/domain";
@@ -79,6 +81,7 @@ function createAssignment(input: {
     attempt: input.attempt,
     requiredCapabilities: [...input.requiredCapabilities],
     triggerRunId: null,
+    dispatchedAt: null,
     leaseExpiresAt: null,
     lastHeartbeatAt: null,
     claimedAt: null,
@@ -88,13 +91,63 @@ function createAssignment(input: {
 }
 
 /**
+ * The routing record to persist for an execution. `provider` is null until an
+ * agent has actually been selected — an unrouted policy constrains capabilities
+ * and preference only, and pins no provider.
+ */
+function routingFrom(
+  policy: AgentSelectionPolicy | undefined,
+  provider: string | null,
+): ExecutionRouting {
+  return {
+    requiredCapabilities: [...(policy?.requiredCapabilities ?? [])],
+    preferredAgentId: policy?.preferredAgentId ?? null,
+    provider,
+  };
+}
+
+/**
+ * The routing policy an execution must keep reproducing across attempts. Falls
+ * back to the assignment's carried capabilities for records written before
+ * routing was persisted (no provider pin, i.e. the pre-existing behaviour).
+ */
+function routingFor(
+  execution: Execution,
+  assignment: AgentAssignment | null,
+): ExecutionRouting {
+  return (
+    execution.routing ?? {
+      requiredCapabilities: assignment?.requiredCapabilities ?? [],
+      preferredAgentId: null,
+      provider: null,
+    }
+  );
+}
+
+/**
+ * Select an agent that satisfies a persisted routing policy, or null.
+ *
+ * The provider pin is the hard part of the policy: once an execution has been
+ * routed to a provider, no later attempt may be answered by an agent of a
+ * different provider. Without it a retry could silently move work to an agent of
+ * a different class and report its result as the original's. When no agent
+ * satisfies the pin the caller re-queues instead of substituting one.
+ */
+function selectRoutedAgent(routing: ExecutionRouting) {
+  return selectAgent({
+    requiredCapabilities: routing.requiredCapabilities,
+    preferredAgentId: routing.preferredAgentId ?? undefined,
+    requiredProvider: routing.provider ?? undefined,
+  });
+}
+
+/**
  * Consume one attempt of the retry budget after a failed or timed-out execution.
  * The caller has already freed the agent and released the current assignment.
  * With budget remaining, the execution is re-queued and (capacity permitting)
- * re-assigned to a freshly selected agent — naturally a different one, since the
- * just-freed agent is now the most-recently-active. When the budget is exhausted
- * the execution is marked failed. Escalation side effects (approval,
- * needs_revision) are deferred to Sprint 1E.
+ * re-assigned under its persisted routing policy — never across providers. When
+ * the budget is exhausted the execution is marked failed. Escalation side effects
+ * are owned by the service layer.
  */
 function applyFailedAttempt(
   execution: Execution,
@@ -111,8 +164,9 @@ function applyFailedAttempt(
   }
 
   const nextAttempt = attempt + 1;
-  const requiredCapabilities = assignment?.requiredCapabilities ?? [];
-  const nextAgent = selectAgent({ requiredCapabilities });
+  const routing = routingFor(execution, assignment);
+  const requiredCapabilities = routing.requiredCapabilities;
+  const nextAgent = selectRoutedAgent(routing);
 
   if (!nextAgent) {
     // No capacity for the retry right now: re-queue unassigned. Clear the prior
@@ -200,6 +254,7 @@ export async function assignExecution(
     createdAt: timestamp,
     assignmentId: null,
     attempt: 1,
+    routing: routingFrom(policy, agent.provider),
   });
   const assignment = createAssignment({
     execution: created,
@@ -244,6 +299,28 @@ export async function assignExecution(
 export async function ensureExecution(input: {
   executionId: string;
   taskId: string;
+  /**
+   * The policy this execution is intended to be assigned under. Persisted at
+   * creation — before any agent exists — so an execution that is created and then
+   * fails to be assigned is still recognizable as agent-backed work and can be
+   * recovered by the sweep. `provider` stays null until an agent is actually
+   * selected, so it pins nothing until there is something to pin to.
+   */
+  policy?: AgentSelectionPolicy;
+  /**
+   * An already-decided routing policy to inherit verbatim, including its provider
+   * pin. Takes precedence over `policy`, which can only express an *intent* (it
+   * has no provider until an agent is selected). This is how a revision inherits
+   * the restrictions of the work it revises: without it, revising a pinned
+   * execution would silently authorize an unpinned one.
+   */
+  routing?: ExecutionRouting;
+  /**
+   * The founder's request, captured once. Stored verbatim so replays and
+   * recoveries run the request the execution was created for rather than a later
+   * caller's payload or the task description as it stands today.
+   */
+  request?: ExecutionRequest;
 }): Promise<Execution> {
   const store = getDevHqStore();
   const existing = store.executions.get(input.executionId);
@@ -272,6 +349,14 @@ export async function ensureExecution(input: {
     createdAt: nowIso(),
     assignmentId: null,
     attempt: 1,
+    // Present even when unrouted (provider null): it marks the execution as
+    // agent-backed work awaiting assignment, which is what makes an assignment
+    // failure recoverable instead of stranding it. An inherited routing keeps its
+    // provider pin from the moment the execution exists.
+    routing: input.routing
+      ? { ...input.routing, requiredCapabilities: [...input.routing.requiredCapabilities] }
+      : routingFrom(input.policy, null),
+    request: input.request ?? null,
   });
 }
 
@@ -291,13 +376,35 @@ export interface EnsureAssignmentResult {
  * no longer queued (`execution_not_queued`) or no eligible agent is available
  * (`no_agent_available`) — either way a later call can retry with no side
  * effects to unwind. Check and write are synchronous with no await between them.
+ *
+ * **Persisted routing wins.** Once an execution has been routed (its first
+ * assignment recorded a provider), that policy governs every later assignment and
+ * a caller-supplied policy cannot widen it. A reconciling re-assignment therefore
+ * cannot move a provider-backed execution onto a different provider.
  */
 export async function ensureAssignment(
   executionId: string,
   policy?: AgentSelectionPolicy,
 ): Promise<EnsureAssignmentResult> {
   const execution = requireExecution(executionId);
-  const requiredCapabilities = policy?.requiredCapabilities ?? [];
+  // Only a *routed* execution — one that has already run on a provider — has an
+  // authoritative policy. Routing recorded at creation is an intent, not yet a
+  // pin, so a caller may still refine it before the first agent is chosen.
+  const routing = execution.routing ?? null;
+  const pinned = routing?.provider ? routing : null;
+  const effectivePolicy: AgentSelectionPolicy = pinned
+    ? {
+        requiredCapabilities: pinned.requiredCapabilities,
+        preferredAgentId: pinned.preferredAgentId ?? undefined,
+        requiredProvider: pinned.provider ?? undefined,
+      }
+    : {
+        requiredCapabilities:
+          policy?.requiredCapabilities ?? routing?.requiredCapabilities ?? [],
+        preferredAgentId:
+          policy?.preferredAgentId ?? routing?.preferredAgentId ?? undefined,
+      };
+  const requiredCapabilities = effectivePolicy.requiredCapabilities ?? [];
   const notAssigned = (
     reason: "no_agent_available" | "execution_not_queued",
   ): EnsureAssignmentResult => ({
@@ -334,7 +441,7 @@ export async function ensureAssignment(
     }
   }
 
-  const agent = selectAgent(policy);
+  const agent = selectAgent(effectivePolicy);
   if (!agent) {
     return notAssigned("no_agent_available");
   }
@@ -355,6 +462,10 @@ export async function ensureAssignment(
         ...execution,
         agentId: agent.id,
         assignmentId: assignment.id,
+        // Selecting an agent is what routes the execution: the effective policy
+        // gains the provider it was actually routed to, and every later attempt
+        // is pinned to that.
+        routing: pinned ?? routingFrom(effectivePolicy, agent.provider),
       }),
       assignment,
       agentId: agent.id,
@@ -417,9 +528,22 @@ export async function claimExecution(
   return saveExecution({ ...execution, status: "running", startedAt: timestamp });
 }
 
-/** Extend the lease of a running execution and record the heartbeat. */
-export async function heartbeat(executionId: string): Promise<Execution> {
+/**
+ * Extend the lease of a running execution and record the heartbeat.
+ *
+ * A heartbeat is only meaningful from the worker that holds the current attempt.
+ * When the caller names an assignment that is no longer the execution's current
+ * one, the beat is a stale worker's and is a **no-op**: honouring it would let an
+ * abandoned run keep a successor attempt's lease alive and mask its failure.
+ */
+export async function heartbeat(
+  executionId: string,
+  assignmentId?: string,
+): Promise<Execution> {
   const execution = requireExecution(executionId);
+  if (assignmentId && execution.assignmentId !== assignmentId) {
+    return execution; // stale worker; the current attempt is someone else's
+  }
   if (execution.status !== "running") {
     throw new Error(
       `Execution is not running; cannot heartbeat: ${executionId}`,
@@ -532,6 +656,52 @@ export async function reclaimStale(now?: IsoTimestamp): Promise<Execution[]> {
   }
 
   return reclaimed;
+}
+
+/**
+ * Release a queued execution's current assignment so it can be assigned again,
+ * without consuming a retry attempt.
+ *
+ * This exists for one recovery case: a queued, undispatched assignment whose
+ * agent can no longer satisfy the execution's routing (the agent left the
+ * registry, or its provider changed). Dispatch refuses such an assignment — it
+ * must not silently run on the wrong provider — which would leave the execution
+ * queued forever behind an assignment nothing can use. Releasing it hands the
+ * execution back to assignment under its unchanged routing policy.
+ *
+ * Refuses anything that is not queued, so a running attempt's lease can never be
+ * dropped this way; that path belongs to reclaim. The attempt counter and routing
+ * are preserved, so this is recovery, not a retry.
+ */
+export async function releaseAssignmentForReassignment(
+  executionId: string,
+): Promise<Execution> {
+  const execution = requireExecution(executionId);
+  if (execution.status !== "queued") {
+    throw new Error(
+      `Execution is not queued; cannot release its assignment: ${executionId}`,
+    );
+  }
+  if (!execution.assignmentId) {
+    return execution;
+  }
+
+  const timestamp = nowIso();
+  const assignment = getAssignment(execution.assignmentId);
+  if (assignment && assignment.status !== "released") {
+    saveAssignment({
+      ...assignment,
+      status: "released",
+      releasedAt: timestamp,
+      leaseExpiresAt: null,
+    });
+  }
+  return saveExecution({
+    ...execution,
+    agentId: null,
+    assignmentId: null,
+    triggerRunId: null,
+  });
 }
 
 /** Create a queued execution with no agent assigned (low-level primitive). */

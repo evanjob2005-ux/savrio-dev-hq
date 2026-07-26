@@ -16,7 +16,7 @@ export class DevEventLogger implements EventLogger {
       actorLabel: input.actorLabel,
       timestamp: nowIso(),
     };
-    return appendEvent(event);
+    return appendEvent(event, input.dedupeKey);
   }
 
   async listRecent(query?: {

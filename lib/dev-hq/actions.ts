@@ -7,40 +7,81 @@
 // token-guarded /api/dev-hq/internal/* routes.
 
 import {
+  ConflictingDispatchRequestError,
   dispatchAgentExecution,
+  dispatchExecutionIdFor,
   type DispatchAgentExecutionResult,
 } from "@/lib/dev-hq/agent-execution-service";
 
+/**
+ * A dispatch outcome the browser can act on.
+ *
+ * `resolved` is the part that matters for idempotency: it says whether the server
+ * reached a definitive answer about this request identity. An exception thrown
+ * anywhere after the canonical execution was created is *not* definitive — state
+ * may exist — so the browser must keep the identity and resume with it rather
+ * than starting a second logical dispatch. Only a returned result, or a rejection
+ * that provably created nothing, resolves the identity.
+ */
 export type DispatchActionResult =
-  | { ok: true; result: DispatchAgentExecutionResult }
-  | { ok: false; error: string };
+  | { ok: true; resolved: true; result: DispatchAgentExecutionResult }
+  | { ok: false; resolved: boolean; error: string; executionId: string | null };
 
 export async function dispatchAgentExecutionAction(input: {
   taskId: string;
   requiredCapabilities?: string[];
+  preferredAgentId?: string;
   instructions?: string;
+  /**
+   * Per-submission key from the panel. Re-submitting the same form submission —
+   * a double click, a retried action, two tabs racing — resolves to one
+   * execution, one assignment, and one durable run instead of duplicates.
+   */
+  idempotencyKey?: string;
 }): Promise<DispatchActionResult> {
   // Simulated agents are a development-only capability (ADR-0001 D4/D7), matching
   // the prod-disabled internal dispatch route.
   if (process.env.NODE_ENV === "production") {
-    return { ok: false, error: "Agent dispatch is disabled in production." };
+    // Rejected before any state could exist: definitively nothing to recover.
+    return {
+      ok: false,
+      resolved: true,
+      error: "Agent dispatch is disabled in production.",
+      executionId: null,
+    };
   }
 
   if (!input.taskId) {
-    return { ok: false, error: "Select a task before dispatching." };
+    return {
+      ok: false,
+      resolved: true,
+      error: "Select a task before dispatching.",
+      executionId: null,
+    };
   }
 
   try {
     const result = await dispatchAgentExecution({
       taskId: input.taskId,
       requiredCapabilities: input.requiredCapabilities,
+      preferredAgentId: input.preferredAgentId,
       instructions: input.instructions,
+      idempotencyKey: input.idempotencyKey,
     });
-    return { ok: true, result };
+    return { ok: true, resolved: true, result };
   } catch (error) {
+    // A conflicting replay is definitive: the stored request differs, so this
+    // identity will never accept these parameters and holding it helps nobody.
+    const conflicting = error instanceof ConflictingDispatchRequestError;
     return {
       ok: false,
+      resolved: conflicting,
       error: error instanceof Error ? error.message : "Dispatch failed.",
+      // The canonical id is derived from the key, so the browser can be told
+      // which execution to look at even when the call failed part-way through.
+      executionId: input.idempotencyKey
+        ? dispatchExecutionIdFor(input.idempotencyKey)
+        : null,
     };
   }
 }

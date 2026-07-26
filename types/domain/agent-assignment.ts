@@ -37,6 +37,14 @@ export interface AgentAssignment {
    * repaired without creating a new assignment, attempt, or logical run.
    */
   triggerRunId: string | null;
+  /**
+   * When the dispatch was confirmed, or null while undispatched. The claim
+   * deadline is measured from here: an assignment that is dispatched but never
+   * claimed (its worker lost the race for a capacity-one agent, or died before
+   * claiming) has no lease to expire, so this is the only thing that makes it
+   * recoverable rather than permanently queued.
+   */
+  dispatchedAt: IsoTimestamp | null;
   /** When the current lease expires; null before claim. */
   leaseExpiresAt: IsoTimestamp | null;
   /** Last heartbeat received from the running agent; null before first beat. */

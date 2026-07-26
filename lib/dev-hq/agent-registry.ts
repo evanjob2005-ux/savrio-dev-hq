@@ -58,11 +58,20 @@ export function evaluateAgentHealth(
   return ageMs > staleAfterMs ? "stale" : "healthy";
 }
 
-/** Available agents that satisfy the policy's required capabilities. */
+/**
+ * Available agents that satisfy the policy's required capabilities and, when the
+ * policy pins one, its required provider. The provider pin is a hard filter
+ * applied before ordering, so a same-provider agent is still found when it is not
+ * the most idle candidate overall.
+ */
 export function findEligibleAgents(policy?: AgentSelectionPolicy): Agent[] {
   const required = policy?.requiredCapabilities ?? [];
+  const provider = policy?.requiredProvider;
   return listAgents().filter(
-    (agent) => isAvailable(agent) && hasCapabilities(agent, required),
+    (agent) =>
+      isAvailable(agent) &&
+      hasCapabilities(agent, required) &&
+      (!provider || agent.provider === provider),
   );
 }
 

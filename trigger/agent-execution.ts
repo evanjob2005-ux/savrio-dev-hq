@@ -5,8 +5,9 @@ import {
   simulateOutcome,
   type AgentExecutionTaskPayload,
 } from "@/lib/dev-hq/agent-execution-service";
+import type { AgentExecutionStatus } from "@/types/domain";
 
-async function postJson(path: string, body: unknown): Promise<void> {
+async function postJson<T = unknown>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${getDevHqBaseUrl()}${path}`, {
     method: "POST",
     headers: getDevHqInternalHeaders(),
@@ -16,6 +17,14 @@ async function postJson(path: string, body: unknown): Promise<void> {
     const text = await response.text();
     throw new Error(`Dev HQ callback failed (${response.status}): ${text}`);
   }
+  return (await response.json().catch(() => ({}))) as T;
+}
+
+/** What the durable run reports back to Trigger. */
+interface AgentExecutionRunResult {
+  executionId: string;
+  /** The attempt outcome, or `stood_down` when this run never held the claim. */
+  status: AgentExecutionStatus | "stood_down";
 }
 
 /**
@@ -37,23 +46,42 @@ export const agentExecution = task({
     metadata.set("executionId", payload.executionId);
     metadata.set("stage", "failed");
   },
-  run: async (payload: AgentExecutionTaskPayload) => {
+  run: async (
+    payload: AgentExecutionTaskPayload,
+  ): Promise<AgentExecutionRunResult> => {
     metadata.set("executionId", payload.executionId);
     metadata.set("stage", "running");
-    await postJson("/api/dev-hq/internal/execution/running", {
+
+    // The claim is the capacity reservation (ADR-0001). This run may lose it —
+    // two dispatches can be assigned the same capacity-one agent before either
+    // claims — so the callback's answer is checked rather than assumed. Without
+    // the claim this attempt is not current and must report nothing; the Work
+    // Management Layer recovers it through the claim deadline.
+    const claimed = await postJson<{
+      execution?: { status?: string; assignmentId?: string | null };
+    }>("/api/dev-hq/internal/execution/running", {
       executionId: payload.executionId,
       assignmentId: payload.assignmentId,
     });
+    const holdsClaim =
+      claimed.execution?.status === "running" &&
+      claimed.execution?.assignmentId === payload.assignmentId;
+    if (!holdsClaim) {
+      metadata.set("stage", "not-claimed");
+      return { executionId: payload.executionId, status: "stood_down" };
+    }
 
     const outcome = simulateOutcome(payload.instructions);
     metadata.set("outcome", outcome);
 
     // A healthy attempt heartbeats before completing; a timeout attempt withholds
     // heartbeats to model a stalled agent (see the simulated-timeout note in the
-    // agent-execution service / ADR).
+    // agent-execution service / ADR). The assignment identifies this attempt, so a
+    // superseded worker's beat cannot extend a successor's lease.
     if (outcome !== "timeout") {
       await postJson("/api/dev-hq/internal/execution/heartbeat", {
         executionId: payload.executionId,
+        assignmentId: payload.assignmentId,
       });
     }
 

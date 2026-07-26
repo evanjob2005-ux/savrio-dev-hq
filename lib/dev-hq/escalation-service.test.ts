@@ -424,6 +424,153 @@ describe("escalation service", () => {
       ))!;
     }
 
+    // A revision is a fresh attempt at the *same* authorized work, so it must
+    // reproduce the restrictions that work carried. Losing them would let a
+    // pinned or capability-restricted execution be revised into unrestricted
+    // work under a different agent.
+    describe("inherited routing and request", () => {
+      /** A second agent of a different provider that also matches the policy. */
+      function seedRivalProviderAgent(): void {
+        const supervisor = getAgent("agent-supervisor")!;
+        saveAgent({
+          ...supervisor,
+          id: "agent-rival",
+          name: "Rival",
+          provider: "vendor-y",
+          // Most idle, so unpinned selection would prefer it.
+          lastActiveAt: "2020-01-01T00:00:00.000Z",
+        });
+      }
+
+      /** Exhaust a pinned, instruction-carrying execution and escalate it. */
+      async function exhaustPinned(taskId: string) {
+        const dispatched = await dispatchAgentExecution({
+          taskId,
+          requiredCapabilities: ["validation"],
+          preferredAgentId: "agent-supervisor",
+          instructions: "fail: review the reserved capacity path",
+          idempotencyKey: "pinned-key-1",
+        });
+        const executionId = dispatched.executionId!;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await handleExecutionRunning(executionId);
+          await handleExecutionComplete({
+            executionId,
+            status: "failed",
+            instructions: "fail: review the reserved capacity path",
+          });
+        }
+        const escalation =
+          (await getDevHqAdapters().escalationStore.findOpenByExecution(executionId))!;
+        return { executionId, escalation };
+      }
+
+      it("carries the routing policy, provider pin, and request into the revision", async () => {
+        const taskId = seedTask().id;
+        const { executionId, escalation } = await exhaustPinned(taskId);
+        const original = (await getExecution(executionId))!;
+        expect(original.routing?.provider).toBe("internal");
+        expect(original.request?.instructions).toBe(
+          "fail: review the reserved capacity path",
+        );
+
+        await resolveEscalation(escalation.id, "revise");
+
+        const revision = (await getExecution(revisionExecutionIdFor(escalation.id)))!;
+        expect(revision.routing).toEqual(original.routing);
+        expect(revision.request).toEqual(original.request);
+        expect(revision.attempt).toBe(1);
+      });
+
+      it("dispatches the authorized request, not the task description as it stands now", async () => {
+        const taskId = seedTask().id;
+        const { escalation } = await exhaustPinned(taskId);
+        // The task description drifts after the request was authorized.
+        await getDevHqAdapters().taskRepository.updateTask(taskId, {
+          description: "something else entirely",
+        });
+        triggerMock.mockClear();
+
+        await resolveEscalation(escalation.id, "revise");
+
+        const payload = triggerMock.mock.calls.at(-1)![1] as {
+          instructions: string;
+        };
+        expect(payload.instructions).toBe(
+          "fail: review the reserved capacity path",
+        );
+      });
+
+      it("keeps the revision on the routed provider rather than a rival agent", async () => {
+        const taskId = seedTask().id;
+        const { escalation } = await exhaustPinned(taskId);
+        // A more-idle agent of a different provider is now available; an unpinned
+        // revision would drift onto it.
+        seedRivalProviderAgent();
+
+        await resolveEscalation(escalation.id, "revise");
+
+        const revision = (await getExecution(revisionExecutionIdFor(escalation.id)))!;
+        expect(revision.routing?.provider).toBe("internal");
+        expect(revision.agentId).not.toBe("agent-rival");
+        expect(getAgent(revision.agentId!)!.provider).toBe("internal");
+      });
+
+      it("re-queues rather than drifting when no agent satisfies the inherited pin", async () => {
+        const taskId = seedTask().id;
+        const { escalation } = await exhaustPinned(taskId);
+        seedRivalProviderAgent();
+        // Every agent of the routed provider disappears from the registry.
+        for (const agent of [...getDevHqStore().agents.values()]) {
+          if (agent.provider === "internal") {
+            getDevHqStore().agents.delete(agent.id);
+          }
+        }
+
+        await resolveEscalation(escalation.id, "revise");
+
+        const revision = await getExecution(revisionExecutionIdFor(escalation.id));
+        expect(revision?.agentId ?? null).toBeNull();
+        expect(revision?.status).toBe("queued");
+        // Recoverable, and still pinned for whenever capacity returns.
+        expect(revision?.routing?.provider).toBe("internal");
+      });
+    });
+
+    it("records the revise-created assignment exactly once, even after a sweep", async () => {
+      const { taskId, executionId, escalation } = await exhaustAndEscalate();
+      await resolveEscalation(escalation.id, "revise");
+
+      const revision = (await getExecution(revisionExecutionIdFor(escalation.id)))!;
+      const revisionAssignmentId = revision.assignmentId!;
+      expect(revisionAssignmentId).toBeTruthy();
+
+      async function assignedEventsFor(id: string) {
+        const events = await getDevHqAdapters().eventLogger.listRecent({
+          entityType: "execution",
+          entityId: id,
+          limit: 200,
+        });
+        return events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assigned);
+      }
+
+      // One transition, recorded once, naming this assignment.
+      const afterRevise = await assignedEventsFor(revision.id);
+      expect(afterRevise).toHaveLength(1);
+      expect(afterRevise[0].message).toContain(revisionAssignmentId);
+
+      // The sweep inspects the same assignment and must not append a second.
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+
+      const afterSweeps = await assignedEventsFor(revision.id);
+      expect(afterSweeps).toHaveLength(1);
+      expect(afterSweeps[0].id).toBe(afterRevise[0].id);
+      // The exhausted original keeps its own single assignment history.
+      expect((await assignedEventsFor(executionId)).length).toBeGreaterThan(0);
+      void taskId;
+    });
+
     it("creates exactly one fresh execution at attempt 1 and dispatches it", async () => {
       const { executionId, escalation } = await exhaustAndEscalate();
       expect((await getExecution(executionId))!.status).toBe("failed");

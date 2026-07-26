@@ -10,7 +10,9 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       taskId?: string;
       requiredCapabilities?: unknown;
+      preferredAgentId?: string;
       instructions?: string;
+      idempotencyKey?: string;
     };
     if (!body.taskId) {
       return NextResponse.json({ error: "taskId is required." }, { status: 400 });
@@ -24,8 +26,18 @@ export async function POST(request: Request) {
     const result = await dispatchAgentExecution({
       taskId: body.taskId,
       requiredCapabilities,
+      preferredAgentId:
+        typeof body.preferredAgentId === "string" && body.preferredAgentId
+          ? body.preferredAgentId
+          : undefined,
       instructions:
         typeof body.instructions === "string" ? body.instructions : undefined,
+      // Callers that supply a key get a fully idempotent dispatch: repeating the
+      // request converges on the same execution, assignment, and run.
+      idempotencyKey:
+        typeof body.idempotencyKey === "string" && body.idempotencyKey
+          ? body.idempotencyKey
+          : undefined,
     });
     return NextResponse.json(result);
   } catch (error) {

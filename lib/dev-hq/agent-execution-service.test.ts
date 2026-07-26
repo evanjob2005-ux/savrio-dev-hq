@@ -18,7 +18,9 @@ import {
 import {
   getAgent,
   getAssignment,
+  getDevHqStore,
   resetDevHqStore,
+  saveAgent,
   saveAssignment,
   saveExecution,
   saveTask,
@@ -30,6 +32,7 @@ import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
 const FAR_FUTURE = "2999-01-01T00:00:00.000Z";
+
 
 function seedTask(overrides?: Partial<Task>): Task {
   return saveTask({
@@ -53,8 +56,20 @@ describe("agent execution service", () => {
   beforeEach(() => {
     resetDevHqStore();
     let counter = 0;
+    // Models Trigger.dev's real idempotency-key semantics: triggers sharing a key
+    // resolve to one logical run, so "one Trigger run" is observable in tests as
+    // one distinct run id rather than merely one call.
+    const runsByKey = new Map<string, string>();
     triggerMock.mockReset();
-    triggerMock.mockImplementation(async () => ({ id: `run-${(counter += 1)}` }));
+    triggerMock.mockImplementation(
+      async (_taskId: string, _payload: unknown, options?: { idempotencyKey?: string }) => {
+        const key = options?.idempotencyKey;
+        if (key && runsByKey.has(key)) return { id: runsByKey.get(key)! };
+        const id = `run-${(counter += 1)}`;
+        if (key) runsByKey.set(key, id);
+        return { id };
+      },
+    );
   });
 
   describe("simulateOutcome", () => {
@@ -655,9 +670,10 @@ describe("agent execution service", () => {
         ).filter((e) => e.type === EXECUTION_EVENT_TYPE.retried),
       ).toHaveLength(1);
 
-      // Repeated reconciliation after a successful dispatch is a no-op.
+      // Repeated reconciliation at the current time is a no-op: the assignment is
+      // dispatched and well within its claim deadline.
       const callsAfter = triggerMock.mock.calls.length;
-      await handleExecutionReclaim(FAR_FUTURE);
+      await handleExecutionReclaim();
       expect(triggerMock.mock.calls.length).toBe(callsAfter);
     });
 
@@ -687,6 +703,7 @@ describe("agent execution service", () => {
         attempt: 1,
         requiredCapabilities: [],
         triggerRunId: null,
+        dispatchedAt: null,
         leaseExpiresAt: null,
         lastHeartbeatAt: null,
         claimedAt: null,
@@ -724,6 +741,7 @@ describe("agent execution service", () => {
         attempt: 3,
         requiredCapabilities: [],
         triggerRunId: null,
+        dispatchedAt: null,
         leaseExpiresAt: null,
         lastHeartbeatAt: null,
         claimedAt: null,
@@ -733,6 +751,799 @@ describe("agent execution service", () => {
       triggerMock.mockClear();
 
       expect(await ensureDispatchForAssignment("asgn-terminal", "x")).toBeNull();
+      expect(triggerMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // Provider-backed agents reuse the whole path above — assignment, dispatch
+  // idempotency, callbacks, retry budget, evidence — with a real model provider
+  // behind the worker instead of the deterministic simulation.
+  // A duplicate manual dispatch is the *same* logical dispatch, however the two
+  // calls interleave.
+  describe("manual dispatch idempotency", () => {
+    const KEY = "dispatch-key-1";
+
+    function dispatchWithKey(taskId: string, key = KEY) {
+      return dispatchAgentExecution({
+        taskId,
+        requiredCapabilities: ["validation"],
+        instructions: "do the work",
+        idempotencyKey: key,
+      });
+    }
+
+    function storeCounts() {
+      const store = getDevHqStore();
+      return {
+        executions: [...store.executions.values()].length,
+        assignments: [...store.agentAssignments.values()].length,
+      };
+    }
+
+    it("collapses concurrent duplicate dispatches onto one execution, assignment, and run", async () => {
+      const task = seedTask();
+
+      const [first, second] = await Promise.all([
+        dispatchWithKey(task.id),
+        dispatchWithKey(task.id),
+      ]);
+
+      expect(first.assigned).toBe(true);
+      expect(second.assigned).toBe(true);
+      expect(second.executionId).toBe(first.executionId);
+      expect(second.agentId).toBe(first.agentId);
+      expect(second.triggerRunId).toBe(first.triggerRunId);
+      expect(storeCounts()).toEqual({ executions: 1, assignments: 1 });
+      // Single-flight: the second caller awaited the first dispatch rather than
+      // issuing its own trigger.
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("collapses a burst of concurrent duplicates", async () => {
+      const task = seedTask();
+
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () => dispatchWithKey(task.id)),
+      );
+
+      const executionIds = new Set(results.map((r) => r.executionId));
+      const runIds = new Set(results.map((r) => r.triggerRunId));
+      expect(executionIds.size).toBe(1);
+      expect(runIds.size).toBe(1);
+      expect(storeCounts()).toEqual({ executions: 1, assignments: 1 });
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("collapses a sequential duplicate dispatch", async () => {
+      const task = seedTask();
+      const first = await dispatchWithKey(task.id);
+      const second = await dispatchWithKey(task.id);
+
+      expect(second.executionId).toBe(first.executionId);
+      expect(second.triggerRunId).toBe(first.triggerRunId);
+      expect(storeCounts()).toEqual({ executions: 1, assignments: 1 });
+      // The second call short-circuits on the recorded triggerRunId.
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("still treats distinct keys as distinct logical dispatches", async () => {
+      const task = seedTask();
+      const first = await dispatchWithKey(task.id, "dispatch-key-a");
+      const second = await dispatchWithKey(task.id, "dispatch-key-b");
+
+      expect(second.executionId).not.toBe(first.executionId);
+      expect(second.triggerRunId).not.toBe(first.triggerRunId);
+      expect(storeCounts()).toEqual({ executions: 2, assignments: 2 });
+    });
+
+    it("allocates a key when the caller omits one", async () => {
+      const task = seedTask();
+      const first = await dispatchAgentExecution({ taskId: task.id });
+      const second = await dispatchAgentExecution({ taskId: task.id });
+
+      expect(first.executionId).toBeTruthy();
+      expect(second.executionId).not.toBe(first.executionId);
+    });
+
+    it("refuses to reuse another task's dispatch key", async () => {
+      const task = seedTask();
+      seedTask({ id: "task-ax-2" });
+      await dispatchWithKey(task.id);
+
+      await expect(dispatchWithKey("task-ax-2")).rejects.toThrow(
+        /belongs to task/,
+      );
+      expect(storeCounts()).toEqual({ executions: 1, assignments: 1 });
+    });
+
+    it("rejects a malformed dispatch key before touching state", async () => {
+      const task = seedTask();
+      await expect(
+        dispatchAgentExecution({ taskId: task.id, idempotencyKey: "bad key!" }),
+      ).rejects.toThrow(/idempotencyKey/);
+      expect(storeCounts()).toEqual({ executions: 0, assignments: 0 });
+      expect(triggerMock).not.toHaveBeenCalled();
+    });
+
+    it("emits the assignment event once across duplicate dispatches", async () => {
+      const task = seedTask();
+      await dispatchWithKey(task.id);
+      await dispatchWithKey(task.id);
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assigned),
+      ).toHaveLength(1);
+    });
+
+    it("reports the canonical execution when its dispatch already terminated", async () => {
+      const task = seedTask();
+      const first = await dispatchWithKey(task.id);
+      const executionId = first.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, assignmentId);
+      await handleExecutionComplete({
+        executionId,
+        assignmentId,
+        status: "succeeded",
+        instructions: "do the work",
+      });
+
+      // A late replay must not resurrect or duplicate a finished dispatch.
+      const replay = await dispatchWithKey(task.id);
+      expect(replay.assigned).toBe(false);
+      expect(replay.reason).toBe("execution_not_queued");
+      expect(replay.executionId).toBe(executionId);
+      expect(storeCounts()).toEqual({ executions: 1, assignments: 1 });
+    });
+  });
+
+  describe("assignment event idempotency", () => {
+    it("records one assignment event across a dispatch and later sweeps", async () => {
+      const task = seedTask();
+      await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "assign-event-1",
+      });
+
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assigned),
+      ).toHaveLength(1);
+    });
+
+    it("records one assignment event under concurrent dispatch and reconciliation", async () => {
+      const task = seedTask();
+      await Promise.all([
+        dispatchAgentExecution({
+          taskId: task.id,
+          requiredCapabilities: ["validation"],
+          idempotencyKey: "assign-event-2",
+        }),
+        dispatchAgentExecution({
+          taskId: task.id,
+          requiredCapabilities: ["validation"],
+          idempotencyKey: "assign-event-2",
+        }),
+        handleExecutionReclaim(),
+      ]);
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assigned),
+      ).toHaveLength(1);
+    });
+
+    it("records one assignment event per attempt", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "assign-event-3",
+      });
+      const executionId = dispatched.executionId!;
+      await handleExecutionRunning(
+        executionId,
+        (await getExecution(executionId))!.assignmentId!,
+      );
+      // A retry is a new assignment, and therefore a new transition to record.
+      await handleExecutionComplete({
+        executionId,
+        assignmentId: (await getExecution(executionId))!.assignmentId!,
+        status: "failed",
+        instructions: "do the work",
+      });
+      await handleExecutionReclaim();
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        entityId: executionId,
+        limit: 200,
+      });
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assigned),
+      ).toHaveLength(2);
+    });
+  });
+
+  // The heartbeat names its attempt, so an abandoned worker cannot mask a
+  // successor's failure by holding its lease open.
+  describe("heartbeat identity", () => {
+    it("ignores a heartbeat from a superseded attempt", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "heartbeat-key",
+      });
+      const executionId = dispatched.executionId!;
+      const first = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, first);
+
+      // The attempt is reclaimed and a successor takes over.
+      await handleExecutionReclaim(FAR_FUTURE);
+      const second = (await getExecution(executionId))!.assignmentId!;
+      expect(second).not.toBe(first);
+      await handleExecutionRunning(executionId, second);
+      const leaseBefore = getAssignment(second)!.leaseExpiresAt;
+
+      // The abandoned worker keeps beating; it must not hold the new lease open.
+      await handleExecutionHeartbeat(executionId, first);
+
+      expect(getAssignment(second)!.leaseExpiresAt).toBe(leaseBefore);
+      expect(getAssignment(first)!.status).toBe("released");
+    });
+
+    it("still extends the lease for the current attempt", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "heartbeat-key-2",
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, assignmentId);
+
+      await handleExecutionHeartbeat(executionId, assignmentId);
+
+      expect(getAssignment(assignmentId)!.status).toBe("running");
+      expect(getAssignment(assignmentId)!.lastHeartbeatAt).toBeTruthy();
+    });
+  });
+
+  // The event buffer is bounded and descriptive. Audit idempotency must therefore
+  // rest on a durable marker, not on searching a buffer that silently forgets.
+  describe("audit idempotency after event-ring eviction", () => {
+    /** Push enough unrelated events to evict everything older. */
+    async function floodEventRing(): Promise<void> {
+      const { eventLogger } = getDevHqAdapters();
+      for (let i = 0; i < 260; i += 1) {
+        await eventLogger.log({
+          type: "noise.event",
+          entityType: "task",
+          entityId: `task-noise-${i}`,
+          message: `unrelated activity ${i}`,
+          actorLabel: "System",
+        });
+      }
+    }
+
+    async function executionEvents(executionId: string) {
+      return getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        entityId: executionId,
+        limit: 500,
+      });
+    }
+
+    it("does not recreate a terminal event evicted from the buffer", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do the work",
+        idempotencyKey: "ring-key-1",
+      });
+      const executionId = dispatched.executionId!;
+      const assignmentId = (await getExecution(executionId))!.assignmentId!;
+      await handleExecutionRunning(executionId, assignmentId);
+      await handleExecutionComplete({
+        executionId,
+        assignmentId,
+        status: "succeeded",
+        instructions: "do the work",
+      });
+      expect(
+        (await executionEvents(executionId)).filter(
+          (e) => e.type === EXECUTION_EVENT_TYPE.succeeded,
+        ),
+      ).toHaveLength(1);
+
+      // The original entries age out of the ring entirely.
+      await floodEventRing();
+      expect(await executionEvents(executionId)).toHaveLength(0);
+
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+
+      // Reconciliation must not resurrect a transition it can no longer see.
+      expect(await executionEvents(executionId)).toHaveLength(0);
+    });
+
+    it("does not recreate retry events evicted from the buffer", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+        idempotencyKey: "ring-key-2",
+      });
+      const executionId = dispatched.executionId!;
+      // Two failed attempts leave one retry event behind.
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        await handleExecutionRunning(executionId);
+        await handleExecutionComplete({
+          executionId,
+          status: "failed",
+          instructions: "fail",
+        });
+      }
+      expect((await getExecution(executionId))!.attempt).toBe(3);
+      expect(
+        (await executionEvents(executionId)).filter(
+          (e) => e.type === EXECUTION_EVENT_TYPE.retried,
+        ),
+      ).toHaveLength(2);
+
+      await floodEventRing();
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+
+      expect(await executionEvents(executionId)).toHaveLength(0);
+    });
+
+    it("still records each transition once when nothing has been evicted", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+        idempotencyKey: "ring-key-3",
+      });
+      const executionId = dispatched.executionId!;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await handleExecutionRunning(executionId);
+        await handleExecutionComplete({
+          executionId,
+          status: "failed",
+          instructions: "fail",
+        });
+      }
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+
+      const events = await executionEvents(executionId);
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.retried),
+      ).toHaveLength(2);
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.exhausted),
+      ).toHaveLength(1);
+    });
+  });
+
+  // A requeue is not a terminal state. Emitting a terminal event for one would
+  // durably key `execution.exhausted` for work that is still queued, suppressing
+  // the real event when the budget is genuinely spent.
+  describe("terminality of requeued executions", () => {
+    async function executionEvents(executionId: string) {
+      return getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        entityId: executionId,
+        limit: 200,
+      });
+    }
+
+    async function exhaustedCount(executionId: string) {
+      return (await executionEvents(executionId)).filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.exhausted,
+      ).length;
+    }
+
+    /** Take away every agent that could serve the execution's routing. */
+    function removeCapacity(): void {
+      for (const agent of [...getDevHqStore().agents.values()]) {
+        getDevHqStore().agents.delete(agent.id);
+      }
+    }
+
+    function restoreCapacity(supervisor: ReturnType<typeof getAgent>): void {
+      saveAgent({ ...supervisor!, availability: "available" });
+    }
+
+    it("emits no terminal event when a failed attempt cannot be re-assigned", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+        idempotencyKey: "terminality-key-1",
+      });
+      const executionId = dispatched.executionId!;
+      await handleExecutionRunning(executionId);
+
+      // Capacity disappears before the attempt reports.
+      removeCapacity();
+      const { execution, retried } = await handleExecutionComplete({
+        executionId,
+        status: "failed",
+        instructions: "fail",
+      });
+
+      // Requeued and recoverable — not terminal, and not re-dispatched.
+      expect(execution.status).toBe("queued");
+      expect(execution.attempt).toBe(2);
+      expect(execution.agentId).toBeNull();
+      expect(retried).toBe(false);
+      expect(await exhaustedCount(executionId)).toBe(0);
+      // The retry it did take is still on the timeline.
+      expect(
+        (await executionEvents(executionId)).filter(
+          (e) => e.type === EXECUTION_EVENT_TYPE.retried,
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("emits exactly one terminal event once the budget is genuinely spent", async () => {
+      const task = seedTask();
+      const supervisor = getAgent("agent-supervisor");
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+        idempotencyKey: "terminality-key-2",
+      });
+      const executionId = dispatched.executionId!;
+
+      // Attempt 1 fails while there is no capacity to take attempt 2.
+      await handleExecutionRunning(executionId);
+      removeCapacity();
+      await handleExecutionComplete({
+        executionId,
+        status: "failed",
+        instructions: "fail",
+      });
+      expect((await getExecution(executionId))!.status).toBe("queued");
+      expect(await exhaustedCount(executionId)).toBe(0);
+
+      // Capacity returns; the sweep assigns and dispatches the waiting attempt.
+      restoreCapacity(supervisor);
+      await handleExecutionReclaim();
+      expect((await getExecution(executionId))!.agentId).toBe("agent-supervisor");
+
+      // Attempts 2 and 3 fail, spending the budget for real.
+      for (let attempt = 2; attempt <= 3; attempt += 1) {
+        await handleExecutionRunning(executionId);
+        await handleExecutionComplete({
+          executionId,
+          status: "failed",
+          instructions: "fail",
+        });
+      }
+
+      const execution = (await getExecution(executionId))!;
+      expect(execution.status).toBe("failed");
+      expect(execution.attempt).toBe(3);
+      // Exactly one terminal event: the earlier requeue never poisoned the key.
+      expect(await exhaustedCount(executionId)).toBe(1);
+
+      // And repeated sweeps neither duplicate nor resurrect it.
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+      expect(await exhaustedCount(executionId)).toBe(1);
+      expect(
+        await getDevHqAdapters().escalationStore.findByExecution(executionId),
+      ).not.toBeNull();
+    });
+
+    it("keeps the retry budget intact while waiting for capacity", async () => {
+      const task = seedTask();
+      const supervisor = getAgent("agent-supervisor");
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+        idempotencyKey: "terminality-key-3",
+      });
+      const executionId = dispatched.executionId!;
+      await handleExecutionRunning(executionId);
+      removeCapacity();
+      await handleExecutionComplete({
+        executionId,
+        status: "failed",
+        instructions: "fail",
+      });
+
+      // Sweeping while nothing is eligible must not consume attempts or
+      // manufacture a terminal state.
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+      let execution = (await getExecution(executionId))!;
+      expect(execution.status).toBe("queued");
+      expect(execution.attempt).toBe(2);
+      expect(await exhaustedCount(executionId)).toBe(0);
+
+      restoreCapacity(supervisor);
+      await handleExecutionReclaim();
+      execution = (await getExecution(executionId))!;
+      expect(execution.attempt).toBe(2); // waiting cost nothing
+      expect(execution.agentId).toBe("agent-supervisor");
+    });
+  });
+
+  // No execution may become permanently unrecoverable.
+  describe("queued execution recovery", () => {
+    beforeEach(() => {
+      resetDevHqStore();
+      triggerMock.mockClear();
+    });
+
+    /** Every agent busy: capacity contention, nothing eligible to assign. */
+    function occupyEveryAgent(): void {
+      for (const agent of getDevHqStore().agents.values()) {
+        saveAgent({ ...agent, availability: "busy" });
+      }
+    }
+
+    it("recovers an execution created under capacity contention", async () => {
+      const task = seedTask();
+      occupyEveryAgent();
+
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "Review this.",
+        idempotencyKey: "stranded-key-1",
+      });
+
+      // The canonical execution exists but nothing could be assigned to it.
+      expect(dispatched.assigned).toBe(false);
+      expect(dispatched.reason).toBe("no_agent_available");
+      const executionId = dispatched.executionId!;
+      const created = (await getExecution(executionId))!;
+      expect(created.status).toBe("queued");
+      expect(created.assignmentId).toBeNull();
+      // Recognizable as agent-backed work awaiting assignment.
+      expect(created.routing).toEqual({
+        requiredCapabilities: ["validation"],
+        preferredAgentId: null,
+        provider: null,
+      });
+
+      // Capacity returns; the sweep finishes the job with no founder action.
+      const supervisor = getAgent("agent-supervisor")!;
+      saveAgent({ ...supervisor, availability: "available" });
+      await handleExecutionReclaim();
+
+      const recovered = (await getExecution(executionId))!;
+      expect(recovered.agentId).toBe("agent-supervisor");
+      expect(recovered.attempt).toBe(1); // recovery, not a retry
+      expect(recovered.routing?.provider).toBe("internal");
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+          });
+
+    it("converges a resumed dispatch on the same stranded execution", async () => {
+      const task = seedTask();
+      occupyEveryAgent();
+      const first = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "stranded-key-2",
+      });
+
+      const supervisor = getAgent("agent-supervisor")!;
+      saveAgent({ ...supervisor, availability: "available" });
+
+      // The founder resumes the held request rather than starting a new one.
+      const resumed = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "stranded-key-2",
+      });
+
+      expect(resumed.executionId).toBe(first.executionId);
+      expect(resumed.assigned).toBe(true);
+      expect([...getDevHqStore().executions.values()]).toHaveLength(1);
+      expect([...getDevHqStore().agentAssignments.values()]).toHaveLength(1);
+    });
+
+    it("recovers an assignment whose agent no longer satisfies the routing", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "Review this.",
+        idempotencyKey: "stranded-key-3",
+      });
+      const executionId = dispatched.executionId!;
+      const staleAssignmentId = (await getExecution(executionId))!.assignmentId!;
+
+      // The assignment predates a registry change that makes its agent invalid
+      // for this execution's provider, and it was never dispatched.
+      const supervisor = getAgent("agent-supervisor")!;
+      saveAgent({
+        ...supervisor,
+        id: "agent-supervisor-2",
+        name: "Supervisor II",
+        lastActiveAt: "2020-01-01T00:00:00.000Z",
+      });
+      saveAgent({ ...supervisor, provider: "vendor-x" });
+      saveAssignment({
+        ...getAssignment(staleAssignmentId)!,
+        triggerRunId: null,
+      });
+      saveExecution({ ...(await getExecution(executionId))!, triggerRunId: null });
+      triggerMock.mockClear();
+
+      // Dispatch refuses it outright — it must not run on the wrong provider.
+      expect(
+        await ensureDispatchForAssignment(staleAssignmentId, "Review this."),
+      ).toBeNull();
+      expect(triggerMock).not.toHaveBeenCalled();
+
+      // The sweep releases the dead-end assignment and routes it correctly.
+      await handleExecutionReclaim();
+
+      const recovered = (await getExecution(executionId))!;
+      expect(recovered.assignmentId).not.toBe(staleAssignmentId);
+      expect(recovered.agentId).toBe("agent-supervisor-2");
+      expect(getAssignment(staleAssignmentId)!.status).toBe("released");
+      expect(recovered.attempt).toBe(1); // no retry consumed by recovery
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps sweeping a stranded execution until capacity exists", async () => {
+      const task = seedTask();
+      occupyEveryAgent();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "stranded-key-4",
+      });
+      const executionId = dispatched.executionId!;
+
+      // Sweeps while nothing is free leave it queued and untouched.
+      await handleExecutionReclaim();
+      await handleExecutionReclaim();
+      let execution = (await getExecution(executionId))!;
+      expect(execution.status).toBe("queued");
+      expect(execution.assignmentId).toBeNull();
+      expect(execution.attempt).toBe(1);
+      expect(triggerMock).not.toHaveBeenCalled();
+
+      const supervisor = getAgent("agent-supervisor")!;
+      saveAgent({ ...supervisor, availability: "available" });
+      await handleExecutionReclaim();
+
+      execution = (await getExecution(executionId))!;
+      expect(execution.agentId).toBe("agent-supervisor");
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("recovers the loser of a pre-claim race for a capacity-one agent", async () => {
+      const task = seedTask();
+      // Two distinct logical dispatches both select the one available agent with
+      // this capability: selection proposes, only the claim reserves (ADR-0001).
+      const first = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "race-key-a",
+      });
+      const second = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "race-key-b",
+      });
+      expect(first.agentId).toBe("agent-supervisor");
+      expect(second.agentId).toBe("agent-supervisor");
+      const loserAssignment = (await getExecution(second.executionId!))!
+        .assignmentId!;
+
+      // The first worker wins the claim; the second cannot start.
+      await handleExecutionRunning(
+        first.executionId!,
+        (await getExecution(first.executionId!))!.assignmentId!,
+      );
+      await expect(
+        handleExecutionRunning(second.executionId!, loserAssignment),
+      ).rejects.toThrow(/not available to claim/);
+
+      // The loser is now the stranding case: queued, dispatched, never claimed,
+      // and holding no lease for reclaim to find.
+      const stranded = (await getExecution(second.executionId!))!;
+      expect(stranded.status).toBe("queued");
+      expect(getAssignment(loserAssignment)!.triggerRunId).toBeTruthy();
+      expect(getAssignment(loserAssignment)!.claimedAt).toBeNull();
+      expect(getAssignment(loserAssignment)!.leaseExpiresAt).toBeNull();
+
+      // Capacity returns when the winner finishes.
+      await handleExecutionComplete({
+        executionId: first.executionId!,
+        assignmentId: (await getExecution(first.executionId!))!.assignmentId!,
+        status: "succeeded",
+        instructions: "Review this.",
+      });
+      triggerMock.mockClear();
+
+      // Past the claim deadline the dead run is superseded and the work runs.
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      const recovered = (await getExecution(second.executionId!))!;
+      expect(recovered.agentId).toBe("agent-supervisor");
+      expect(recovered.assignmentId).not.toBe(loserAssignment);
+      expect(recovered.attempt).toBe(1); // recovery consumed no business attempt
+      expect(getAssignment(loserAssignment)!.status).toBe("released");
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+      // Still two distinct logical dispatches, never merged or duplicated.
+      expect([...getDevHqStore().executions.values()]).toHaveLength(2);
+    });
+
+    it("leaves a dispatched assignment alone inside its claim deadline", async () => {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        idempotencyKey: "race-key-c",
+      });
+      const assignmentId = (await getExecution(dispatched.executionId!))!
+        .assignmentId!;
+      triggerMock.mockClear();
+
+      // A sweep at the current time must not disturb a run that has barely begun.
+      await handleExecutionReclaim();
+
+      expect((await getExecution(dispatched.executionId!))!.assignmentId).toBe(
+        assignmentId,
+      );
+      expect(getAssignment(assignmentId)!.status).toBe("assigned");
+      expect(triggerMock).not.toHaveBeenCalled();
+    });
+
+    it("does not sweep founder-request executions", async () => {
+      const task = seedTask({ id: "task-fr-1" });
+      const execution = saveExecution({
+        id: "exec-founder-1",
+        taskId: task.id,
+        workflowId: "wf-founder-request",
+        agentId: null,
+        status: "queued",
+        triggerRunId: null,
+        startedAt: null,
+        completedAt: null,
+        createdAt: TS,
+        assignmentId: null,
+        attempt: 1,
+      });
+
+      await handleExecutionReclaim();
+
+      const after = (await getExecution(execution.id))!;
+      expect(after.agentId).toBeNull();
+      expect(after.assignmentId).toBeNull();
       expect(triggerMock).not.toHaveBeenCalled();
     });
   });

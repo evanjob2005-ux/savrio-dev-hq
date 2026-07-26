@@ -12,6 +12,14 @@ export interface AgentSelectionPolicy {
   requiredCapabilities?: string[];
   /** When set and eligible, prefer this agent over the default policy. */
   preferredAgentId?: string;
+  /**
+   * When set, only agents with this registry `provider` are eligible. Unlike
+   * `preferredAgentId` this is a hard constraint, not a preference: it is how a
+   * retry of a provider-backed execution is prevented from being answered by an
+   * agent of a different provider (a simulated one, say). No eligible agent means
+   * no assignment, never a substitution.
+   */
+  requiredProvider?: string;
 }
 
 /**

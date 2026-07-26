@@ -20,10 +20,9 @@ import {
   ensureExecution,
   getExecution,
 } from "@/lib/dev-hq/execution-manager";
-import { getAgent, getDevHqStore } from "@/lib/dev-hq/store";
+import { getDevHqStore } from "@/lib/dev-hq/store";
 import {
   ESCALATION_EVENT_TYPE,
-  EXECUTION_EVENT_TYPE,
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_USER_ID,
   MAX_EXECUTION_ATTEMPTS,
@@ -166,26 +165,17 @@ async function ensureEscalationEvent(input: {
   actorId: string | null;
   actorLabel: string;
 }): Promise<void> {
-  const { eventLogger } = getDevHqAdapters();
-  const recent = await eventLogger.listRecent({
-    entityType: "task",
-    entityId: input.taskId,
-    limit: 200,
-  });
-  const already = recent.some(
-    (event) =>
-      event.type === input.type && event.message.includes(input.escalationId),
-  );
-  if (already) {
-    return;
-  }
-  await eventLogger.log({
+  await getDevHqAdapters().eventLogger.log({
     type: input.type,
     entityType: "task",
     entityId: input.taskId,
     message: input.message,
     actorId: input.actorId,
     actorLabel: input.actorLabel,
+    // Keyed on the escalation itself. The previous message-substring search over
+    // the bounded event buffer would re-emit a raise/resolve entry once the
+    // original had been evicted by unrelated traffic.
+    dedupeKey: `${input.type}:${input.escalationId}`,
   });
 }
 
@@ -207,8 +197,16 @@ export function revisionExecutionIdFor(escalationId: string): string {
   return `exec-revision-${escalationId}`;
 }
 
-/** Dispatch instructions for the revision: the task's own description. */
-function reviseInstructions(taskId: string): string {
+/**
+ * Dispatch instructions for the revision: the authorized request being revised,
+ * falling back to the task description for executions created before the request
+ * envelope existed. Never the description when a request is on record — a
+ * revision must run the work the founder authorized, not whatever the task says
+ * now.
+ */
+function reviseInstructions(taskId: string, execution: Execution | null): string {
+  const stored = (execution?.request?.instructions ?? "").trim();
+  if (stored) return stored;
   const task = getDevHqStore().tasks.get(taskId);
   return (task?.description ?? "").trim() || "Execute the assigned task.";
 }
@@ -254,9 +252,21 @@ async function ensureReviseDispatch(
 
   // 2. Create-or-get the execution at exactly that id. A replay after a failed
   //    creation notices the miss by keyed lookup and retries with the same id.
+  //
+  //    The revision inherits the routing policy and the immutable request of the
+  //    execution being revised. A revision is a fresh attempt at *the same work*,
+  //    so it must reproduce the restrictions that work was authorized under —
+  //    otherwise revising a pinned or capability-restricted execution would
+  //    silently produce unrestricted work under a different agent, and replays
+  //    would converge on the execution id while diverging on what it runs.
+  const revised = escalation.executionId
+    ? getDevHqStore().executions.get(escalation.executionId)
+    : null;
   const execution = await ensureExecution({
     executionId,
     taskId: escalation.taskId,
+    routing: revised?.routing ?? undefined,
+    request: revised?.request ?? undefined,
   });
 
   // 3. Create or recover its assignment. A non-assigned outcome (no agent free,
@@ -270,33 +280,24 @@ async function ensureReviseDispatch(
     return getExecution(executionId);
   }
 
-  // 4. Emit the assignment lifecycle event exactly once, when this call is the
-  //    one that created the assignment (the pre-existing dispatch path emits the
-  //    same event; a replay reusing the assignment must not duplicate it).
-  if (created) {
-    const agent = decision.agentId ? getAgent(decision.agentId) : null;
-    await getDevHqAdapters().eventLogger.log({
-      type: EXECUTION_EVENT_TYPE.assigned,
-      entityType: "execution",
-      entityId: execution.id,
-      message: `Execution ${execution.id} assigned to ${
-        agent?.name ?? "an agent"
-      } for task ${escalation.taskId}.`,
-      actorId: decision.agentId,
-      actorLabel: agent?.name ?? "System",
-    });
-  }
+  // 4. Record the assignment transition through the *same* canonical emitter every
+  //    other path uses. Keyed on the assignment id, so a sweep that later inspects
+  //    this revision finds the transition already recorded instead of appending a
+  //    second one — the revise path emitting its own unkeyed event was exactly how
+  //    a duplicate arose. `created` is deliberately not consulted: the key decides.
+  //    The import is dynamic to avoid a static cycle with agent-execution-service
+  //    (which imports raiseRetryExhaustionEscalation from this module).
+  void created;
+  const { ensureAssignmentEvent, ensureDispatchForAssignment } = await import(
+    "@/lib/dev-hq/agent-execution-service"
+  );
+  await ensureAssignmentEvent(execution, decision.assignment.id, decision.agentId);
 
   // 5. Dispatch through the assignment-keyed idempotent path, so concurrent
   //    callers collapse onto one logical Trigger run and a replay is a no-op.
-  //    The import is dynamic to avoid a static cycle with agent-execution-service
-  //    (which imports raiseRetryExhaustionEscalation from this module).
-  const { ensureDispatchForAssignment } = await import(
-    "@/lib/dev-hq/agent-execution-service"
-  );
   await ensureDispatchForAssignment(
     decision.assignment.id,
-    reviseInstructions(escalation.taskId),
+    reviseInstructions(escalation.taskId, execution),
   );
 
   // 6. Record authoritative state after the fact — deduped by uri, never a gate.

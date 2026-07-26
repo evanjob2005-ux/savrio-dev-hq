@@ -7,7 +7,7 @@ vi.mock("@trigger.dev/sdk", () => ({
 }));
 
 import { dispatchAgentExecutionAction } from "@/lib/dev-hq/actions";
-import { resetDevHqStore, saveTask } from "@/lib/dev-hq/store";
+import { getDevHqStore, resetDevHqStore, saveTask } from "@/lib/dev-hq/store";
 import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
@@ -51,11 +51,14 @@ describe("dispatchAgentExecutionAction", () => {
     }
   });
 
-  it("returns a validation error when no task is selected", async () => {
+  it("returns a resolved validation error when no task is selected", async () => {
     const outcome = await dispatchAgentExecutionAction({ taskId: "" });
     expect(outcome).toEqual({
       ok: false,
+      // Definitively nothing was created, so the browser may retire the identity.
+      resolved: true,
       error: "Select a task before dispatching.",
+      executionId: null,
     });
     expect(triggerMock).not.toHaveBeenCalled();
   });
@@ -66,6 +69,64 @@ describe("dispatchAgentExecutionAction", () => {
     if (!outcome.ok) {
       expect(outcome.error).toContain("Task not found");
     }
+  });
+
+  it("keeps the request identity recoverable when the service fails mid-dispatch", async () => {
+    const task = seedTask();
+    triggerMock.mockRejectedValueOnce(new Error("trigger unreachable"));
+
+    const outcome = await dispatchAgentExecutionAction({
+      taskId: task.id,
+      requiredCapabilities: ["validation"],
+      idempotencyKey: "action-key-1",
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      // Ambiguous: the canonical execution exists even though the call failed, so
+      // the browser must resume this identity rather than start a second dispatch.
+      expect(outcome.resolved).toBe(false);
+      expect(outcome.executionId).toBe("exec-dispatch-action-key-1");
+    }
+
+    // Resuming under the same identity converges on the execution already created.
+    triggerMock.mockResolvedValue({ id: "run-2" });
+    const resumed = await dispatchAgentExecutionAction({
+      taskId: task.id,
+      requiredCapabilities: ["validation"],
+      idempotencyKey: "action-key-1",
+    });
+    expect(resumed.ok).toBe(true);
+    if (resumed.ok) {
+      expect(resumed.resolved).toBe(true);
+      expect(resumed.result.executionId).toBe("exec-dispatch-action-key-1");
+    }
+    expect(getDevHqStore().executions.size).toBe(1);
+    expect(getDevHqStore().agentAssignments.size).toBe(1);
+  });
+
+  it("resolves a conflicting replay instead of holding the identity forever", async () => {
+    const task = seedTask();
+    await dispatchAgentExecutionAction({
+      taskId: task.id,
+      instructions: "review the sweeper",
+      idempotencyKey: "action-key-2",
+    });
+
+    const conflicting = await dispatchAgentExecutionAction({
+      taskId: task.id,
+      instructions: "review something else entirely",
+      idempotencyKey: "action-key-2",
+    });
+
+    expect(conflicting.ok).toBe(false);
+    if (!conflicting.ok) {
+      // A different request under the same key can never succeed, so holding the
+      // identity would strand the founder; it resolves and they start anew.
+      expect(conflicting.resolved).toBe(true);
+      expect(conflicting.error).toContain("different instructions");
+    }
+    expect(getDevHqStore().executions.size).toBe(1);
   });
 
   it("reports a non-assigned result as ok with assigned=false", async () => {
