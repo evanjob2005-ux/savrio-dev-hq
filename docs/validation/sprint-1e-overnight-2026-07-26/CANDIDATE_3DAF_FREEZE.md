@@ -1,3 +1,48 @@
+> ## ⚠️ SUPERSEDED — HISTORICAL EVIDENCE ONLY
+>
+> **Appended 2026-07-26. The original record below is unmodified and is retained verbatim.**
+>
+> **This document no longer describes any extant tree.** The candidate it freezes was
+> committed, with a further authorized change, as:
+>
+> **`d922f3794a6c57f02039ab969e0b98477f4c4c29`** — *"fix(dev-hq): Sprint 1E remediation —
+> AR2-1/X1/X3/X4, F1, F4, AR2-4"* (committed tree `fbe55154a91c0dd71aa025c56c648da11a71d63d`).
+>
+> Every identity claim below is therefore historical:
+>
+> | Stated below | Actual, as committed in `d922f379` |
+> |---|---|
+> | "**UNCOMMITTED. UNSTAGED.**" (§1, §3) | **Committed.** Working tree clean, nothing staged |
+> | HEAD `fe7fab1252df…` | `d922f3794a6c…` (`fe7fab1` is its parent) |
+> | Candidate hash `3daf0790…36c3f4` | **`d3a692d6795b0e649f2dbe188c93ac28b498a6f1f4a9f15c8390daf71be60427`** |
+> | Diffstat `+557 / −35` | **`+573 / −35`** |
+> | `agent-execution-service.ts` `136 ++-` | **`152 ++-`** |
+> | §11 "current position: step 2 of 5 — Independent Code Review next" | Sequence complete; committed |
+>
+> **The delta is +16 net lines in `lib/dev-hq/agent-execution-service.ts`, entirely comment.**
+> Verified mechanically: the comment-stripped TypeScript compiler emit of the frozen and
+> committed versions is byte-identical (`cb339b456998352752fcbfac56ddb2879be0837066e4ebbd09b24f89d1cec9b1`),
+> and the other nine files are byte-identical outright. **No production code differs from the
+> candidate frozen below.**
+>
+> **Note on §11's reviewer instruction.** The Independent Code Review it calls for was
+> attempted and returned **`FAIL` on candidate identity** — the candidate mutated mid-review
+> and was committed while the review was in flight
+> (`FRESH_CR_1E_3DAF_FINAL_REVIEW.md`). That FAIL concerns freeze integrity and sequencing,
+> **not a code defect; none was found.** It is closed by the ratification below.
+>
+> **Operative verdict for this work — see instead:**
+>
+> | Artifact | Verdict |
+> |---|---|
+> | **`RATIFICATION_1E_D922F379.md`** | **`RATIFIED WITH NON-BLOCKING FINDINGS`, 0 blockers** — the binding verdict, bound to commit `d922f379` / diff `d3a692d6…`. All five gates re-run: tsc 0, eslint 0, targeted 0 (3 files/97 tests), vitest 0 (22 files/322 tests), next build 0. |
+> | `FRESH_CR_1E_3DAF_FINAL_REVIEW.md` | `FAIL` — candidate identity/mutation only; superseded by the above |
+>
+> **Do not cite this document as certifying any tree.** Cite it only as the historical record
+> of candidate `3daf0790…`, and cite `RATIFICATION_1E_D922F379.md` for the committed state.
+
+---
+
 # Sprint 1E Remediation — Candidate `3daf0790…` Freeze Record
 
 **Status:** FROZEN FOR INDEPENDENT CODE REVIEW. **UNCOMMITTED. UNSTAGED.**
