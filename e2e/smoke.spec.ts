@@ -8,7 +8,15 @@ test("mission control shell renders its heading for a visitor", async ({
 }) => {
   await page.goto("/");
 
+  // exact: true is load-bearing. Accessible-name matching is case-insensitive
+  // substring by default, so an unrelated heading merely containing these words
+  // satisfied the assertion -- part of the false positive that failed
+  // candidate-1f-pkg2-1.
   await expect(
-    page.getByRole("heading", { level: 1, name: "Savrio Dev HQ" }),
+    page.getByRole("heading", {
+      level: 1,
+      name: "Savrio Dev HQ",
+      exact: true,
+    }),
   ).toBeVisible();
 });

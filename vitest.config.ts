@@ -20,6 +20,10 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: ["**/*.test.ts"],
+          // e2e/ belongs to Playwright. Excluded explicitly rather than relying
+          // on the .spec.ts suffix alone, so an E2E file named .test.ts is
+          // collected by neither runner instead of by both.
+          exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
           clearMocks: true,
           restoreMocks: true,
         },
