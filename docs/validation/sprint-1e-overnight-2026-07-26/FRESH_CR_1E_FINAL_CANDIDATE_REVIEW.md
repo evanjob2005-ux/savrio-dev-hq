@@ -1,3 +1,36 @@
+> ## ⚠️ SUPERSEDED — PROCEDURAL FAIL, NO UNRESOLVED CODE BLOCKER
+>
+> **Appended 2026-07-26 on Founder direction. The original review below is unmodified and
+> retained verbatim.**
+>
+> **This review's `FAIL` verdict was PROCEDURAL, not substantive.** It failed on *candidate
+> identity*: the candidate mutated while the review was in flight and was committed during
+> it, so no verdict could be bound to a stable artifact. The reviewer states this plainly in
+> its own opening — *"This is not a defect in the remediation logic."*
+>
+> **It found no unresolved code blocker.**
+>
+> The work it reviewed was subsequently committed as
+> **`d922f3794a6c57f02039ab969e0b98477f4c4c29`** and independently **ratified**.
+>
+> | | |
+> |---|---|
+> | **Authoritative post-commit result** | **`docs/validation/sprint-1e-overnight-2026-07-26/RATIFICATION_1E_D922F379.md`** |
+> | **Ratification verdict** | **`RATIFIED WITH NON-BLOCKING FINDINGS`** |
+> | **Unresolved blockers** | **0** |
+> | Suitable as the protected Sprint 1E baseline | **YES** |
+>
+> The ratification re-ran all five gates against the committed tree: TypeScript pass, ESLint
+> pass, targeted remediation tests 97 passed, full suite 322 passed, production build pass.
+>
+> **Cite this document only as the historical record of a freeze-integrity failure.** For the
+> verdict governing the committed Sprint 1E state, cite `RATIFICATION_1E_D922F379.md`.
+>
+> *Recorded in response to finding RAT-3, which observed that a reader opening this file alone
+> would see an unqualified FAIL with no supersession marker.*
+
+---
+
 # Fresh Independent Code Review — Sprint 1E FINAL Candidate (C1–C4 + MAJOR-1)
 
 **Reviewer:** Independent Code Reviewer (AGENT-008), fresh session
