@@ -891,6 +891,144 @@ INSERT after the test closing at line 1506:
 
 ---
 
+## AMENDMENTS (CR-1E, after AR-1E's rulings) — these supersede the blocks above
+
+Three amended blocks. Everything else in the specification stands unchanged. Expected
+end state remains **320 tests** — these strengthen existing rewrites and add no cases.
+
+### Amendment 1 (D3) — §1.2 comment
+
+Signature and body unchanged (`reason: AssignmentDecision["reason"]` already satisfied
+AR-1E's first refinement). The doc comment through the guard line becomes:
+
+```ts
+/**
+ * Ensure the timeline records that an execution could not be given an agent and
+ * remains queued (ADR-0001 O6). This changes no outcome — the queued execution is
+ * the approved behaviour — it supplies the record that was missing, which is what
+ * made a declined dispatch indistinguishable from one never requested.
+ *
+ * Keyed per (execution, attempt): reconciliation retries a stranded execution on
+ * every sweep, and one deferral per attempt is the honest count. A genuinely new
+ * attempt still records its own.
+ *
+ * **Only a capacity decline is a deferral, and the guard below is load-bearing.**
+ * `execution_not_queued` means the execution is running, succeeded, failed or
+ * cancelled — states the timeline already carries via `execution.claimed`,
+ * `execution.succeeded` and `execution.exhausted`. Emitting here would be a late,
+ * redundant signal about state already recorded, and its message would assert
+ * "stays queued" about an execution that had left the queue: an untruth on an
+ * append-only timeline, which is the exact defect class X4 removes from the
+ * reclaim message.
+ *
+ * **Deleting the guard therefore reintroduces X4.** It is stated at this length
+ * because a guard that makes a helper do nothing for some inputs reads like dead
+ * weight to a later simplification pass. It is not: it is the condition the five
+ * call sites share, held in one place so they cannot drift apart.
+ */
+export async function ensureAssignmentDeferredEvent(
+  execution: Execution,
+  reason: AssignmentDecision["reason"],
+): Promise<void> {
+  // Do not remove: see the X4 note above. Sites 1, 4 and 5 can reach here with
+  // `execution_not_queued`; sites 2 and 6 cannot, being enclosed by a queued
+  // check. The guard is what keeps all six uniform at the call site.
+  if (reason !== "no_agent_available") return;
+```
+
+Remainder from `const attempt = execution.attempt ?? 1;` unchanged.
+
+### Amendment 2 (D2) — §3.2 replaced
+
+**CR-1E identified a flaw in AR-1E's own requirement.** Asserting `lastHeartbeatAt`
+equals its prior value is **not sound alone**: `nowIso()` is millisecond-resolution, so
+a wrongly-written stamp inside the same millisecond compares equal and passes vacuously.
+A sentinel is pinned first, making any write detectable regardless of clock resolution.
+
+FIND (`execution-manager.test.ts` 172-174):
+```ts
+    // Cannot heartbeat a non-running execution.
+    await releaseExecution(execution!.id, makeResult("succeeded"));
+    await expect(heartbeat(execution!.id)).rejects.toThrow(/not running/);
+```
+REPLACE:
+```ts
+    // A beat that lands after the attempt already finished is absorbed, not an
+    // error — and it must be a *silent* no-op: no lease extended, no heartbeat
+    // recorded, no status moved. Asserting only that it resolves would swap one
+    // weak test for another, which is the X2 failure mode.
+    await releaseExecution(execution!.id, makeResult("succeeded"));
+
+    // Pin a recognisable stamp on the released assignment first. Comparing
+    // `lastHeartbeatAt` against its previous value would not be sound on its own:
+    // nowIso() is millisecond-resolution, so a wrongly-written stamp inside the
+    // same millisecond would compare equal and pass vacuously. A sentinel makes
+    // any write detectable regardless of clock resolution.
+    const releasedAssignment = getAssignment(execution!.assignmentId!)!;
+    saveAssignment({
+      ...releasedAssignment,
+      lastHeartbeatAt: "2026-07-24T20:00:00.000Z",
+    });
+
+    const late = await heartbeat(execution!.id);
+    expect(late.status).toBe("succeeded");
+
+    const afterLate = getAssignment(execution!.assignmentId!);
+    // The two assertions a real write could not survive: heartbeat() sets status
+    // to "running" and stamps a fresh lease.
+    expect(afterLate?.status).toBe("released");
+    expect(afterLate?.leaseExpiresAt).toBeNull();
+    // And the field itself, unchanged.
+    expect(afterLate?.lastHeartbeatAt).toBe("2026-07-24T20:00:00.000Z");
+```
+Existing imports only: `getAssignment` (18), `saveAssignment` (22), `releaseExecution`
+(13), `makeResult` (local, 48).
+
+### Amendment 3 (D1) — `stood_down` reachability lives in §2.8
+
+**CR-1E's judgement call, stated for override.** `stood_down` is a return value of
+`trigger/agent-execution.ts`, which the Execution Manager cannot observe and which no
+unit test in this repo exercises. A manager-level assertion would be asserting something
+the manager cannot see. What the manager test *can* prove is the precondition — the
+compare-and-set returns null and leaves state claimable — and it does.
+
+**3a — pointer comment appended in §2.7(b):**
+```ts
+    //
+    // This is the capacity-1 claim race at the manager boundary, and it proves
+    // only the precondition. That the losing *worker* can now reach its
+    // stood_down branch is a property of the callback chain and is pinned in
+    // agent-execution-service.test.ts, "recovers the loser of a pre-claim race
+    // for a capacity-one agent".
+```
+
+**3b — insert in §2.8** after `expect(lost.assignmentId).toBe(loserAssignment);`, before
+`const lostEvents = ...`:
+```ts
+      // The worker's own predicate, transcribed from trigger/agent-execution.ts
+      // (`claimed.execution?.status === "running" && claimed.execution
+      // ?.assignmentId === payload.assignmentId`) and evaluated against what this
+      // callback actually returns — the route serialises exactly this object as
+      // `{ execution }`.
+      //
+      // `false` here is the whole behavioural win of F1: the stood_down branch
+      // guarded by this predicate was unreachable while the callback threw,
+      // because postJson raised on the resulting 500 before the worker could
+      // evaluate it. With retries.enabledInDev false the run then died outright.
+      const holdsClaim =
+        lost.status === "running" && lost.assignmentId === loserAssignment;
+      expect(holdsClaim).toBe(false);
+```
+
+⚠️ **Limitation recorded by CR-1E, not smoothed over.** This *transcribes* the worker's
+predicate; it does not execute the worker. If `trigger/agent-execution.ts:66-68` later
+changes, this test keeps passing while the real stand-down breaks. Closing it properly
+requires driving the Trigger task against the route — scaffolding that exists for no
+task in this repo. **CR-1E recommends a Sprint 1F follow-up rather than growing this
+package.** Founder decision.
+
+---
+
 ## AR-1E rulings on the flagged deviations
 
 All four items routed to AR-1E as policy owner. **CR-1E upheld on every one.**
