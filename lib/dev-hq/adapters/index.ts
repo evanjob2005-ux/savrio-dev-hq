@@ -5,6 +5,7 @@ import { createDevEventLogger } from "@/lib/dev-hq/adapters/dev-event-logger";
 import { createDevEvidenceStore } from "@/lib/dev-hq/adapters/dev-evidence-store";
 import { createDevExecutionRunner } from "@/lib/dev-hq/adapters/dev-execution-runner";
 import { createDevProjectRepository } from "@/lib/dev-hq/adapters/dev-project-repository";
+import { createDevReviewStore } from "@/lib/dev-hq/adapters/dev-review-store";
 import { createDevStateReader } from "@/lib/dev-hq/adapters/dev-state-reader";
 import { createDevTaskRepository } from "@/lib/dev-hq/adapters/dev-task-repository";
 import { createDevWorkflowEngine } from "@/lib/dev-hq/adapters/dev-workflow-engine";
@@ -17,6 +18,7 @@ import type {
   EvidenceStore,
   ExecutionRunner,
   ProjectRepository,
+  ReviewStore,
   StateReader,
   TaskRepository,
   WorkflowEngine,
@@ -35,6 +37,7 @@ export interface DevHqAdapters {
   executionRunner: ExecutionRunner;
   evidenceStore: EvidenceStore;
   escalationStore: EscalationStore;
+  reviewStore: ReviewStore;
 }
 
 let cached: DevHqAdapters | null = null;
@@ -57,6 +60,7 @@ export function getDevHqAdapters(): DevHqAdapters {
       executionRunner: createDevExecutionRunner(),
       evidenceStore: createDevEvidenceStore(),
       escalationStore: createDevEscalationStore(),
+      reviewStore: createDevReviewStore(),
     };
   }
   return cached;

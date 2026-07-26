@@ -38,6 +38,17 @@ export type {
   AgentAssignmentStatus,
 } from "./agent-assignment";
 export type { Evidence, EvidenceKind } from "./evidence";
+export type {
+  PublicReview,
+  Review,
+  ReviewEscalationReason,
+  ReviewFinding,
+  ReviewFindingSeverity,
+  ReviewOutcome,
+  ReviewPolicy,
+  ReviewSecretField,
+  ReviewStatus,
+} from "./review";
 export type { Approval } from "./approval";
 export type {
   Escalation,

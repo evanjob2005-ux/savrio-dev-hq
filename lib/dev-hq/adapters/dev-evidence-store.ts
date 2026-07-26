@@ -1,6 +1,15 @@
-import type { CreateEvidenceInput, EvidenceStore } from "@/types/contracts";
+import type {
+  CreateEvidenceInput,
+  EnsureEvidenceInput,
+  EvidenceStore,
+} from "@/types/contracts";
 import type { Evidence } from "@/types/domain";
-import { getDevHqStore, getEvidence, saveEvidence } from "@/lib/dev-hq/store";
+import {
+  ensureEvidenceByUri,
+  getDevHqStore,
+  getEvidence,
+  saveEvidence,
+} from "@/lib/dev-hq/store";
 import { nextId, nowIso } from "@/lib/dev-hq/id";
 
 /**
@@ -17,18 +26,15 @@ export class DevEvidenceStore implements EvidenceStore {
   }
 
   async addEvidence(input: CreateEvidenceInput): Promise<Evidence> {
-    const evidence: Evidence = {
-      id: nextId("evd"),
-      executionId: input.executionId ?? null,
-      taskId: input.taskId,
-      kind: input.kind,
-      label: input.label,
-      summary: input.summary,
-      uri: input.uri ?? null,
-      createdAt: nowIso(),
-      createdByAgentId: input.createdByAgentId ?? null,
-    };
-    return saveEvidence(evidence);
+    return saveEvidence(buildEvidence(input));
+  }
+
+  async ensureEvidence(input: EnsureEvidenceInput): Promise<Evidence> {
+    // No await between the lookup and the insert — `ensureEvidenceByUri` is
+    // synchronous and so is building the row — so concurrent callers cannot
+    // interleave and both create. The async signature is the contract's, not a
+    // suspension point.
+    return ensureEvidenceByUri(input.uri, () => buildEvidence(input));
   }
 
   async getEvidence(id: string): Promise<Evidence | null> {
@@ -40,6 +46,20 @@ export class DevEvidenceStore implements EvidenceStore {
       .filter(predicate)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
+}
+
+function buildEvidence(input: CreateEvidenceInput): Evidence {
+  return {
+    id: nextId("evd"),
+    executionId: input.executionId ?? null,
+    taskId: input.taskId,
+    kind: input.kind,
+    label: input.label,
+    summary: input.summary,
+    uri: input.uri ?? null,
+    createdAt: nowIso(),
+    createdByAgentId: input.createdByAgentId ?? null,
+  };
 }
 
 export function createDevEvidenceStore(): DevEvidenceStore {

@@ -81,4 +81,59 @@ describe("DevEvidenceStore", () => {
     expect(await store.listForExecution("exec-2")).toHaveLength(1);
     expect(await store.listForTask("task-missing")).toEqual([]);
   });
+
+  // URI-keyed create-or-get, mirroring the keyed event and keyed finding
+  // patterns: uniqueness is a property of the write, not of a preceding read.
+  describe("ensureEvidence", () => {
+    function input(uri: string, label = "Outcome") {
+      return {
+        executionId: "exec-1",
+        taskId: "task-1",
+        kind: "log" as const,
+        label,
+        summary: "Succeeded.",
+        uri,
+      };
+    }
+
+    it("creates the row on first call and returns the same one on replay", async () => {
+      const first = await store.ensureEvidence(input("review:rvw-1:outcome"));
+      const replay = await store.ensureEvidence(
+        input("review:rvw-1:outcome", "A different label"),
+      );
+
+      expect(replay.id).toBe(first.id);
+      // The first writer's content is authoritative; a replay never rewrites it.
+      expect(replay.label).toBe("Outcome");
+      expect(await store.listForTask("task-1")).toHaveLength(1);
+    });
+
+    it("creates exactly one row under concurrent callers for one uri", async () => {
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          store.ensureEvidence(input("review:rvw-1:finding:blocking-1")),
+        ),
+      );
+
+      expect(new Set(results.map((evidence) => evidence.id)).size).toBe(1);
+      expect(await store.listForTask("task-1")).toHaveLength(1);
+    });
+
+    it("still creates distinct rows for distinct uris", async () => {
+      const a = await store.ensureEvidence(input("review:rvw-1:outcome"));
+      const b = await store.ensureEvidence(input("review:rvw-1:finding:x"));
+
+      expect(a.id).not.toBe(b.id);
+      expect(await store.listForTask("task-1")).toHaveLength(2);
+    });
+
+    it("keeps unkeyed appends append-only", async () => {
+      await store.addEvidence(input("review:rvw-1:outcome"));
+      await store.addEvidence(input("review:rvw-1:outcome"));
+
+      // addEvidence remains the append-only audit write; only ensureEvidence
+      // claims uri uniqueness.
+      expect(await store.listForTask("task-1")).toHaveLength(2);
+    });
+  });
 });

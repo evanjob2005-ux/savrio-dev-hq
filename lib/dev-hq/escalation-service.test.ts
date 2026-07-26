@@ -217,6 +217,26 @@ describe("escalation service", () => {
     ).toHaveLength(1);
   });
 
+  it("records one escalation evidence entry under concurrent raises", async () => {
+    seedTask();
+    const failed = failedExecution();
+
+    // The first raise of this execution, driven concurrently: every caller
+    // observes no evidence yet, so only a keyed write keeps the audit row
+    // single. A read-then-write check appends one row per caller.
+    await Promise.all(
+      Array.from({ length: 5 }, () => raiseRetryExhaustionEscalation(failed)),
+    );
+
+    const evidence =
+      await getDevHqAdapters().evidenceStore.listForTask("task-esc-1");
+    expect(
+      evidence.filter(
+        (e) => e.label === "Escalation raised: retry budget exhausted",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("resolves an escalation idempotently and emits one resolution event", async () => {
     const executionId = await exhaust(seedTask().id);
     const escalation =
@@ -897,13 +917,13 @@ describe("escalation service", () => {
         const { escalation } = await exhaustAndEscalate();
         const canonical = revisionExecutionIdFor(escalation.id);
         const adapters = getDevHqAdapters();
-        const original = adapters.evidenceStore.addEvidence.bind(
+        const original = adapters.evidenceStore.ensureEvidence.bind(
           adapters.evidenceStore,
         );
 
         // Terminate the revision *after* dispatch, during the descriptive
         // evidence write — the window after the last snapshot was taken.
-        vi.spyOn(adapters.evidenceStore, "addEvidence").mockImplementation(
+        vi.spyOn(adapters.evidenceStore, "ensureEvidence").mockImplementation(
           async (input) => {
             if (input.uri === `escalation:${escalation.id}:revise-dispatch`) {
               const asgn = await currentAssignment(canonical);

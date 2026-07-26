@@ -4,6 +4,7 @@
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
 import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
 import type { DevHqState, DevHqStoreData } from "@/lib/dev-hq/types";
+import { toPublicReviews } from "@/lib/dev-hq/review-projection";
 import { nowIso } from "@/lib/dev-hq/id";
 import type {
   Agent,
@@ -14,6 +15,8 @@ import type {
   Evidence,
   Execution,
   Project,
+  Review,
+  ReviewFinding,
   Task,
   Workflow,
   WorkflowRunRecord,
@@ -93,7 +96,10 @@ function createEmptyStore(): DevHqStoreData {
     agents: createSeedAgents(),
     agentAssignments: new Map(),
     evidence: new Map(),
+    evidenceUris: new Map(),
     escalations: new Map(),
+    reviews: new Map(),
+    reviewFindings: new Map(),
     eventKeys: new Map(),
   };
 }
@@ -151,6 +157,16 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
   const escalations = [...store.escalations.values()].sort((a, b) =>
     b.raisedAt.localeCompare(a.raisedAt),
   );
+  // Projected, never raw: this state is served to the browser, and a Review
+  // carries the internal capability that resolves it.
+  const reviews = toPublicReviews(
+    [...store.reviews.values()].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    ),
+  );
+  const reviewFindings = [...store.reviewFindings.values()].sort((a, b) =>
+    b.recordedAt.localeCompare(a.recordedAt),
+  );
 
   const pendingApprovals = approvals.filter((a) => a.status === "pending").length;
   const activeTasks = tasks.filter(
@@ -169,6 +185,8 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
     agents,
     evidence,
     escalations,
+    reviews,
+    reviewFindings,
     overview: {
       activeProjects: projects.filter((p) => p.status === "active").length,
       activeTasks,
@@ -248,12 +266,57 @@ export function getAssignment(assignmentId: string): AgentAssignment | null {
 }
 
 export function saveEvidence(evidence: Evidence): Evidence {
-  getDevHqStore().evidence.set(evidence.id, evidence);
+  const store = getDevHqStore();
+  store.evidence.set(evidence.id, evidence);
+  // Register the uri if nothing holds it yet. The append-only path stays
+  // append-only — a second row with the same uri is still stored — but the index
+  // remembers the *first* row, so a later keyed write converges on whatever is
+  // already on the timeline rather than adding a twin beside it. That is what
+  // lets recovery reuse evidence an interrupted attempt had already made durable.
+  if (evidence.uri && !store.evidenceUris.has(evidence.uri)) {
+    store.evidenceUris.set(evidence.uri, evidence);
+  }
   return evidence;
+}
+
+/**
+ * Create the evidence row for `uri`, or return the one already recorded there.
+ *
+ * The keyed check and the insert are synchronous with no await between them, so
+ * concurrent writers cannot both create — the same argument that makes
+ * `appendEvent`'s dedupe key and the keyed ReviewFinding hold. This is why
+ * uniqueness is a property of the write: a service-level read-then-write check
+ * cannot provide it, because both callers pass the read before either writes.
+ *
+ * Append-only is preserved: nothing is ever mutated or removed, and the losing
+ * caller is handed the winner's row so evidence identity is stable across
+ * replays, sweeps, and races.
+ */
+export function ensureEvidenceByUri(
+  uri: string,
+  create: () => Evidence,
+): Evidence {
+  const existing = getDevHqStore().evidenceUris.get(uri);
+  if (existing) return existing;
+  return saveEvidence(create());
 }
 
 export function getEvidence(evidenceId: string): Evidence | null {
   return getDevHqStore().evidence.get(evidenceId) ?? null;
+}
+
+export function saveReview(review: Review): Review {
+  getDevHqStore().reviews.set(review.id, review);
+  return review;
+}
+
+export function getReview(reviewId: string): Review | null {
+  return getDevHqStore().reviews.get(reviewId) ?? null;
+}
+
+export function saveReviewFinding(finding: ReviewFinding): ReviewFinding {
+  getDevHqStore().reviewFindings.set(finding.id, finding);
+  return finding;
 }
 
 export function saveEscalation(escalation: Escalation): Escalation {

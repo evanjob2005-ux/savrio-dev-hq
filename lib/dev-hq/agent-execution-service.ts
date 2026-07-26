@@ -11,6 +11,7 @@ import type {
   AgentResult,
   Execution,
   ExecutionRequest,
+  ReviewPolicy,
 } from "@/types/domain";
 import {
   ensureAssignment,
@@ -32,6 +33,7 @@ import {
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import { raiseRetryExhaustionEscalation } from "@/lib/dev-hq/escalation-service";
 import {
+  DEFAULT_REVIEW_POLICY,
   EXECUTION_CLAIM_DEADLINE_MS,
   EXECUTION_EVENT_TYPE,
   MAX_EXECUTION_ATTEMPTS,
@@ -105,8 +107,9 @@ async function logExecutionEvent(
 
 /**
  * Ensure exactly one append-only log evidence entry for an execution attempt
- * outcome, deduped by a stable per-attempt uri so a reconciling retry does not
- * duplicate it.
+ * outcome, keyed on a stable per-attempt uri so neither a reconciling retry nor
+ * a concurrent callback duplicates it. Keyed in the store, not checked here: a
+ * read-then-write check lets two callers both observe no row and both append.
  */
 async function ensureOutcomeEvidence(
   execution: Execution,
@@ -117,12 +120,8 @@ async function ensureOutcomeEvidence(
 ): Promise<void> {
   const { evidenceStore } = getDevHqAdapters();
   const ref = `execution:${execution.id}:attempt:${attempt}:outcome`;
-  const existing = await evidenceStore.listForExecution(execution.id);
-  if (existing.some((evidence) => evidence.uri === ref)) {
-    return;
-  }
   const base = `Agent execution ${execution.id} attempt ${attempt} reported "${status}".`;
-  await evidenceStore.addEvidence({
+  await evidenceStore.ensureEvidence({
     executionId: execution.id,
     taskId: execution.taskId,
     kind: "log",
@@ -535,6 +534,11 @@ export interface DispatchAgentExecutionInput {
   preferredAgentId?: string;
   instructions?: string;
   /**
+   * How thoroughly the completed work is reviewed (ADR-0002 E1). Defaults to
+   * `basic`; pass `none` to dispatch work that is final when it succeeds.
+   */
+  reviewPolicy?: ReviewPolicy;
+  /**
    * Caller-supplied dispatch idempotency key. Two dispatches carrying the same
    * key for the same task are the *same* logical dispatch: they converge on one
    * canonical execution, one assignment, and one Trigger run, no matter how they
@@ -664,6 +668,7 @@ export async function dispatchAgentExecution(
     taskId: input.taskId,
     policy,
     request,
+    reviewPolicy: input.reviewPolicy ?? DEFAULT_REVIEW_POLICY,
   });
 
   // One key, one request. A replay that supplies materially different parameters
@@ -839,6 +844,7 @@ export async function handleExecutionComplete(
 
     await ensureRetryEvents(execution, attemptAgentId);
     await finalizeTerminalExecution(execution, attempt, attemptAgentId);
+    await requestReviewIfSucceeded(execution);
     return { execution, retried: false };
   }
 
@@ -849,6 +855,25 @@ export async function handleExecutionComplete(
   // state rather than exiting merely because the execution is terminal.
   await reconcileRecordsFor(current);
   return { execution: current, retried: false };
+}
+
+/**
+ * Hand a succeeded execution to the review loop.
+ *
+ * Imported dynamically so this service carries no static dependency on the review
+ * subsystem: review policy and the revision loop belong to the review service,
+ * which reaches back here the same way to dispatch a revision. Failures are not
+ * swallowed silently — but the review is also reconciled by the sweep, so a lost
+ * request is recovered rather than dropped.
+ */
+async function requestReviewIfSucceeded(execution: Execution): Promise<void> {
+  if (execution.status !== "succeeded") return;
+  const policy = execution.reviewPolicy ?? null;
+  if (!policy || policy === "none") return;
+  const { ensureReviewForExecution } = await import(
+    "@/lib/dev-hq/review-service"
+  );
+  await ensureReviewForExecution(execution.id);
 }
 
 /**

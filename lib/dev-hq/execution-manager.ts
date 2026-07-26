@@ -15,6 +15,7 @@ import type {
   ExecutionRequest,
   ExecutionRouting,
   IsoTimestamp,
+  ReviewPolicy,
   Task,
 } from "@/types/domain";
 import {
@@ -222,6 +223,7 @@ export async function listReadyWork(): Promise<Task[]> {
 export async function assignExecution(
   taskId: string,
   policy?: AgentSelectionPolicy,
+  reviewPolicy?: ReviewPolicy,
 ): Promise<AssignmentDecision> {
   const task = getDevHqStore().tasks.get(taskId);
   if (!task) {
@@ -255,6 +257,7 @@ export async function assignExecution(
     assignmentId: null,
     attempt: 1,
     routing: routingFrom(policy, agent.provider),
+    reviewPolicy: reviewPolicy ?? null,
   });
   const assignment = createAssignment({
     execution: created,
@@ -321,6 +324,18 @@ export async function ensureExecution(input: {
    * caller's payload or the task description as it stands today.
    */
   request?: ExecutionRequest;
+  /**
+   * The review policy the execution is dispatched under (ADR-0002 E1). Persisted
+   * verbatim: the Execution Manager stores it so the record is complete, but the
+   * policy's meaning and the loop it drives belong to the review service.
+   */
+  reviewPolicy?: ReviewPolicy;
+  /**
+   * The review that authorized this execution as a revision, when one did.
+   * Persisted verbatim: the manager stores the link so the record is complete,
+   * while the chain it forms is read and interpreted only by the review service.
+   */
+  revisionOfReviewId?: string;
 }): Promise<Execution> {
   const store = getDevHqStore();
   const existing = store.executions.get(input.executionId);
@@ -357,6 +372,8 @@ export async function ensureExecution(input: {
       ? { ...input.routing, requiredCapabilities: [...input.routing.requiredCapabilities] }
       : routingFrom(input.policy, null),
     request: input.request ?? null,
+    reviewPolicy: input.reviewPolicy ?? null,
+    revisionOfReviewId: input.revisionOfReviewId ?? null,
   });
 }
 

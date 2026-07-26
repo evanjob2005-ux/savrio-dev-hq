@@ -1,4 +1,5 @@
 import type { EntityId, ExecutionStatus, IsoTimestamp } from "./common";
+import type { ReviewPolicy } from "./review";
 
 /**
  * The routing decision that authorized an execution's agent selection, persisted
@@ -63,4 +64,22 @@ export interface Execution {
    * created for. Additive and optional: founder-request executions carry none.
    */
   request?: ExecutionRequest | null;
+  /**
+   * Agent-backed executions only. How thoroughly this execution is reviewed once
+   * it succeeds (ADR-0002 E1). Additive and optional: founder-request executions
+   * carry none, and an absent policy is treated as no review rather than a
+   * default, so nothing is reviewed that was not dispatched under a policy.
+   */
+  reviewPolicy?: ReviewPolicy | null;
+  /**
+   * Agent-backed executions only. The review that authorized this execution as a
+   * revision, or null/absent for an execution nobody revised into existence.
+   *
+   * This is the revision chain: it is what lets the review loop count its own
+   * iterations instead of counting every review the task ever had, so unrelated
+   * work on the same task cannot exhaust the bound. An escalation `revise`
+   * deliberately leaves it unset — that is how the founder's decision resets the
+   * loop (ADR-0002 E2).
+   */
+  revisionOfReviewId?: EntityId | null;
 }

@@ -8,6 +8,9 @@ import type {
   Evidence,
   Execution,
   Project,
+  PublicReview,
+  Review,
+  ReviewFinding,
   Task,
   Workflow,
   WorkflowRunRecord,
@@ -25,6 +28,12 @@ export interface DevHqState {
   agents: Agent[];
   evidence: Evidence[];
   escalations: Escalation[];
+  /**
+   * The read-model projection, never the domain object: this state is served to
+   * the browser, and a Review carries the callback capability that resolves it.
+   */
+  reviews: PublicReview[];
+  reviewFindings: ReviewFinding[];
   overview: SystemOverviewMetrics;
 }
 
@@ -39,7 +48,17 @@ export interface DevHqStoreData {
   agents: Map<string, Agent>;
   agentAssignments: Map<string, AgentAssignment>;
   evidence: Map<string, Evidence>;
+  /**
+   * The first evidence row recorded for each logical uri. A keyed index rather
+   * than a scan of `evidence`, so uri uniqueness is decided by one synchronous
+   * lookup-and-insert instead of a read-then-write that two concurrent callers
+   * can both pass.
+   */
+  evidenceUris: Map<string, Evidence>;
   escalations: Map<string, Escalation>;
+  reviews: Map<string, Review>;
+  /** Findings keyed by their deterministic id, so a replay cannot duplicate one. */
+  reviewFindings: Map<string, ReviewFinding>;
   /**
    * Events already recorded under an idempotency key. Keyed lookup rather than a
    * scan of `events`, which is trimmed and would silently forget older keys.

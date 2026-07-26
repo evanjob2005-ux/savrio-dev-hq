@@ -82,6 +82,48 @@ export const EXECUTION_EVENT_TYPE = {
 export const EXECUTION_SWEEP_CRON = "* * * * *";
 
 /**
+ * Review-iteration budget (ADR-0002 E6): blocking findings may drive up to this
+ * many review iterations for a task before the loop is exhausted and escalated.
+ * Independent of the execution retry budget — the two counters never conflate,
+ * and a review-driven revision starts a new execution with a full retry budget.
+ */
+export const MAX_REVIEW_ITERATIONS = 3;
+
+/**
+ * How long a dispatched review may go without reporting before recovery treats
+ * its run as dead and re-dispatches it. A review holds no lease — nothing else
+ * would ever free it — so this deadline is the only thing that keeps a stalled
+ * reviewer from stranding the loop. Matched to the execution claim deadline.
+ */
+export const REVIEW_RESPONSE_DEADLINE_MS = EXECUTION_CLAIM_DEADLINE_MS;
+
+/**
+ * How many times a single review may be dispatched before an unresponsive
+ * reviewer is escalated instead of re-dispatched. Bounded for the same reason the
+ * retry budget is: automated recovery that never gives up is a stall, not
+ * recovery.
+ */
+export const MAX_REVIEW_DISPATCH_ATTEMPTS = 3;
+
+/**
+ * Review policy applied to a manually dispatched agent execution when the caller
+ * does not specify one (ADR-0002 E1, D-E2).
+ */
+export const DEFAULT_REVIEW_POLICY = "basic";
+
+/**
+ * Review lifecycle event names, emitted from the review service (ADR-0002 E3).
+ * One event per accepted transition; none are emitted for a no-op callback.
+ */
+export const REVIEW_EVENT_TYPE = {
+  started: "review.started",
+  findingRecorded: "review.finding_recorded",
+  passed: "review.passed",
+  changesRequested: "review.changes_requested",
+  escalated: "review.escalated",
+} as const;
+
+/**
  * Escalation lifecycle event names, emitted from the service layer (ADR-0002 E2/E3).
  */
 export const ESCALATION_EVENT_TYPE = {

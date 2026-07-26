@@ -158,7 +158,10 @@ describe("agent execution service", () => {
     expect(execution.status).toBe("succeeded");
     expect(retried).toBe(false);
     expect(getAgent("agent-supervisor")?.availability).toBe("available");
-    expect(triggerMock).toHaveBeenCalledTimes(1); // only the initial dispatch
+    // The execution itself is never re-dispatched. The second trigger is the
+    // review of the completed work, which the default policy asks for.
+    const dispatchedTasks = triggerMock.mock.calls.map((call) => call[0]);
+    expect(dispatchedTasks).toEqual(["agent-execution", "agent-review"]);
   });
 
   it("re-dispatches a failed attempt under the retry budget", async () => {

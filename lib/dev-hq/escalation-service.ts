@@ -26,11 +26,13 @@ import {
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_USER_ID,
   MAX_EXECUTION_ATTEMPTS,
+  MAX_REVIEW_ITERATIONS,
 } from "@/lib/dev-hq/constants";
 import type {
   Escalation,
   EscalationResolution,
   Execution,
+  Review,
   Task,
 } from "@/types/domain";
 
@@ -133,6 +135,12 @@ async function activateTaskForLiveRevision(
   });
 }
 
+/**
+ * Append-only escalation evidence, keyed on the escalation's own uri. Keyed in
+ * the store rather than checked here: concurrent raises and reconciling replays
+ * would all pass a read-then-write check before any of them wrote, leaving one
+ * audit row per caller for a single escalation.
+ */
 async function ensureEscalationEvidence(input: {
   ref: string;
   taskId: string;
@@ -141,12 +149,7 @@ async function ensureEscalationEvidence(input: {
   summary: string;
   createdByAgentId: string | null;
 }): Promise<void> {
-  const { evidenceStore } = getDevHqAdapters();
-  const existing = await evidenceStore.listForTask(input.taskId);
-  if (existing.some((evidence) => evidence.uri === input.ref)) {
-    return;
-  }
-  await evidenceStore.addEvidence({
+  await getDevHqAdapters().evidenceStore.ensureEvidence({
     executionId: input.executionId,
     taskId: input.taskId,
     kind: "log",
@@ -267,6 +270,12 @@ async function ensureReviseDispatch(
     taskId: escalation.taskId,
     routing: revised?.routing ?? undefined,
     request: revised?.request ?? undefined,
+    // The policy carries forward, so the authorized retry is reviewed exactly as
+    // the work it replaces was. The revision-chain link is deliberately *not*
+    // set: a founder revise resets the review-iteration counter (ADR-0002 E2), so
+    // the new execution starts a fresh loop at iteration 1 rather than inheriting
+    // the exhausted chain.
+    reviewPolicy: revised?.reviewPolicy ?? undefined,
   });
 
   // 3. Create or recover its assignment. A non-assigned outcome (no agent free,
@@ -320,6 +329,81 @@ async function ensureReviseDispatch(
   //    claim "queued" for an execution that has already succeeded, failed, or
   //    been cancelled — which would wrongly reactivate the task.
   return getExecution(executionId);
+}
+
+/**
+ * Raise the founder escalation for a review loop that has run out of iterations
+ * (ADR-0002 E2/E6). The review service establishes exhaustion; this owns the
+ * escalation itself, so escalation creation, deduplication, task transition,
+ * evidence, and event all stay in one place.
+ *
+ * Idempotent: the store dedupes per (execution, origin), and each side effect is
+ * re-applied only when missing — so repeated reconciliation converges on one
+ * escalation rather than a second founder decision.
+ */
+export async function raiseReviewExhaustionEscalation(
+  review: Review,
+): Promise<Escalation> {
+  if (review.status !== "escalated") {
+    throw new Error(
+      `Cannot raise a review-exhaustion escalation for review ${review.id}: status is "${review.status}", not "escalated".`,
+    );
+  }
+  // The precondition is checked against the recorded cause, so each way the loop
+  // can terminate is validated on its own terms rather than one standing in for
+  // the other. An iterations-exhausted escalation must actually be at the bound;
+  // an unresponsive reviewer legitimately escalates at any iteration.
+  if (
+    review.escalationReason === "iterations_exhausted" &&
+    review.iteration < MAX_REVIEW_ITERATIONS
+  ) {
+    throw new Error(
+      `Cannot raise a review-exhaustion escalation for review ${review.id}: iteration ${review.iteration} of ${MAX_REVIEW_ITERATIONS}, review budget not exhausted.`,
+    );
+  }
+
+  const { escalationStore } = getDevHqAdapters();
+  const summary =
+    review.escalationReason === "reviewer_unresponsive"
+      ? `Review of execution ${review.executionId} was dispatched ${review.dispatchAttempts} time` +
+        `${review.dispatchAttempts === 1 ? "" : "s"} and never reported an outcome; the review loop cannot proceed without a founder decision.`
+      : `Review of execution ${review.executionId} still requested changes after ${review.iteration} review iteration` +
+        `${review.iteration === 1 ? "" : "s"}; the bounded revision loop is exhausted.`;
+
+  const escalation = await escalationStore.createEscalation({
+    origin: "review_exhausted",
+    taskId: review.taskId,
+    executionId: review.executionId,
+    reviewId: review.id,
+    summary,
+    raisedByAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  });
+  if (escalation.status === "resolved") {
+    return escalation;
+  }
+
+  await ensureTaskStatus(escalation.taskId, "needs_revision");
+  await ensureEscalationEvidence({
+    ref: `escalation:${escalation.id}:raised`,
+    taskId: escalation.taskId,
+    executionId: escalation.executionId,
+    label:
+      review.escalationReason === "reviewer_unresponsive"
+        ? "Escalation raised: reviewer never reported"
+        : "Escalation raised: review iterations exhausted",
+    summary: escalation.summary,
+    createdByAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  });
+  await ensureEscalationEvent({
+    type: ESCALATION_EVENT_TYPE.raised,
+    taskId: escalation.taskId,
+    escalationId: escalation.id,
+    message: `Escalation ${escalation.id} raised for task ${escalation.taskId}: ${escalation.summary}`,
+    actorId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+    actorLabel: "Executive Orchestrator",
+  });
+
+  return escalation;
 }
 
 /**

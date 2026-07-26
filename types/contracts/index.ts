@@ -32,6 +32,7 @@ export type {
 } from "./execution-runner";
 export type {
   CreateEvidenceInput,
+  EnsureEvidenceInput,
   EvidenceStore,
 } from "./evidence-store";
 export type {
@@ -50,3 +51,12 @@ export type {
   ReserveRevisionExecutionInput,
   ResolveEscalationInput,
 } from "./escalation-store";
+export type {
+  CreateReviewInput,
+  RecordReviewDispatchInput,
+  RecordReviewFindingInput,
+  ReserveReviewRevisionInput,
+  ReserveReviewTokenInput,
+  ResolveReviewInput,
+  ReviewStore,
+} from "./review-store";
