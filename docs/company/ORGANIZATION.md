@@ -137,6 +137,30 @@ Responsibilities:
 - Verify required corrections
 - Distinguish blocking from non-blocking findings
 
+### Architecture Reviewer
+
+**Agent ID:** AGENT-019
+**Role ID:** ROLE-022
+
+Responsibilities:
+
+- Review architectural soundness independently of implementation
+- Verify ADR compliance
+- Verify service, repository, and orchestration boundaries
+- Analyze concurrency, replay convergence, crash recovery, and idempotency
+- Verify lifecycle consistency and persistence implications
+- Detect architectural drift and hidden coupling
+- Enforce approved scope
+- Issue the architecture commit-gate verdict
+
+The Architecture Reviewer is read-only and never implements. It does not
+replace the Independent Code Reviewer: line-level defect detection and
+standards compliance remain that role's, while structure, ownership, and
+invariants under failure belong here. Both reviews may be required on the
+same work, and neither verdict substitutes for the other.
+
+Authority, verdicts, and commit-gate rules are defined in GOV-001.
+
 ---
 
 ## Quality Assurance
@@ -245,6 +269,7 @@ Founder and CEO
 |
 +-- Code Quality
 |   +-- Independent Code Reviewer
+|   +-- Architecture Reviewer
 |
 +-- Quality Assurance
 |   +-- QA Engineer

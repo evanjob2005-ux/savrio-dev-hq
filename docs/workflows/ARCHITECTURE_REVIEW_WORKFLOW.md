@@ -12,6 +12,19 @@ This workflow defines how significant architectural decisions are proposed, revi
 
 Its purpose is to ensure long-term maintainability, scalability, security, and consistency across Dev HQ projects.
 
+**Not to be confused with the commit-gate architecture review.** This workflow is
+design-time: it decides *what to build* before implementation and produces an
+ADR. Its Stage 5 review is a consensus of participating specialists, led by the
+Lead Software Engineer, with the outcomes listed in Stage 6.
+
+The commit-gate architecture review is a different control. It reviews *work
+already implemented*, is performed independently by the Architecture Reviewer
+(AGENT-019), is read-only, and returns PASS, PASS WITH NON-BLOCKING FOLLOW-UPS,
+or FAIL. It is defined in GOV-001 and appears as Stage 11 of WF-001.
+
+A decision approved here does not satisfy that gate, and a PASS there does not
+authorize an architecture this workflow never approved.
+
 ---
 
 # Workflow Overview

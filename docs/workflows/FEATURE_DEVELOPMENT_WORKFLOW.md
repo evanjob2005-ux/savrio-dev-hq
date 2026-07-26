@@ -41,6 +41,10 @@ Independent Code Review
  ↓
 Engineering Corrections
  ↓
+Architecture Review (when required)
+ ↓
+Engineering Corrections
+ ↓
 QA
  ↓
 Security Review (when required)
@@ -245,6 +249,32 @@ Approved.
 
 # Stage 11
 
+## Architecture Review
+
+Performed when required by GOV-001. Independent of implementation, read-only,
+and distinct from Stage 10: line-level defects belong to Independent Code
+Review, while structure, ownership, and invariants under failure belong here.
+
+Owner
+
+Architecture Reviewer (AGENT-019)
+
+Deliverables
+
+- Architecture Review Report
+- Blockers, separated from non-blocking follow-ups
+- Verdict
+
+Exit Criteria
+
+A verdict of PASS or PASS WITH NON-BLOCKING FOLLOW-UPS, with any follow-ups
+explicitly recorded. A FAIL returns the work to the responsible owner for
+correction and re-review; it may not be bypassed.
+
+---
+
+# Stage 12
+
 ## QA
 
 Deliverables
@@ -260,7 +290,7 @@ QA Approved.
 
 ---
 
-# Stage 12
+# Stage 13
 
 ## Security Review
 
@@ -272,7 +302,7 @@ Security Approved.
 
 ---
 
-# Stage 13
+# Stage 14
 
 ## Database Review
 
@@ -292,7 +322,7 @@ Database Approved.
 
 ---
 
-# Stage 14
+# Stage 15
 
 ## Reliability Review
 
@@ -310,7 +340,7 @@ Operational approval.
 
 ---
 
-# Stage 15
+# Stage 16
 
 ## Release
 
@@ -325,6 +355,8 @@ Product
 Engineering
 
 Code Review
+
+Architecture Review (when required by GOV-001)
 
 QA
 
