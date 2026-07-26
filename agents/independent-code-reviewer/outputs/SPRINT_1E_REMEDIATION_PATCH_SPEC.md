@@ -891,6 +891,87 @@ INSERT after the test closing at line 1506:
 
 ---
 
+## AR-1E rulings on the flagged deviations
+
+All four items routed to AR-1E as policy owner. **CR-1E upheld on every one.**
+
+### D3 — narrowing ACCEPTED, and the framing corrected in CR-1E's favour
+
+AR-1E verified `execution-manager.ts:439-441` independently and traced which sites can
+actually carry `execution_not_queued`:
+
+| Site | Carries it? | Why |
+|---|---|---|
+| 1 — `agent-execution-service.ts:682-690` | **yes** | replayed dispatch after the canonical execution moved on |
+| 2 — `:823-825` | no | enclosed by `if (execution.status === "queued")` at `:817` — provably queued |
+| 4 — `review-service.ts:626-631` | **yes** | its own comment says *"or the revision already left the queue"* |
+| 5 — `escalation-service.ts:285-290` | **yes** | its own comment says *"or no longer dispatchable at all"* |
+| 6 — `:1005-1020` | no | reached only when `status === "queued"` — provably queued |
+
+**AR-1E's correction to the coordinator's framing:** this was **not** CR-1E deviating
+from the policy. AR-1E's clause 2 already reads *"stay silent when the outcome is a
+redundant or late signal about state already recorded."* `execution_not_queued` means
+the execution is running, succeeded, failed or cancelled — states already carried by
+`execution.claimed`, `execution.succeeded`, `execution.exhausted`. **The rule already
+dictated the narrowing; AR-1E specified five *sites* where it should have specified a
+*condition*, and the site list silently dropped the clause it was implementing.** CR-1E
+restored it.
+
+AR-1E asked that this be recorded precisely, because *"the reviewer's policy was
+contradictory"* and *"the reviewer's shorthand lost his own rule"* have different
+implications for how far the rest of its specification should be trusted. **It is the
+second.**
+
+Reason-dependent message **rejected** — AR-1E: a single event type whose meaning depends
+on a field the reader must separately fetch is the same defect as PE-3, and adding a
+second instance inside the patch that fixes audit truthfulness would be self-defeating.
+Helper placement upheld: it makes the rule structural rather than a conditional five
+callers must each keep getting right.
+
+**Amendments required:** parameter already typed `AssignmentDecision["reason"]` ✅; the
+filter comment must state that **removing the guard reintroduces the X4 class of
+untruth** (a guard that makes a helper do nothing for some inputs is what a later
+"simplification" deletes).
+
+### D1 / D2 — ACCEPTED; AR-1E's guidance was incomplete
+
+AR-1E: *"I named only the service-layer test for F1 and no test at all for F4. That was
+a gap in my specification."*
+
+**D1 is sharper than first conveyed.** The comment above
+`execution-manager.test.ts:133-137` reads *"Both proposed the only available validation
+agent."* It is not an incidental precondition test — **it is the capacity-1 claim race
+itself, with the throw pinned as the expected outcome.** The most direct possible
+statement that the defect is correct behaviour.
+
+**Requirement on both rewrites:** each must assert the **absorption's post-state**, not
+merely that nothing throws. Rewriting to `.resolves` without post-state assertions swaps
+one weak test for another — the X2 failure mode. D2 must additionally assert
+`lastHeartbeatAt` is untouched. D1's rewrite should carry the assertion that the
+**`stood_down` path is now reachable**, the real behavioural win of F1.
+
+### Export asymmetry — UPHELD, do not respecify
+
+AR-1E declined to override CR-1E: *"an export surface should mirror actual
+participation, not aesthetic symmetry."* It framed a gratuitous export as AR2-6 running
+in reverse — a contract that **overstates** a capability rather than understating one.
+Both mislead the next implementer. `ensureClaimLostEvent` stays unexported.
+
+### `assignmentId` guard — SHIP AS SPECIFIED
+
+AR-1E confirms CR-1E's type reading: `handleExecutionRunning`'s `assignmentId` is
+optional, so when absent the equality check at `:729-731` is skipped and reaching the
+absorption point does **not** establish non-nullness. A non-null assertion would be
+unsound.
+
+**Contract widening deferred to AR2-6.** Making `assignmentId` required on the three
+callback handlers is the clean fix — the worker always sends it
+(`trigger/agent-execution.ts:63,84,90`) — but it is a breaking contract change outside
+approved scope, and belongs with `claimExecution`'s return type and `heartbeat`'s
+missing parameter as **one port revision, not three**. Recorded onto AR2-6.
+
+---
+
 ## Coordinator pre-verification of apply-safety
 
 Every FIND anchor was checked against the working tree before approval. **15 of 16 are
