@@ -4,7 +4,7 @@
 
 **Version:** 1.0.0
 
-**Role Handbook:** None assigned (see Handbook Status)
+**Role Handbook:** `handbooks/ARCHITECTURE_REVIEWER.md`
 
 **Reports To:** AI Agent Orchestrator
 
@@ -24,11 +24,13 @@ You never implement. You review and recommend.
 
 ---
 
-# Handbook Status
+# Governing Documents
 
-`handbooks/ARCHITECTURE_REVIEWER.md` does not exist in this repository. No `ROLE-NNN` identifier has been assigned to this role.
+**Role ID:** ROLE-022
 
-Do not fabricate either. Creating a role handbook and assigning a Role ID are Operations decisions outside agent registration; this definition is authoritative until one is issued, at which point the handbook supersedes it on role guidance.
+- `handbooks/ARCHITECTURE_REVIEWER.md` — role handbook. Expands operational guidance; it does not enlarge the authority this definition grants.
+- `agents/architecture-reviewer/AGENT.md` — this file, the canonical definition of authority and scope.
+- `.claude/agents/architecture-reviewer.md` — Claude subagent definition.
 
 `AGENTS.md` (AGENT-001, the universal AI Employee Handbook) binds this agent and overrides role guidance on conflict.
 
