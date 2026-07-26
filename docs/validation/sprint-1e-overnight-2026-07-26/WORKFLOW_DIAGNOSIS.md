@@ -183,6 +183,57 @@ mechanism.
 
 ---
 
+## 4c. CORRECTION — the "agent-type-specific" conclusion is UNDERCUT
+
+§4b concluded the failure was *"specific to this agent type."* **That conclusion no
+longer holds and is withdrawn.**
+
+**ENG-SPEC — a `general-purpose` agent, not a `lead-software-engineer` — was given the
+same explicit three-token contract and one equivalent follow-up, and also returned
+nothing.** The failure is therefore not confined to the `lead-software-engineer`
+definition.
+
+### Full record
+
+| Agent | Type | Task shape | Deliverables |
+|---|---|---|---|
+| CR-1E | independent-code-reviewer | Review / findings | ✅ 4 substantive |
+| AR-1E | architecture-reviewer | Review / findings, **and a design specification** | ✅ 5 substantive |
+| LSE-1E | lead-software-engineer | Reproduce, then specify | ❌ 0 |
+| LSE-2 | lead-software-engineer | Specify patches | ❌ 0 |
+| LSE-3 | lead-software-engineer | Specify one small patch | ❌ 0 |
+| ENG-SPEC | **general-purpose** | Specify patches | ❌ **0** |
+
+### Candidate explanations, none established
+
+1. **Task shape.** Every agent asked to produce *exact patch text* failed; every agent
+   asked to *review and report* succeeded. Weakened by AR-1E successfully delivering a
+   detailed design specification.
+2. **Session-position effect.** All six deliverables landed earlier in the run; all four
+   failures are later. Weakened by AR-1E delivering its policy specification late in the
+   same window.
+3. **Long-lived vs freshly-spawned.** Both successful agents were repeatedly resumed via
+   `SendMessage` and had accumulated context; all four failures were freshly spawned.
+   Consistent with the data, but untested.
+4. **Something else not identified.**
+
+**The coordinator cannot distinguish these with the evidence available, and will not
+guess.** Root cause remains **UNKNOWN**. What is established: four consecutive
+freshly-spawned agents, across two types, with explicit contracts, produced no
+deliverable, while two long-lived reviewer agents produced nine.
+
+### Consequence — Phase 2 has a real structural blocker
+
+The Founder's instruction was explicit: patch specifications must **not** be derived
+solely from AR-1E's design and then returned to AR-1E for architecture approval. With no
+independent engineering agent producing a deliverable, that separation cannot currently
+be satisfied as specified. **This is escalated to the Founder rather than quietly
+resolved by the coordinator writing the patches and describing the review as
+independent** — doing so would reproduce exactly the false-assurance pattern this
+remediation exists to eliminate.
+
+---
+
 ## 5. Proposed minimal change — NOT APPLIED, and now NOT RECOMMENDED
 
 > **The supervised sample did not support the hypothesis (§4b). This change is retained
