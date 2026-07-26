@@ -47,8 +47,8 @@ independent of it.
 |---|---|---|
 | 0 | Branch setup from tag | ✅ Complete |
 | 1 | Deterministic gates | ✅ Complete — 4/4 green |
-| 2 | Behavioral probing (10 embedded categories) | ⏳ In progress |
-| 3 | Adversarial architecture review | ⏳ In progress |
+| 2 | Behavioral probing (10 embedded categories) | ⏳ LSE-1E in progress; CR-1E ✅ reported (12 findings) |
+| 3 | Adversarial architecture review | ⏳ AR-1E in progress; report requested |
 | 4 | Synthesis and recommendation | ⬜ Not started |
 
 ---
@@ -107,11 +107,44 @@ Sprint 1F, which is prohibited for this run.
 
 ## Issue register
 
-No issues found yet. Phase 1 produced zero failures.
+Phase 1 produced zero failures. All entries below come from **static source tracing
+by CR-1E — none has been reproduced.** The fix protocol requires reproduction before
+any patch is applied, so every issue is `AWAITING_REPRO` pending LSE-1E.
 
-| ID | Severity | Category | Status | Attempts | CR | AR |
+Full report: `agents/independent-code-reviewer/outputs/SPRINT_1E_OVERNIGHT_CR_REVIEW.md`
+
+| ID | Sev | Category | Status | Attempts | CR | AR |
 |---|---|---|---|---|---|---|
-| _(none)_ | | | | | | |
+| F1 | Major | Dead recovery path (claim-race loser hard-fails) | AWAITING_REPRO | 0 | raised | pending |
+| F2 | Major | Lost reclaim audit records (unkeyed, unreconciled) | AWAITING_REPRO | 0 | raised | pending |
+| F3 | Minor | Dev-only unauthenticated escalation routes | **DOWNGRADED — see below** | 0 | raised | pending |
+| F4 | Major | Heartbeat throws where siblings no-op | AWAITING_REPRO | 0 | raised | pending |
+| F5 | Minor | Lost update on task status | AWAITING_REPRO | 0 | raised | pending |
+| F6 | Minor | Full read-model rebuild per event list | AWAITING_REPRO | 0 | raised | pending |
+| F7 | Minor | `AssignmentDecision` permits invalid states | AWAITING_REPRO | 0 | raised | pending |
+| F8 | Minor | Unsound non-null assertion (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
+| F9 | Minor | Module-local id sequence vs global store (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
+| F10 | Minor | `eventKeys` unbounded growth | AWAITING_REPRO | 0 | raised | pending |
+| F11 | Minor | Unvalidated enum, `internal/finalize` (pre-1E) | AWAITING_REPRO | 0 | raised | pending |
+| F12 | Minor | Unbounded recovery cycling (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
+
+### Coordinator verification — F3 partly refuted
+
+CR-1E claimed the founder escalation routes are "not disabled in production,"
+having searched for `middleware.ts` and found none. **This conclusion is false.**
+Next.js 16 uses `proxy.ts`, present at the repo root:
+
+- `proxy.ts:20-22` — matcher `/api/dev-hq/:path*`
+- `proxy.ts:11-17` — 403 for the whole Dev HQ surface when `NODE_ENV=production`
+- Phase 1 build output confirms it active: `ƒ Proxy (Middleware)`
+
+Surviving finding: in development those routes have no per-route auth — but
+`proxy.ts:3-9` already documents that as a deliberate accepted posture, naming the
+founder endpoints explicitly. **Reclassified Major → Minor / known-accepted.** Not a
+new Sprint 1E authorization gap. Input to the Sprint 1F auth boundary.
+
+Verified independently by the coordinator by reading `proxy.ts`, `internal-guard.ts`,
+and the four escalation route files, and by grepping guard usage across `app/`.
 
 ---
 
