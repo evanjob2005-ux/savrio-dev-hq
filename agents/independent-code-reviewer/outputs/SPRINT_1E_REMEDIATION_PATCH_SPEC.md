@@ -891,6 +891,25 @@ INSERT after the test closing at line 1506:
 
 ---
 
+## Coordinator pre-verification of apply-safety
+
+Every FIND anchor was checked against the working tree before approval. **15 of 16 are
+uniquely matched.** One requires care:
+
+⚠️ **`if (execution.status !== "running") {` appears TWICE in `execution-manager.ts`.**
+
+| Line | Function | Error text | Disposition |
+|---|---|---|---|
+| **564** | `heartbeat` | `cannot heartbeat` | **← patch 3.1 target: absorb** |
+| **603** | `releaseExecution` | `cannot release` | **MUST KEEP THROWING — do not touch** |
+
+Line 603 is a different function and a different category: releasing a non-running
+execution is caller fault, which the shared policy says stays loud. CR-1E's FIND block
+includes the full `cannot heartbeat` message text, so it disambiguates correctly and is
+safe to apply verbatim. Recorded because a shortened or re-derived anchor would silently
+hit the wrong function and quietly convert a caller-fault throw into an absorption —
+exactly the overreach the "only one precondition moves" precision exists to prevent.
+
 ## Blast radius (grep-verified by CR-1E)
 
 - `claimExecution` non-test callers: `execution-manager.ts:757`, `dev-execution-runner.ts:27` — only these.
