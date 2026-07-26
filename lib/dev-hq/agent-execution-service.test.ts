@@ -1,10 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { triggerMock } = vi.hoisted(() => ({ triggerMock: vi.fn() }));
+const { triggerMock, runnerOverride } = vi.hoisted(() => ({
+  triggerMock: vi.fn(),
+  // The substitution point for the ExecutionRunner port. Null for every test but
+  // the port-substitution suite, which is what keeps the rest of this file
+  // running against the real composition root.
+  runnerOverride: { current: null as unknown },
+}));
 
 vi.mock("@trigger.dev/sdk", () => ({
   tasks: { trigger: triggerMock },
 }));
+
+/**
+ * Substitute a single port in what the composition root serves, leaving every
+ * other adapter real.
+ *
+ * This is deliberately an interception of `getDevHqAdapters` rather than a
+ * test-only setter added to `adapters/index.ts`: the seam under test is
+ * production's *resolution* of the runner, and a production API that exists only
+ * so tests can write to it would weaken the very boundary this is checking. With
+ * no override registered the real object is returned by identity, so the mock is
+ * inert for the other ~130 tests in this file.
+ */
+vi.mock("@/lib/dev-hq/adapters", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/dev-hq/adapters")>();
+  return {
+    ...actual,
+    getDevHqAdapters: () => {
+      const real = actual.getDevHqAdapters();
+      return runnerOverride.current
+        ? { ...real, executionRunner: runnerOverride.current }
+        : real;
+    },
+  };
+});
 
 import {
   dispatchAgentExecution,
@@ -27,7 +58,15 @@ import {
 } from "@/lib/dev-hq/store";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import { EXECUTION_EVENT_TYPE } from "@/lib/dev-hq/constants";
-import { getExecution } from "@/lib/dev-hq/execution-manager";
+import {
+  claimExecution as managerClaimExecution,
+  getExecution,
+  heartbeat as managerHeartbeat,
+} from "@/lib/dev-hq/execution-manager";
+import type {
+  ClaimExecutionResult,
+  ExecutionRunner,
+} from "@/types/contracts/execution-runner";
 import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
@@ -55,6 +94,7 @@ function seedTask(overrides?: Partial<Task>): Task {
 describe("agent execution service", () => {
   beforeEach(() => {
     resetDevHqStore();
+    runnerOverride.current = null;
     let counter = 0;
     // Models Trigger.dev's real idempotency-key semantics: triggers sharing a key
     // resolve to one logical run, so "one Trigger run" is observable in tests as
@@ -2026,6 +2066,201 @@ describe("agent execution service", () => {
         await getDevHqAdapters().reviewStore.findByExecution(executionId);
       expect(review).not.toBeNull();
       expect(review?.executionId).toBe(executionId);
+    });
+  });
+
+  // AR2-6 A5. Before this change the ExecutionRunner port was *inert*: it was
+  // declared, implemented, and registered in the composition root, but nothing
+  // outside `adapters/index.ts` ever read `executionRunner` back out. The
+  // callback path imported the Execution Manager directly, so the registered
+  // adapter could have been deleted without changing a single observable
+  // behaviour — and a test that substituted it would have passed while proving
+  // nothing.
+  //
+  // These tests are written to *fail* against that tree. Each one substitutes one
+  // port through the composition root and asserts that the substitution changed
+  // what the callback did. If the handlers ever go back to importing the manager
+  // directly, the recorded calls go empty and these fail again.
+  describe("execution runner port (composition-root substitution)", () => {
+    /**
+     * A stub ExecutionRunner that records the calls the callback path makes and
+     * refuses everything else.
+     *
+     * The refusals are an assertion in their own right: they pin *which* of the
+     * port's twelve methods this path is allowed to use, so a later change that
+     * quietly routes something else through it is a loud failure rather than a
+     * silent widening of the seam.
+     */
+    function recordingRunner(options: {
+      calls: string[];
+      claim?: (
+        executionId: string,
+        agentId: string,
+      ) => Promise<ClaimExecutionResult>;
+    }): ExecutionRunner {
+      const outOfPath = (method: string) => () => {
+        throw new Error(
+          `Stub ExecutionRunner: ${method} is not on the agent-execution callback path.`,
+        );
+      };
+      return {
+        getExecution: (executionId) => getExecution(executionId),
+        claimExecution: async (executionId, agentId) => {
+          options.calls.push(`claim:${executionId}:${agentId}`);
+          return options.claim
+            ? options.claim(executionId, agentId)
+            : managerClaimExecution(executionId, agentId);
+        },
+        heartbeat: async (executionId, assignmentId) => {
+          options.calls.push(`heartbeat:${executionId}:${assignmentId}`);
+          return managerHeartbeat(executionId, assignmentId);
+        },
+        listReadyWork: outOfPath("listReadyWork"),
+        assignExecution: outOfPath("assignExecution"),
+        releaseExecution: outOfPath("releaseExecution"),
+        reclaimStale: outOfPath("reclaimStale"),
+        queueExecution: outOfPath("queueExecution"),
+        runExecution: outOfPath("runExecution"),
+        cancelExecution: outOfPath("cancelExecution"),
+      };
+    }
+
+    async function dispatchOne(key: string) {
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "do the work",
+        idempotencyKey: key,
+      });
+      const executionId = dispatched.executionId!;
+      return {
+        executionId,
+        assignmentId: (await getExecution(executionId))!.assignmentId!,
+      };
+    }
+
+    it("takes the claim from the injected runner, not the Execution Manager", async () => {
+      const { executionId, assignmentId } = await dispatchOne("port-claim-1");
+
+      // Every precondition for a real claim holds: the execution is queued, the
+      // assignment is current, and agent-supervisor is available. So the *only*
+      // way this callback can decline is by having asked the injected port.
+      expect(getAgent("agent-supervisor")?.availability).toBe("available");
+
+      const calls: string[] = [];
+      runnerOverride.current = recordingRunner({
+        calls,
+        claim: async () => ({ outcome: "agent_unavailable" }),
+      });
+
+      const result = await handleExecutionRunning(executionId, assignmentId);
+
+      // 1. The port was consulted, with the arguments the callback derived.
+      expect(calls).toEqual([`claim:${executionId}:agent-supervisor`]);
+      // 2. Its answer, not the manager's, decided the outcome.
+      expect(result.status).toBe("queued");
+      expect((await getExecution(executionId))!.status).toBe("queued");
+      // 3. Nothing was reserved: the real manager would have moved the agent to
+      //    busy and stamped a lease on this assignment.
+      expect(getAgent("agent-supervisor")?.availability).toBe("available");
+      expect(getAssignment(assignmentId)?.status).toBe("assigned");
+      expect(getAssignment(assignmentId)?.leaseExpiresAt).toBeNull();
+      // 4. And the injected outcome reached the timeline as itself — the
+      //    `agent_unavailable` wording, not the concurrency one.
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      const stoodDown = events.filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.claimLost,
+      );
+      expect(stoodDown).toHaveLength(1);
+      expect(stoodDown[0]?.message).toContain("no longer taking work");
+      expect(stoodDown[0]?.message).not.toContain("another attempt");
+    });
+
+    it("distinguishes a lost compare-and-set from an unavailable agent on the timeline", async () => {
+      const { executionId, assignmentId } = await dispatchOne("port-claim-2");
+      const calls: string[] = [];
+      runnerOverride.current = recordingRunner({
+        calls,
+        claim: async () => ({ outcome: "lost_to_concurrent_claim" }),
+      });
+
+      await handleExecutionRunning(executionId, assignmentId);
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      const stoodDown = events.filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.claimLost,
+      );
+      expect(stoodDown).toHaveLength(1);
+      expect(stoodDown[0]?.message).toContain("another attempt held the agent");
+    });
+
+    it("claims through the injected runner when it reports success", async () => {
+      const { executionId, assignmentId } = await dispatchOne("port-claim-3");
+      const calls: string[] = [];
+      // No claim override: the stub delegates to the manager. The seam is still
+      // the only route, so a `claimed` outcome must still flow back through it.
+      runnerOverride.current = recordingRunner({ calls });
+
+      const result = await handleExecutionRunning(executionId, assignmentId);
+
+      expect(calls).toEqual([`claim:${executionId}:agent-supervisor`]);
+      expect(result.status).toBe("running");
+      expect(getAgent("agent-supervisor")?.availability).toBe("busy");
+      expect(getAssignment(assignmentId)?.status).toBe("claimed");
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.claimed),
+      ).toHaveLength(1);
+    });
+
+    it("beats through the injected runner, carrying the attempt's assignment", async () => {
+      const { executionId, assignmentId } = await dispatchOne("port-beat-1");
+      const calls: string[] = [];
+      runnerOverride.current = recordingRunner({ calls });
+      await handleExecutionRunning(executionId, assignmentId);
+
+      // The callback edge accepts an omitted identity — the internal route parses
+      // it out of a request body where it can legitimately be absent — but the
+      // port never sees an anonymous beat: the edge resolves it to the
+      // execution's current attempt first.
+      const beat = await handleExecutionHeartbeat(executionId);
+
+      expect(beat.status).toBe("running");
+      expect(calls).toEqual([
+        `claim:${executionId}:agent-supervisor`,
+        `heartbeat:${executionId}:${assignmentId}`,
+      ]);
+      expect(getAssignment(assignmentId)?.status).toBe("running");
+    });
+
+    it("forwards a superseded worker's own assignment id rather than substituting the current one", async () => {
+      const { executionId, assignmentId } = await dispatchOne("port-beat-2");
+      const calls: string[] = [];
+      runnerOverride.current = recordingRunner({ calls });
+      await handleExecutionRunning(executionId, assignmentId);
+
+      // A stale worker names its own attempt. If the edge quietly replaced that
+      // with the current assignment, an abandoned run could keep a successor's
+      // lease alive — the exact failure the identity exists to prevent.
+      const stale = await handleExecutionHeartbeat(executionId, "asgn-superseded");
+
+      expect(calls).toEqual([
+        `claim:${executionId}:agent-supervisor`,
+        `heartbeat:${executionId}:asgn-superseded`,
+      ]);
+      // Absorbed, and no lease extended: the assignment never left "claimed".
+      expect(stale.status).toBe("running");
+      expect(getAssignment(assignmentId)?.status).toBe("claimed");
     });
   });
 });

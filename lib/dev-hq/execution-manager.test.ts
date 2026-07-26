@@ -24,10 +24,28 @@ import {
   saveTask,
 } from "@/lib/dev-hq/store";
 import { MAX_EXECUTION_ATTEMPTS } from "@/lib/dev-hq/constants";
-import type { AgentExecutionStatus, AgentResult, Task } from "@/types/domain";
+import type { ClaimExecutionResult } from "@/types/contracts/execution-runner";
+import type {
+  AgentExecutionStatus,
+  AgentResult,
+  Execution,
+  Task,
+} from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
 const FAR_FUTURE = "2999-01-01T00:00:00.000Z";
+
+/**
+ * Unwrap a claim that is expected to have succeeded. Asserting the outcome rather
+ * than reaching for `.execution` keeps a test that claims when it should not have
+ * from failing on an unrelated `undefined` several lines later.
+ */
+function claimedExecution(result: ClaimExecutionResult): Execution {
+  if (result.outcome !== "claimed") {
+    throw new Error(`Expected the claim to succeed, got "${result.outcome}".`);
+  }
+  return result.execution;
+}
 
 function seedTask(overrides?: Partial<Task>): Task {
   return saveTask({
@@ -108,7 +126,9 @@ describe("execution manager", () => {
       requiredCapabilities: ["validation"],
     });
 
-    const running = (await claimExecution(execution!.id, "agent-supervisor"))!;
+    const running = claimedExecution(
+      await claimExecution(execution!.id, "agent-supervisor"),
+    );
     expect(running.status).toBe("running");
     expect(running.startedAt).toBeTruthy();
     expect(getAgent("agent-supervisor")?.availability).toBe("busy");
@@ -133,9 +153,13 @@ describe("execution manager", () => {
     expect(b.agentId).toBe("agent-supervisor");
 
     await claimExecution(a.execution!.id, "agent-supervisor");
-    // Still exactly one winner; the loser now reports that by returning null
-    // instead of throwing. The reservation itself is unchanged.
-    expect(await claimExecution(b.execution!.id, "agent-supervisor")).toBeNull();
+    // Still exactly one winner; the loser now reports that as a named outcome
+    // rather than a bare null, and still does not throw. The reservation itself
+    // is unchanged. The name matters: `lost_to_concurrent_claim` says capacity
+    // will return when the winner finishes, which `agent_unavailable` does not.
+    expect(await claimExecution(b.execution!.id, "agent-supervisor")).toEqual({
+      outcome: "lost_to_concurrent_claim",
+    });
     expect((await getExecution(b.execution!.id))!.status).toBe("queued");
     expect(getAgent("agent-supervisor")?.availability).toBe("busy");
     //
@@ -165,6 +189,58 @@ describe("execution manager", () => {
     ).rejects.toThrow(/not claimable/);
   });
 
+  it("distinguishes an unavailable agent from a lost compare-and-set", async () => {
+    const task = seedTask();
+    const { execution } = await assignExecution(task.id, {
+      requiredCapabilities: ["validation"],
+    });
+
+    // The agent left the pool between selection and the claim — it went offline
+    // rather than being taken by a rival attempt. The caller was still right when
+    // it was dispatched, so this is a named outcome and not an error; but it is
+    // NOT the concurrency outcome, and reporting it as one would tell the caller
+    // to wait for capacity that is not coming back.
+    const supervisor = getAgent("agent-supervisor")!;
+    saveAgent({ ...supervisor, availability: "offline" });
+
+    expect(await claimExecution(execution!.id, "agent-supervisor")).toEqual({
+      outcome: "agent_unavailable",
+    });
+    // Absorbed, not applied: nothing was reserved and the execution still waits.
+    expect((await getExecution(execution!.id))!.status).toBe("queued");
+    expect(getAgent("agent-supervisor")?.availability).toBe("offline");
+    expect(getAssignment(execution!.assignmentId!)?.status).toBe("assigned");
+    expect(getAssignment(execution!.assignmentId!)?.leaseExpiresAt).toBeNull();
+  });
+
+  it("throws for caller faults instead of absorbing them as an outcome", async () => {
+    // The three outcomes are the outcomes a *correct* caller can meet. A caller
+    // that could not have been right must not be handed a value it is free to
+    // ignore — that is how a defect becomes a silently stalled execution.
+    const task = seedTask();
+    const { execution } = await assignExecution(task.id, {
+      requiredCapabilities: ["validation"],
+    });
+
+    // Missing execution, wrong agent, and an execution that has left the queue.
+    await expect(claimExecution("exec-nope", "agent-supervisor")).rejects.toThrow(
+      /Execution not found/,
+    );
+    await expect(
+      claimExecution(execution!.id, "agent-orchestrator"),
+    ).rejects.toThrow(/assigned to agent-supervisor/);
+
+    // An agent the registry does not have is an infrastructure fault, not a
+    // capacity one: there is no availability to compare and nothing to wait for.
+    const orphan = await assignExecution(seedTask({ id: "task-orphan" }).id, {
+      requiredCapabilities: ["routing"],
+    });
+    getDevHqStore().agents.delete("agent-orchestrator");
+    await expect(
+      claimExecution(orphan.execution!.id, "agent-orchestrator"),
+    ).rejects.toThrow(/Agent not found/);
+  });
+
   it("heartbeats a running execution and keeps the lease", async () => {
     const task = seedTask();
     const { execution } = await assignExecution(task.id, {
@@ -172,7 +248,7 @@ describe("execution manager", () => {
     });
     await claimExecution(execution!.id, "agent-supervisor");
 
-    const beat = await heartbeat(execution!.id);
+    const beat = await heartbeat(execution!.id, execution!.assignmentId!);
     expect(beat.status).toBe("running");
     const assignment = getAssignment(execution!.assignmentId!);
     expect(assignment?.status).toBe("running");
@@ -196,7 +272,7 @@ describe("execution manager", () => {
       lastHeartbeatAt: "2026-07-24T20:00:00.000Z",
     });
 
-    const late = await heartbeat(execution!.id);
+    const late = await heartbeat(execution!.id, execution!.assignmentId!);
     expect(late.status).toBe("succeeded");
 
     const afterLate = getAssignment(execution!.assignmentId!);
@@ -213,7 +289,9 @@ describe("execution manager", () => {
     const { execution } = await assignExecution(task.id, {
       requiredCapabilities: ["validation"],
     });
-    const claimed = (await claimExecution(execution!.id, "agent-supervisor"))!;
+    const claimed = claimedExecution(
+      await claimExecution(execution!.id, "agent-supervisor"),
+    );
     const assignmentId = claimed.assignmentId!;
 
     // Spend the retry budget so the reclaim is terminal rather than a requeue.
