@@ -47,8 +47,8 @@ independent of it.
 |---|---|---|
 | 0 | Branch setup from tag | ✅ Complete |
 | 1 | Deterministic gates | ✅ Complete — 4/4 green |
-| 2 | Behavioral probing (10 embedded categories) | ⏳ LSE-1E in progress; CR-1E ✅ reported (12 findings) |
-| 3 | Adversarial architecture review | ⏳ AR-1E in progress; report requested |
+| 2 | Behavioral probing (10 embedded categories) | ⚠️ LSE-1E has NOT reported; CR-1E ✅ reported (12 findings) |
+| 3 | Adversarial architecture review | ✅ AR-1E reported — PASS with non-blocking follow-ups, 0 blockers, 6 findings |
 | 4 | Synthesis and recommendation | ⬜ Not started |
 
 ---
@@ -128,7 +128,34 @@ Full report: `agents/independent-code-reviewer/outputs/SPRINT_1E_OVERNIGHT_CR_RE
 | F11 | Minor | Unvalidated enum, `internal/finalize` (pre-1E) | AWAITING_REPRO | 0 | raised | pending |
 | F12 | Minor | Unbounded recovery cycling (PLAUSIBLE) | AWAITING_REPRO | 0 | raised | pending |
 
-### Coordinator verification — F3 partly refuted
+### AR-1E architectural findings
+
+Full report: `agents/architecture-reviewer/outputs/SPRINT_1E_OVERNIGHT_AR_REVIEW.md`
+Verdict: **PASS WITH NON-BLOCKING FOLLOW-UPS — 0 blockers.**
+
+| ID | Dimension | Status | Attempts | CR | AR |
+|---|---|---|---|---|---|
+| AR2-1 | ADR-0001 O6 violation — 5/10 capabilities unassignable, no decline event | AWAITING_REPRO | 0 | pending | raised |
+| AR2-2 | Lifecycle violation — Task/Execution decoupled both directions | AWAITING_REPRO | 0 | pending | raised |
+| AR2-3 | Id generation process-local vs `globalThis` store | AWAITING_REPRO | 0 | pending | raised |
+| AR2-4 | Review handoff recovery path not the one the callback replays | AWAITING_REPRO | 0 | pending | raised |
+| AR2-5 | Authorization depth asymmetry | **RESOLVED — registration confirmed** | — | pending | raised |
+| AR2-6 | `ExecutionRunner` port omits `assignmentId` | AWAITING_REPRO | 0 | pending | raised |
+
+### Independent convergence between reviewers
+
+CR-1E and AR-1E worked without sight of each other and independently landed on the
+same two properties. Convergence raises confidence materially:
+
+- **Id generation** — CR-1E F9 and AR-1E AR2-3, same mechanism
+  (`id.ts` module-local `sequence` vs `globalThis`-scoped store), reached separately.
+- **Unbounded `eventKeys` growth** — CR-1E F10 and AR-1E's persistence §, same
+  observation that `events` is capped at 200 while the key map is not.
+
+Both reviewers also independently declined to treat the deferred 1E-8/1E-9 timeline
+work as a defect, correctly reading it as approved scope.
+
+### Coordinator verification — F3 partly refuted, and AR2-5 resolved
 
 CR-1E claimed the founder escalation routes are "not disabled in production,"
 having searched for `middleware.ts` and found none. **This conclusion is false.**
@@ -145,6 +172,24 @@ new Sprint 1E authorization gap. Input to the Sprint 1F auth boundary.
 
 Verified independently by the coordinator by reading `proxy.ts`, `internal-guard.ts`,
 and the four escalation route files, and by grepping guard usage across `app/`.
+
+**AR-1E independently challenged this refutation** (AR2-5), finding
+`.next/server/middleware-manifest.json` empty (`middleware: {}`,
+`sortedMiddleware: []`) and declining to conclude the proxy is active. It listed
+"evidence that `proxy.ts` is inert" as a condition that would flip its verdict to FAIL.
+
+**Coordinator resolution — registration confirmed, FAIL condition not met.** Next 16
+registers the proxy in `.next/server/functions-config-manifest.json` under
+`/_middleware` with `originalSource: "/api/dev-hq/:path*"`, mirrored in
+`_clientMiddlewareManifest.js`. The legacy `middleware-manifest.json` is a stale
+artifact. The registered regexp was executed against real paths and matches all three
+escalation routes plus `/escalations` and the internal dispatch route, while correctly
+rejecting `/api/other/thing`.
+
+**Limit:** this confirms registration from build artifacts. No production server was
+run, so runtime enforcement remains unexecuted. AR-1E's surviving recommendations
+stand and are carried forward: no test anywhere exercises `proxy.ts`, and it is the
+single control for the most privileged founder-decision surface.
 
 ---
 
