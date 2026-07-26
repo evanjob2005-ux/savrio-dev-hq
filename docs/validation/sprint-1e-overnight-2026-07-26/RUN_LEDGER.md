@@ -115,7 +115,7 @@ Full report: `agents/independent-code-reviewer/outputs/SPRINT_1E_OVERNIGHT_CR_RE
 
 | ID | Sev | Category | Status | Attempts | CR | AR |
 |---|---|---|---|---|---|---|
-| F1 | Major | Dead recovery path (claim-race loser hard-fails) | AWAITING_REPRO | 0 | raised | pending |
+| F1 | Major | Dead recovery path (claim-race loser hard-fails) | **REPRODUCED** | 0 | raised | confirmed, severity corrected down |
 | F2 | Major | Lost reclaim audit records (unkeyed, unreconciled) | AWAITING_REPRO | 0 | raised | pending |
 | F3 | Minor | Dev-only unauthenticated escalation routes | **CLOSED — refuted, accepted by CR-1E** | — | withdrawn | concurs |
 | F4 | Major | Heartbeat throws where siblings no-op | AWAITING_REPRO | 0 | raised | pending |
@@ -135,10 +135,10 @@ Verdict: **PASS WITH NON-BLOCKING FOLLOW-UPS — 0 blockers.**
 
 | ID | Dimension | Status | Attempts | CR | AR |
 |---|---|---|---|---|---|
-| AR2-1 | ADR-0001 O6 violation — 5/10 capabilities unassignable, no decline event | AWAITING_REPRO | 0 | pending | raised |
+| AR2-1 | ADR-0001 O6 violation — 5/10 capabilities unassignable, no decline event | **REPRODUCED** | 0 | confirmed | raised |
 | AR2-2 | Lifecycle violation — Task/Execution decoupled both directions | AWAITING_REPRO | 0 | pending | raised |
 | AR2-3 | Id generation process-local vs `globalThis` store | AWAITING_REPRO | 0 | pending | raised |
-| AR2-4 | Review handoff recovery path not the one the callback replays | AWAITING_REPRO | 0 | pending | raised |
+| AR2-4 | Review handoff recovery path not the one the callback replays | **REPRODUCED** | 0 | confirmed as Minor | raised |
 | AR2-5 | Authorization depth asymmetry | **PARTIALLY resolved — registration question closed; two recommendations OPEN** | 0 | endorses | raised |
 | AR2-6 | `ExecutionRunner` port omits `assignmentId` | AWAITING_REPRO | 0 | pending | raised |
 
@@ -257,6 +257,74 @@ which it credited to AR-1E explicitly. Reproduced by the coordinator.
 
 CR-1E recommends folding F12 (unbounded recovery cycling) under X1 — same family, but
 X1 is reachable with the shipped roster whereas F12 is not.
+
+---
+
+## REPRODUCED BY EXECUTION — AR2-4 and F1
+
+Second reproduction pass, same method: temporary harness, run, deleted, never
+committed. Assertions written to FAIL if the defect is real.
+Raw log: scratchpad `logs/repro-ar2-4-f1.log`.
+
+### AR2-4 — CONFIRMED
+
+```
+DIAG reviews after fresh complete: 1
+DIAG reviews after re-entry:       0
+AssertionError: expected +0 to be 1
+```
+
+Drove an execution to `succeeded` (fresh path correctly created 1 review), deleted the
+review to simulate the lost step, then re-invoked `handleExecutionComplete`. The
+re-entry path produced **zero** reviews. AR-1E's claim is exact: `reconcileRecordsFor`
+never requests a review, so a crash between the transition and
+`agent-execution-service.ts:847` means **no callback ever requests it, on that attempt
+or any later one.** Only the sweeper can recover it.
+
+The re-entry comment at `:851-855` claims everything after the transition "is
+descriptive and may have been lost to a crash — so reconcile the records for every
+post-`running` state." The review request is exactly such a consequence, and it is not
+reconciled. **Doc/behaviour mismatch, confirmed by execution.**
+
+CR-1E's qualification stands and is recorded: the sweeper *does* recover this within
+one cron tick (60s), so the impact is a bounded delay rather than permanent loss —
+which is why CR-1E rates AR2-4 **Minor**, not Major. Both reviewers agree on the
+mechanism and differ only on severity. Disagreement preserved, not reconciled.
+
+### F1 — CONFIRMED
+
+```
+DIAG d1.assigned: true  d2.assigned: true
+DIAG B threw: Agent agent-supervisor is not available to claim (status busy).
+AssertionError: expected Error: Agent agent-supervisor is not avai… to be null
+```
+
+Two dispatches for `validation` both received assignments naming the same capacity-one
+agent — confirming `ensureAssignment` proposes without reserving
+(`execution-manager.ts:220-222`). Worker A claimed; worker B's `handleExecutionRunning`
+**threw** rather than returning a stand-down-able state. The route maps that to HTTP
+500, and `postJson` raises before `holdsClaim` is evaluated, so the worker's documented
+stand-down branch (`trigger/agent-execution.ts:55-59`) is unreachable for the race its
+own comment describes.
+
+AR-1E's downward severity correction stands and is recorded: the lost **run** is real,
+but the **execution** always recovers via the 120s claim deadline, costing no business
+attempt. Not a blocker.
+
+### Reproduction scoreboard
+
+| Finding | Predicted by | Reproduced |
+|---|---|---|
+| AR2-1 (no decline event, ADR-0001 O6) | AR-1E | ✅ |
+| X1 (execution stranded queued forever) | CR-1E, building on AR-1E | ✅ |
+| AR2-4 (review lost on callback re-entry) | AR-1E | ✅ |
+| F1 (claim-race loser throws, no stand-down) | CR-1E | ✅ |
+
+**Four for four.** Every claim submitted with a falsifiable prediction reproduced
+exactly as its author described. Both reviewers' static-tracing method is validated by
+execution — a meaningful result in itself, given neither ran anything.
+
+Baseline suite re-confirmed 22 files / 317 tests green after each harness removal.
 
 ---
 
