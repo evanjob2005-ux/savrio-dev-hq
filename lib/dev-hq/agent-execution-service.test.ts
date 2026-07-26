@@ -1248,6 +1248,84 @@ describe("agent execution service", () => {
       ).toHaveLength(1);
     });
 
+    it("puts the completion callback's capacity decline on the timeline", async () => {
+      // 1E-F5 site C — agent-execution-service.ts:930-932, inside
+      // `handleExecutionComplete`. The attempt reported, the retry budget still
+      // had room, and nothing was free to take the next attempt. The test above
+      // pins that the execution is not terminal; nothing pinned the record that
+      // says why it is sitting queued.
+      const task = seedTask();
+      const dispatched = await dispatchAgentExecution({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+        instructions: "fail",
+        idempotencyKey: "deferral-site-callback",
+      });
+      const executionId = dispatched.executionId!;
+      await handleExecutionRunning(executionId);
+
+      removeCapacity();
+      triggerMock.mockClear();
+      const { execution, retried } = await handleExecutionComplete({
+        executionId,
+        status: "failed",
+        instructions: "fail",
+      });
+
+      // The site-specific state transition. This is the only deferral site that
+      // returns out of the completion callback, and it returns the execution
+      // requeued at the *next* attempt with `retried` false. Neither revision
+      // path, nor dispatch, nor reconciliation, nor the reclaim loop returns
+      // this value, because none of them is this function.
+      expect(retried).toBe(false);
+      expect(execution.status).toBe("queued");
+      expect(execution.attempt).toBe(2);
+      expect(execution.agentId).toBeNull();
+      expect(triggerMock).not.toHaveBeenCalled();
+
+      const events = await executionEvents(executionId);
+      const deferrals = events.filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred,
+      );
+      // The message entire, at attempt 2 — the attempt this callback advanced to.
+      // A deferral from the dispatch decline could only ever read attempt 1,
+      // because it fires before any attempt has been consumed.
+      expect(deferrals.map((e) => e.message)).toEqual([
+        `Execution ${executionId} could not be assigned an agent for task ${task.id}; it stays queued at attempt 2 for reconciliation to retry.`,
+      ]);
+      expect(deferrals[0]!.actorId).toBeNull();
+      expect(deferrals[0]!.actorLabel).toBe("System");
+
+      // Ordering pins the emitter to this call: the callback records the retry it
+      // just consumed and then defers, so the retry event precedes the deferral.
+      const appended = events
+        .slice()
+        .reverse()
+        .map((e) => e.type);
+      expect(appended.indexOf(EXECUTION_EVENT_TYPE.retried)).toBeGreaterThan(-1);
+      expect(appended.indexOf(EXECUTION_EVENT_TYPE.retried)).toBeLessThan(
+        appended.indexOf(EXECUTION_EVENT_TYPE.assignmentDeferred),
+      );
+      // No sweep ran here, so neither `reconcileQueuedDispatches` nor the reclaim
+      // loop was reachable; and attempt 1 was assigned, so the dispatch-decline
+      // site never ran either.
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.reclaimed),
+      ).toHaveLength(0);
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.assigned),
+      ).toHaveLength(1);
+      // And nothing else in the store deferred, so the assertions above cannot
+      // have been met by another execution's event.
+      const allDeferrals = (
+        await getDevHqAdapters().eventLogger.listRecent({
+          entityType: "execution",
+          limit: 200,
+        })
+      ).filter((e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred);
+      expect(allDeferrals.map((e) => e.entityId)).toEqual([executionId]);
+    });
+
     it("emits exactly one terminal event once the budget is genuinely spent", async () => {
       const task = seedTask();
       const supervisor = getAgent("agent-supervisor");
@@ -1618,6 +1696,124 @@ describe("agent execution service", () => {
       expect(reclaimed).toHaveLength(1);
       expect(reclaimed[0]?.message).toContain("waiting for an available agent");
       expect(reclaimed[0]?.message).not.toContain("retrying as attempt");
+    });
+
+    it("tells a requeued attempt with no agent apart from one that is actually retrying", async () => {
+      // 1E-F4. `handleExecutionReclaim` picks the reclaim message from three
+      // mutually exclusive arms; the one under test is `requeuedWithoutAgent`.
+      // An attempt that was requeued because nothing could take it must not
+      // announce that it is retrying, because no attempt is running to retry.
+      //
+      // The test above pins that wording, but positionally: `reclaimed[0]` over a
+      // fixture holding exactly one execution, asserted by substring. Nothing in
+      // it names the execution or the arm, so it cannot separate "the
+      // without-agent arm produced this" from "the only reclaim in the store
+      // happened to read this way", and a passing run is equally consistent with
+      // the branch having been replaced by a constant.
+      //
+      // So reclaim two executions in ONE sweep, one down each requeue arm, and
+      // assert each execution's own reclaim event — selected by `entityId` —
+      // against its exact, whole message. That is the discriminator twice over:
+      // exact equality excludes both sibling arms and every other event, and the
+      // second execution proves the branch genuinely tells the two cases apart
+      // rather than the retry wording merely being absent everywhere. Collapsing
+      // the ternary back to status-only branching makes the first execution read
+      // like the second, and this fails.
+      const strandRunning = async (
+        taskId: string,
+        capability: string,
+        key: string,
+      ) => {
+        const task = seedTask({ id: taskId });
+        const dispatched = await dispatchAgentExecution({
+          taskId: task.id,
+          requiredCapabilities: [capability],
+          instructions: "do the work",
+          idempotencyKey: key,
+        });
+        const executionId = dispatched.executionId!;
+        await handleExecutionRunning(
+          executionId,
+          (await getExecution(executionId))!.assignmentId!,
+        );
+        return executionId;
+      };
+
+      // "validation" is served only by agent-supervisor and "routing" only by
+      // agent-orchestrator, so each execution holds a different agent. Both are
+      // provider "internal", which is what each execution pins.
+      const withoutAgentId = await strandRunning(
+        "task-f4-no-agent",
+        "validation",
+        "f4-no-agent",
+      );
+      const withAgentId = await strandRunning(
+        "task-f4-with-agent",
+        "routing",
+        "f4-with-agent",
+      );
+
+      // Withdraw the provider of the validation agent only. The sweep frees both
+      // agents, so agent-orchestrator still satisfies the routing execution's pin
+      // and that retry is assigned and re-dispatched, while agent-supervisor no
+      // longer satisfies the validation execution's pin and that retry is
+      // requeued with no agent. One sweep, both arms.
+      const supervisor = getAgent("agent-supervisor")!;
+      saveAgent({ ...supervisor, provider: "provider-withdrawn" });
+
+      triggerMock.mockClear();
+      await handleExecutionReclaim(FAR_FUTURE);
+
+      const withoutAgent = (await getExecution(withoutAgentId))!;
+      const withAgent = (await getExecution(withAgentId))!;
+      expect(withoutAgent.status).toBe("queued");
+      expect(withoutAgent.agentId).toBeNull();
+      expect(withoutAgent.attempt).toBe(2);
+      expect(withAgent.status).toBe("queued");
+      expect(withAgent.agentId).toBe("agent-orchestrator");
+      expect(withAgent.attempt).toBe(2);
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      const messagesFor = (type: string, executionId: string) =>
+        events
+          .filter((e) => e.type === type && e.entityId === executionId)
+          .map((e) => e.message);
+
+      // The arm under test, as the whole message, bound to the execution it
+      // describes. No other execution's event and neither sibling arm can satisfy
+      // this, and it pins the attempt the message claims.
+      expect(
+        messagesFor(EXECUTION_EVENT_TYPE.reclaimed, withoutAgentId),
+      ).toEqual([
+        `Execution ${withoutAgentId} lease expired; reclaimed as attempt 2, which is waiting for an available agent.`,
+      ]);
+      // The sibling arm, same sweep, for the execution that did find an agent.
+      expect(messagesFor(EXECUTION_EVENT_TYPE.reclaimed, withAgentId)).toEqual([
+        `Execution ${withAgentId} lease expired; reclaimed and retrying as attempt 2.`,
+      ]);
+
+      // Existing reclaim and retry behaviour is unchanged and still separated by
+      // the same condition: the assigned retry is re-dispatched and records no
+      // deferral; the unassignable one is not dispatched and records one.
+      // Asserted as the set of executions dispatched rather than a call count,
+      // because the sweep re-offers an already-dispatched assignment and the
+      // shared idempotency key collapses those offers into one logical run.
+      expect(
+        new Set(
+          triggerMock.mock.calls.map(
+            (call) => (call[1] as { executionId: string }).executionId,
+          ),
+        ),
+      ).toEqual(new Set([withAgentId]));
+      expect(
+        messagesFor(EXECUTION_EVENT_TYPE.assignmentDeferred, withoutAgentId),
+      ).toHaveLength(1);
+      expect(
+        messagesFor(EXECUTION_EVENT_TYPE.assignmentDeferred, withAgentId),
+      ).toHaveLength(0);
     });
 
     it("emits the requeue deferral from the reclaim loop, before the sweep runs", async () => {

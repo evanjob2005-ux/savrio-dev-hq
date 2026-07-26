@@ -25,6 +25,7 @@ import {
 import { getExecution } from "@/lib/dev-hq/execution-manager";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import {
+  EXECUTION_EVENT_TYPE,
   MAX_REVIEW_DISPATCH_ATTEMPTS,
   MAX_REVIEW_ITERATIONS,
   REVIEW_EVENT_TYPE,
@@ -588,6 +589,79 @@ describe("review service", () => {
       expect(
         await eventsOfType(executionId, REVIEW_EVENT_TYPE.changesRequested),
       ).toHaveLength(1);
+    });
+
+    it("puts the authorized revision's capacity decline on the timeline", async () => {
+      // 1E-F5 site B — review-service.ts:632-635, inside `ensureReviewRevision`.
+      // A blocking review authorizes exactly one revision; when nothing can take
+      // it the review loop stalls, and without this emission it stalls silently.
+      //
+      // The site is reached through `await import(...)`, which `tsc` resolves
+      // statically but no test executed before this one — a path-alias or
+      // module-boundary change would break it at runtime with a green suite.
+      const task = seedTask();
+      const executionId = await succeedExecution({ instructions: "block this" });
+      const reviewId = reviewIdFor(executionId);
+      const token = (await getDevHqAdapters().reviewStore.getReview(reviewId))!
+        .callbackToken!;
+
+      // Withdraw capacity after the reviewed execution has succeeded, so only the
+      // revision is affected.
+      for (const agent of [...getDevHqStore().agents.values()]) {
+        saveAgent({ ...agent, availability: "busy" });
+      }
+
+      const result = await handleReviewComplete({
+        reviewId,
+        callbackToken: token,
+        outcome: "changes_requested",
+        findings: simulateReview("block this", "basic").findings,
+      });
+
+      const revisionId = revisionExecutionIdFor(reviewId);
+      const revision = (await getExecution(revisionId))!;
+      expect(result.revisionExecutionId).toBe(revisionId);
+      expect(revision.status).toBe("queued");
+      expect(revision.agentId).toBeNull();
+      expect(revision.attempt).toBe(1);
+      // The site-unique metadata. `revisionOfReviewId` is the review loop's
+      // chain link and only `ensureReviewRevision` sets it — the escalation
+      // revise path deliberately leaves it unset so a founder revise starts a
+      // fresh iteration count. Together with the `exec-review-revision-<reviewId>`
+      // namespace, which is built never to collide with the escalation revise
+      // namespace, this execution can only have been created by this site.
+      expect(revision.revisionOfReviewId).toBe(reviewId);
+
+      const allEvents = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      const deferrals = allEvents.filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred,
+      );
+      // The whole deferral population by entity, then the message entire — not a
+      // count, which a second path sharing the dedupe key could satisfy.
+      expect(deferrals.map((e) => e.entityId)).toEqual([revisionId]);
+      expect(deferrals[0]!.message).toBe(
+        `Execution ${revisionId} could not be assigned an agent for task ${task.id}; it stays queued at attempt 1 for reconciliation to retry.`,
+      );
+      expect(deferrals[0]!.actorId).toBeNull();
+      expect(deferrals[0]!.actorLabel).toBe("System");
+
+      // No other site could have produced it. The reviewed execution succeeded
+      // and never deferred; the revision was never assigned, so the dispatch
+      // decline never ran; and no reclaim swept in this test.
+      expect(deferrals.some((e) => e.entityId === executionId)).toBe(false);
+      expect(
+        allEvents.filter(
+          (e) =>
+            e.type === EXECUTION_EVENT_TYPE.assigned &&
+            e.entityId === revisionId,
+        ),
+      ).toHaveLength(0);
+      expect(
+        allEvents.filter((e) => e.type === EXECUTION_EVENT_TYPE.reclaimed),
+      ).toHaveLength(0);
     });
   });
 

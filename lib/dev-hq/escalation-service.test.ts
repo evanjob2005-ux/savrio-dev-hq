@@ -557,6 +557,66 @@ describe("escalation service", () => {
       });
     });
 
+    it("puts the founder-authorized revision's capacity decline on the timeline", async () => {
+      // 1E-F5 site A — escalation-service.ts:290-293, inside `ensureReviseDispatch`.
+      // The founder-facing site, and the one that matters most: the Founder has
+      // just decided `revise`, the task reopens to `active`, and if the revision
+      // cannot be assigned there is nothing running and — without this emission —
+      // nothing on the timeline saying why.
+      //
+      // Nothing here reaches the site through a sweep, a dispatch, or a reclaim.
+      // The path is the founder decision itself.
+      const { taskId, executionId, escalation } = await exhaustAndEscalate();
+      // Withdraw the whole registry so the authorized revision cannot be assigned.
+      // Exhaustion has already happened, so this removes capacity from the
+      // revision only.
+      for (const agent of [...getDevHqStore().agents.values()]) {
+        getDevHqStore().agents.delete(agent.id);
+      }
+      triggerMock.mockClear();
+
+      await resolveEscalation(escalation.id, "revise");
+
+      // Attribution runs through the canonical revision id. It lives in the
+      // escalation revise namespace (`exec-revision-<escalationId>`), which
+      // review-service's `exec-review-revision-<reviewId>` is deliberately built
+      // never to collide with, and which no dispatch, retry, reclaim, or
+      // reconciliation path can invent — only this site creates an execution here.
+      const revisionId = revisionExecutionIdFor(escalation.id);
+      const revision = (await getExecution(revisionId))!;
+      expect(revision.status).toBe("queued");
+      expect(revision.agentId).toBeNull();
+      expect(revision.attempt).toBe(1);
+      expect((await reload(escalation.id)).revisionExecutionId).toBe(revisionId);
+
+      const events = await getDevHqAdapters().eventLogger.listRecent({
+        entityType: "execution",
+        limit: 200,
+      });
+      const deferrals = events.filter(
+        (e) => e.type === EXECUTION_EVENT_TYPE.assignmentDeferred,
+      );
+      // The whole deferral population, by entity — not a count. The only one is
+      // the revision's, and its message is asserted entire, naming the revision,
+      // its task, and the attempt it claims to be queued at.
+      expect(deferrals.map((e) => e.entityId)).toEqual([revisionId]);
+      expect(deferrals[0]!.message).toBe(
+        `Execution ${revisionId} could not be assigned an agent for task ${taskId}; it stays queued at attempt 1 for reconciliation to retry.`,
+      );
+      expect(deferrals[0]!.actorId).toBeNull();
+      expect(deferrals[0]!.actorLabel).toBe("System");
+
+      // No other emission site could have produced it. The exhausted original is
+      // terminal and never deferred; nothing was dispatched, so the dispatch
+      // decline never ran; and no sweep or reclaim ran in this test, so neither
+      // `reconcileQueuedDispatches` nor the reclaim loop was reachable.
+      expect(deferrals.some((e) => e.entityId === executionId)).toBe(false);
+      expect(triggerMock).not.toHaveBeenCalled();
+      expect(
+        events.filter((e) => e.type === EXECUTION_EVENT_TYPE.reclaimed),
+      ).toHaveLength(0);
+    });
+
     it("records the revise-created assignment exactly once, even after a sweep", async () => {
       const { taskId, executionId, escalation } = await exhaustAndEscalate();
       await resolveEscalation(escalation.id, "revise");
