@@ -234,6 +234,67 @@ remediation exists to eliminate.
 
 ---
 
+## 4d. FINAL TALLY — the failure is universal to fresh spawns, and the third hypothesis is dead too
+
+Two further agents were engaged for the Sprint 1E remediation review gate. **Both
+returned no deliverable**, bringing the total to **six consecutive freshly-spawned
+agents producing nothing.**
+
+| # | Agent | Type | Task shape | Contract | Follow-ups | Delivered |
+|---|---|---|---|---|---|---|
+| — | CR-1E | independent-code-reviewer | review | implicit | 1 | ✅ (and 4× more, resumed) |
+| — | AR-1E | architecture-reviewer | review + design spec | implicit | 1 | ✅ (and 4× more, resumed) |
+| 1 | LSE-1E | lead-software-engineer | reproduce | no | 3+ | ❌ |
+| 2 | LSE-2 | lead-software-engineer | specify | no | 2 | ❌ |
+| 3 | LSE-3 | lead-software-engineer | specify (small) | **yes, explicit** | 1 | ❌ |
+| 4 | ENG-SPEC | **general-purpose** | specify | **yes, explicit** | 1 | ❌ |
+| 5 | CR-FRESH-C1 | **independent-code-reviewer** | **review** | **yes, explicit** | 1 | ❌ |
+| 6 | CR-GATE-C1 | **independent-code-reviewer** | **review** | **yes, front-loaded** | 1 | ❌ |
+
+**Agents 5 and 6 kill the last surviving hypothesis.** Both were the *same agent type*
+as CR-1E, given the *same task shape* (review) that CR-1E performs successfully, with an
+*explicit* deliverable contract that CR-1E never needed. They still produced nothing.
+
+### Hypotheses proposed and eliminated
+
+| # | Hypothesis | Eliminated by |
+|---|---|---|
+| 1 | Tool boundary — assigned work the role could not perform | LSE-2, LSE-3 (tool-compatible, still failed) |
+| 2 | Missing terminal deliverable contract in the definition | LSE-3 (explicit contract in prompt, still failed) |
+| 3 | Agent type / task shape | ENG-SPEC (different type), CR-FRESH-C1 and CR-GATE-C1 (same type *and* task as a working agent) |
+
+### What is established
+
+- The failure is **universal to freshly-spawned agents** in this session, independent of
+  agent type, task shape, task size, and the presence of an explicit output contract.
+- The **only** agents that deliver are CR-1E and AR-1E — spawned in the initial batch and
+  thereafter *resumed* via `SendMessage`, ten deliverables between them.
+- **Root cause remains UNKNOWN.** Three hypotheses proposed by the coordinator, three
+  eliminated by its own tests. A fourth is not proposed on this evidence.
+
+### Consequence — a required gate cannot be satisfied
+
+The Founder's sequence is **Fresh Independent Code Review → Architecture Review →
+Founder Approval → commit.** The first gate cannot be obtained. Two attempts were made
+and a third was declined as a repetition of a failing action.
+
+**What remains available, stated precisely:**
+
+| Reviewer | Independent of the patches? | Suitable for |
+|---|---|---|
+| **AR-1E** | **Yes** — authored the policy, not the code | Architecture Review, as specified |
+| **CR-1E** | **No** — authored the specification the patches implement | Fidelity verification only, *not* independent review |
+
+**The coordinator will not relabel CR-1E's fidelity check as a fresh independent
+review.** That would manufacture the appearance of a gate the Founder specified, which
+is the same false-assurance pattern this remediation exists to eliminate — and the
+arrangement the Founder explicitly prohibited when routing specification away from
+AR-1E.
+
+Escalated to the Founder for decision.
+
+---
+
 ## 5. Proposed minimal change — NOT APPLIED, and now NOT RECOMMENDED
 
 > **The supervised sample did not support the hypothesis (§4b). This change is retained
