@@ -89,6 +89,35 @@ A single sample cannot prove the mechanism either way. A positive result raises
 confidence enough to justify the minimal change; a negative result rules the change out
 as the fix.
 
+### ⚠️ Correction — the rule above was mis-specified, and the confound matters
+
+**The original "silence = failure" criterion does not discriminate.** On review of the
+session record, **CR-1E and AR-1E also went idle without reporting on their first
+pass.** Both delivered only after the coordinator sent a follow-up request. Going idle
+before delivering is therefore the **baseline behaviour of every agent observed on this
+run**, not a property that separates the working definitions from the failing one.
+
+Applying the rule as originally written would have rejected the hypothesis on evidence
+that does not bear on it. It is corrected here rather than silently reinterpreted after
+the fact, because a post-hoc adjustment to a pre-registered criterion is exactly the
+failure mode pre-registration exists to prevent — and because the direction of the
+correction happens to favour the hypothesis, which is when scrutiny matters most.
+
+**Corrected criterion — equal treatment.** The test is whether **one follow-up request
+elicits a conforming deliverable**, since that is precisely the treatment the two
+working reviewers received before they delivered.
+
+| Result after one equivalent follow-up | Conclusion |
+|---|---|
+| Returns one of the three tokens | Hypothesis **supported** |
+| Still returns nothing | Hypothesis **not supported** — LSE fails under treatment that succeeds for both reviewers |
+
+**Consequence for the earlier instances.** LSE-1E and LSE-2 each received multiple
+follow-up requests — considerably more than either reviewer needed — and returned
+nothing. Under the corrected criterion that record still stands as a genuine
+operational failure. What changes is only the standard applied to LSE-3, which is now
+the same standard the reviewers met.
+
 ---
 
 ## 5. Proposed minimal change — NOT APPLIED
