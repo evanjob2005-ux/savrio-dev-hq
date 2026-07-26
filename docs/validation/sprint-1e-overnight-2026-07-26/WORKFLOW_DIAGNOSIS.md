@@ -120,10 +120,79 @@ the same standard the reviewers met.
 
 ---
 
-## 5. Proposed minimal change — NOT APPLIED
+## 4b. SAMPLE RESULT — hypothesis NOT SUPPORTED
 
-To be applied only on Founder approval, and only if the supervised sample supports the
-hypothesis. Additive; changes no existing text.
+**LSE-3 returned no deliverable, after an explicit terminal contract in its prompt and
+one equivalent follow-up request.** Applying the corrected criterion exactly as written:
+
+> Still returns nothing → **Hypothesis not supported** — LSE fails under treatment that
+> succeeds for both reviewers.
+
+**The proposed definition change must NOT be applied on this evidence.** It was the
+coordinator's own hypothesis, and the result goes against it.
+
+### What this rules out
+
+The missing deliverable contract is **not sufficient** to explain the failure. LSE-3
+received:
+- a mandatory three-token contract, stated twice (opening and closing of the prompt)
+- silence explicitly defined as failure
+- a deliberately small, single-defect task
+- the approved fix direction supplied, so no derivation was required
+- an equivalent follow-up, the same treatment that elicited reports from both reviewers
+
+It still produced nothing. Adding the same contract to the definition would therefore be
+**cargo-culting a fix whose mechanism has been tested and failed** — precisely the error
+AR-1E warned against with X1, where treating the visible symptom misses the actual
+violation.
+
+### Record across all three instances
+
+| Instance | Assignment | Tools sufficient | Terminal contract | Follow-ups | Deliverables |
+|---|---|---|---|---|---|
+| LSE-1E | Reproduce (harness authoring) | **No** | No | 3+ | 0 |
+| LSE-2 | Specify only (read-only) | Yes | No | 2 | 0 |
+| LSE-3 | Specify one small defect | Yes | **Yes, explicit** | 1 | **0** |
+
+Three instances, two independent candidate causes tested and eliminated, zero
+deliverables.
+
+### Honest conclusion
+
+**The root cause of the `lead-software-engineer` failure is UNKNOWN.** Two hypotheses
+have been tested and neither explains it:
+
+1. ~~Tool boundary~~ — confirmed real for LSE-1E's first assignment, eliminated as the
+   general cause by LSE-2 and LSE-3.
+2. ~~Missing terminal deliverable contract~~ — eliminated by LSE-3.
+
+What remains established, and is sufficient for the workflow repair:
+
+- The failure is **repeatable** across three instances.
+- It is **specific to this agent type** — `independent-code-reviewer` and
+  `architecture-reviewer`, with identical tool grants and the same coordinator message
+  patterns, produced nine substantive deliverables between them on this run.
+- It is **not** caused by the assignment, the tools, or the absence of an output
+  contract.
+
+**Consequence for Phase 4:** the workflow repair must NOT depend on the
+`lead-software-engineer` role, and must NOT claim to have fixed it. The standing
+corrections in §6 hold regardless of root cause and are the actionable output. The role
+should be treated as unavailable for this project until someone identifies the actual
+mechanism.
+
+---
+
+## 5. Proposed minimal change — NOT APPLIED, and now NOT RECOMMENDED
+
+> **The supervised sample did not support the hypothesis (§4b). This change is retained
+> for the record but is NO LONGER RECOMMENDED.** Applying it would add a contract whose
+> mechanism has already been tested in prompt form and failed to produce a deliverable.
+> It is kept here so a future investigator can see what was tried and ruled out, not as
+> a pending action.
+
+Originally drafted to be applied only on Founder approval and only if the sample
+supported the hypothesis. Additive; changes no existing text.
 
 **File:** `.claude/agents/lead-software-engineer.md`
 **Insert** a new section before the existing `## Return value`:
