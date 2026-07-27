@@ -10,8 +10,47 @@
 | Document | Author | Content |
 |---|---|---|
 | [`AR_1F_PKG3_CANDIDATE_1.md`](./AR_1F_PKG3_CANDIDATE_1.md) | Independent Architecture Reviewer | Complete review, verbatim, single-author |
-| [`ICR_1F_PKG3_CANDIDATE_1_RELAYED.md`](./ICR_1F_PKG3_CANDIDATE_1_RELAYED.md) | **Main Coordinator** | **Relayed findings only — the ICR text does not exist** |
+| [`ICR_1F_PKG3_CANDIDATE_1_RELAYED.md`](./ICR_1F_PKG3_CANDIDATE_1_RELAYED.md) | **Main Coordinator** | **Relayed findings only** — what was available at reconciliation time |
+| [`ICR_1F_PKG3_CANDIDATE_1.md`](./ICR_1F_PKG3_CANDIDATE_1.md) | AGENT-008 Independent Code Reviewer | **Recovered after approval** — complete transcript, verbatim, **authoritative for the reviewer's wording** |
 | this file | Main Coordinator | Reconciliation, approval decision, obligations |
+
+> **Post-approval addendum, 2026-07-27.** The ICR transcript was recovered from the
+> dedicated ICR tab **after** this reconciliation and after `sprint-1f-pkg3-approved`
+> was created. Comparison against the relayed record found **no material difference**
+> in verdict, counts, candidate identity, severity, remediation decision, or
+> recommendation. **The approval decision is unchanged and PKG-3 was not reopened.**
+>
+> Three statements below are superseded by the recovery and are corrected here rather
+> than rewritten in place, so the record shows what was known when:
+>
+> 1. **R1 — "Independent Code Review … verdict NOT ON RECORD."** The recovered
+>    transcript states **APPROVE WITH FINDINGS**. Both gates therefore recommend
+>    approval on the record, which strengthens rather than alters the decision.
+> 2. **R9 — the ICR's worktree state and probe state recorded as NOT ON RECORD.** Now
+>    on record: detached at `b7386f05`, final `git status --porcelain -uall` empty,
+>    all probes removed, `README.md` modified and restored byte-identically, tags
+>    unmoved, no commit, no push. **The reviewer disclosed that the designated review
+>    worktree did not exist and that it created one detached at the candidate commit**
+>    — no branch, no tag touched, nothing committed.
+> 3. **R6 / R12 — "the 13 relayed ICR NOTE texts are not on record."** All 13 are now
+>    preserved verbatim.
+>
+> One divergence between the gates, non-blocking, recorded for completeness: the
+> concurrency key omitting event type is **AR N-6 (MINOR, recommends a fix)** but
+> **ICR NOTE-13 ("defensible — same ref, same commit")**. Both agree it cannot
+> produce a false green. It is already carried in follow-up **package E**.
+>
+> Two places where the recovered ICR is **stronger** than this reconciliation
+> recorded: it **closed the NC-7 gap itself by probe** (§6.14 — an untracked file and
+> a tracked modification were both detected; `*.log` and `local/` correctly ignored),
+> so the hygiene check is now demonstrated to discriminate in **both** directions,
+> where the AR could only recommend a future positive control; and it **verified all
+> seven** green-restoration run trees as `ca9cdc7e…`, extending the merge-ref proof
+> beyond the three runs recorded here. It also **empirically refined AR N-1**: the
+> npm 11 allow-scripts advisories did **not** leave the four packages unbuilt —
+> `ignore-scripts` is false and `esbuild --version`, `require('sharp')` and
+> `require('unrs-resolver')` all resolve — so the impact is log noise, not a broken
+> install.
 
 **The evidence set is asymmetric and that must not be smoothed over.** One complete
 independent gate is on record. The second gate's report was never supplied and is

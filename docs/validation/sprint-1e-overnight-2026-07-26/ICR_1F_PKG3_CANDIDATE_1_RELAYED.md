@@ -6,6 +6,24 @@
 
 ---
 
+> ## ✅ SUPERSEDED FOR WORDING — the original transcript was recovered
+>
+> **Added 2026-07-27, after PKG-3 reconciliation and approval.** The original
+> AGENT-008 transcript was subsequently recovered from the dedicated ICR tab and is
+> preserved at [`ICR_1F_PKG3_CANDIDATE_1.md`](./ICR_1F_PKG3_CANDIDATE_1.md).
+>
+> **That file is now authoritative for the reviewer's exact wording.** This file is
+> retained unaltered as the historical record of what was actually available during
+> reconciliation and approval — it is what the Coordinator reconciled against, and
+> deleting it would erase that fact.
+>
+> The recovered transcript **confirms** every relayed item below: counts
+> (0 / 1 / 5 / 13), all candidate identity values, every severity, the
+> no-remediation decision, and the recommendation. It also supplies three things
+> this file recorded as NOT ON RECORD: the **verdict — APPROVE WITH FINDINGS**; the
+> reviewer's **worktree state** (clean, detached, all probes removed); and the
+> **13 NOTE texts**. **The PKG-3 approval decision is unchanged.**
+
 ## ⚠ THIS IS NOT THE REVIEWER'S REPORT
 
 **The PKG-3 Independent Code Review text does not exist in any form available to the
