@@ -308,7 +308,19 @@ texts are supplied.
 | E-11 / A-P4 implementation authority | Governance | **RESOLVED** 2026-07-27 — granted to the Lead Software Engineer, package-scoped under the Main Coordinator. Does not permit self-selected or expanded scope |
 | E-1 / E-2 hosting target and Web Push scope | Founder decision | **HELD OPEN** — H-AQ is the provisional direction, not ratified; pending V-2 |
 | E-12 `NODE_ENV=production` internal-route barrier | Founder decision | **HELD OPEN — newly surfaced.** H-AQ requires non-production mode; the guard must not be weakened or conditioned while open |
-| V-2 Trigger.dev Development-worker viability | **HIGH** | **Open — two attempts, both UNABLE TO VERIFY.** `V2_VERIFICATION_RECORD.md` §9. Blocks H-AQ ratification and all deployment; does not block E-3 or ADR drafting |
+| V-2 Trigger.dev Development-worker viability | **HIGH** | **ANSWERED — `PATH B FAILED`.** `V2_VERIFICATION_RECORD.md` §10. Abrupt CLI loss cancels a suspended Development waitpoint in ~1s |
+| **H-AQ disposition** | **CRITICAL** | **HELD FOR REDESIGN** — durable-suspension premise falsified in the Development environment. Not ratified, not rejected. Routed to Architecture Review |
+| V2S1B-F1 abrupt CLI loss cancels the suspended run | **CRITICAL** | **Confirmed, Development-only.** Status `canceled`, error `Dev session ended (CLI exited)`. Must not be generalized to staging or production |
+| V2S1B-F2 completeToken returns success against a cancelled run | **CRITICAL** | **Confirmed as a Trigger.dev primitive.** False-success semantic. `founder-request-service.ts:486-489`'s correctness comment depends on it throwing. **Blocks approval-UX implementation on the current workflow.** Real-route consequence is code-derived, not executed |
+| V2S1B-F3 client cancellation mechanism | **HIGH** | **Fully confirmed at source and runtime.** Supersedes the V2S1-F2 "must not be called a defect" qualification, for Development only |
+| V2S1B-F4 suspended runs report `executing`, not `WAITING` | **LOW** | **Implementation note.** No Savrio code filters on Trigger.dev `WAITING`; the `"waiting"` hits are `AgentAvailability`, a different concept. No remediation required |
+| V2S1B-F5 alternate-config isolation | **Favourable** | **Verified testing technique.** A prior version's declarative schedule did not fire once a newer version omitted it. Not evidence of H-AQ viability |
+| V2S1B-F6 `.trigger` residue | **INFO** | Gitignored; no repository or reproducibility impact |
+| V-2 Step 1B disposable runs | Evidence | `run_06fqb1d5pj0kidda7902lo7501` (canceled), `run_06fqb236vqq04csntd3lftrn01` (completed), waitpoint `waitpoint_cms3r3ijz17nd0jok8p36mzxm` |
+| Residual Development worker `20260727.2` | **INFO** | Contains only disposable probe tasks; no worker connected so nothing can execute. Superseded by the next real `npm run trigger:dev` |
+| Step 0 favourable inference | Superseded | Step 0 correctly returned `DOCUMENTATION DOES NOT SETTLE H-AQ`; its provisional favourable inference is **withdrawn** — empirical evidence supersedes it |
+| Deployed-environment durability | **OPEN** | Untested. Step 1B evidence is Development-only and must not be extended. Requires a separately scoped probe if a production answer is needed |
+| Unexecuted Path B tests | Deferred | Graceful shutdown, version lock, TTL-on-resume, and four negative controls — preserved for whichever replacement design still uses Trigger.dev tokens |
 | V2S1-F1 normal CLI startup runs the real sweeper | **HIGH for testing** | **Open** — `trigger.config.ts:5` `dirs: ["./trigger"]`; no task-filter flag exists in the 4.5.7 CLI. Blocks Step 1 and Path A unisolated. Not an H-AQ defect |
 | V2S1-F2 suspended runs in the watchdog disconnect payload | **HIGH** | **Open — confirmed at the 4.5.7 client layer, server behaviour UNKNOWN.** Not a confirmed cancellation defect. **Blocks H-AQ ratification.** Highest-value unknown in V-2 |
 | V2S1-F3 graceful vs abrupt CLI exit differ | **MEDIUM** | **Open — confirmed at source.** Abrupt exit lets the watchdog fire disconnect; graceful exit kills it first. May make enforced graceful shutdown load-bearing for H-AQ |

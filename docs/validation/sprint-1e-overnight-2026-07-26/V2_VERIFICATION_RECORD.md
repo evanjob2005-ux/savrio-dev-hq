@@ -676,3 +676,286 @@ cleanup.
 5. Does not call V2S1-F2 a confirmed defect.
 
 **Preservation is custody, not approval.**
+
+---
+
+# 10. SUPPLEMENT — V-2 Step 1B, isolated probe. PATH B FAILED
+
+Appended after the Step 1B rerun. Sections 0 through 9 stand unchanged.
+
+**This is the decisive V-2 result.** The isolation method worked, the test executed, and
+it produced a disqualifying answer.
+
+## 10.1 Verdict
+
+```text
+PATH B FAILED
+```
+
+**Accepted by the Main Coordinator without correction.** The Path B question was whether
+a Development-environment waitpoint survives abrupt loss of the Development CLI. The test
+exercised that question directly and answered it.
+
+**The verdict is not downgraded** for n = 1, for graceful shutdown being untested, for
+production being untested, or for the negative controls being unexecuted. Those bound the
+result's *scope*; they do not weaken the result *within* its scope. The disqualification
+rule in the authorization required stopping once the central premise failed, and stopping
+was correct.
+
+## 10.2 Isolation gate — PASSED
+
+1. Baseline captured at T0 = 2026-07-27T21:36:04Z: 13 Development runs over 7 days, most
+   recent `execution-sweeper` at 21:06:43.
+2. CLI started with the alternate config only. Registered inventory: worker
+   `20260727.2` with exactly three tasks, all in `trigger-v2-probe/probe.ts` —
+   `v2-probe-waiter`, `v2-probe-completer`, `v2-probe-inspector`. **No task from
+   `trigger/` appeared.**
+3. Observed 165 seconds, to 21:40:09. Run list re-queried from T0: **0 runs.**
+4. Zero new `execution-sweeper`, `founder-request-workflow`, `agent-execution`,
+   `agent-review`, `hello-world`, or other non-disposable runs.
+
+**This also resolves the residual uncertainty the Coordinator flagged in §9.8:** the
+declarative sweeper schedule registered by worker version `20260727.1` did **not**
+continue firing once version `20260727.2` omitted it. At a one-minute cadence, the
+165-second window offered two to three firing opportunities and produced none.
+
+## 10.3 The decisive sequence
+
+1. Disposable run `run_06fqb1d5pj0kidda7902lo7501`, task `v2-probe-waiter`, version
+   `20260727.2`, attempt 1, created 21:40:27 UTC.
+2. Waitpoint `waitpoint_cms3r3ijz17nd0jok8p36mzxm`. `wait.createToken()` span COMPLETED;
+   `wait.forToken()` span IN PROGRESS.
+3. `.trigger/active-runs.json` read
+   `{"parentPid":11988,"runFriendlyIds":["run_06fqb1d5pj0kidda7902lo7501"]}` — **direct
+   runtime confirmation that the suspended run remained in the active set.**
+4. Process identities: wrapper shell 38680; **actual CLI 11988**; detached watchdog 30860.
+5. Only PID 11988 terminated, via `Stop-Process -Force` (no catchable signal), at
+   approximately 21:41:33 UTC. **The watchdog was deliberately left alive.**
+6. Within about 1.5 seconds the watchdog exited on its own, removing both
+   `active-runs.json` and `watchdog.pid` — a clean `cleanup()` on the `onParentDied()`
+   path, not a tree kill, which would have left both files.
+7. **Original run status: `canceled`.** Finished 21:41:33 UTC, roughly one second after
+   the kill. Platform error: `Error: Dev session ended (CLI exited)`. Task span
+   CANCELLED, Attempt 1 CANCELLED.
+8. CLI restarted with the same alternate config. No new task version — content unchanged,
+   still `20260727.2`.
+9. **Token completion was ACCEPTED:**
+   `{"attempted":"waitpoint_cms3r3ijz17nd0jok8p36mzxm","accepted":true,"response":{"success":true}}`
+10. **The original run did not resume.** Still `canceled`, finished 21:41:33, no second
+    attempt, no new snapshot, no continuation, no replacement run, no duplicate effect.
+
+## 10.4 Findings V2S1B-F1 through V2S1B-F6
+
+### V2S1B-F1 — Abrupt CLI loss cancels the suspended Development run
+
+1. **Status: CONFIRMED. Severity: CRITICAL.**
+2. **Local source chain, independently re-derived by the Coordinator across Step 1 and
+   Step 1B:** `dev-run-controller.js:273-290` retains the `DevRunController` during
+   `EXECUTING_WITH_WAITPOINTS` and returns without calling `runFinished()`;
+   `devSupervisor.js:231` writes `Array.from(this.runControllers.keys())` to
+   `active-runs.json`; `devSupervisor.js:415-428` removes controllers only in
+   `onFinished`; `devWatchdog.js` survives abrupt parent death, polls at 1000 ms, and
+   POSTs the run IDs to `/engine/v1/dev/disconnect`.
+3. **Cloud-side confirmation, separate from the source chain and NOT locally
+   re-derivable by the Coordinator:** the server actually cancelled the run, with status
+   `canceled` and error `Dev session ended (CLI exited)`.
+4. **Scope, binding:** Development environment only; abrupt CLI termination only. The
+   machinery involved — `devSupervisor`, `devWatchdog`, `/engine/v1/dev/disconnect` —
+   exists only in the dev execution path. **This must not be generalized to staging or
+   production.**
+5. **It falsifies H-AQ's durable-suspension premise as H-AQ is currently defined**,
+   because H-AQ places a long-lived Founder approval wait in exactly this environment.
+
+### V2S1B-F2 — Token completion returns success against a cancelled run, with no continuation
+
+1. **Status: CONFIRMED as a Trigger.dev primitive behaviour. Severity: CRITICAL.**
+   **This is the most consequential finding in the V-2 workstream.**
+2. **Confirmed primitive behaviour (Step 1B runtime):** `wait.completeToken` against the
+   token of an already-cancelled run returned `{success: true}` and produced no
+   continuation. The caller received a success-shaped result for an action that could no
+   longer affect the workflow. **This is a false-success semantic.**
+3. **Code-derived application consequence — traced by the Coordinator, NOT executed
+   end-to-end.** `lib/dev-hq/founder-request-service.ts:486-489` carries this comment
+   verbatim:
+
+```text
+  // Complete the token before recording the decision. If this throws, the
+  // approval stays pending and the founder can retry; recording first would
+  // leave a decided approval whose run never resumes.
+```
+
+   **The entire correctness argument of the real approve route rests on
+   `wait.completeToken` throwing when the run cannot resume.** Step 1B proved it returns
+   success instead. By code trace, `approveFounderRequest` would therefore proceed past
+   line 489 to `approvalManager.approve()` at `:493`, record the approval as approved
+   with hardcoded Founder identity, log `Evan approved …` at `:502`, and return state —
+   while the workflow run stays cancelled and never resumes. **This is precisely the
+   outcome the comment was written to prevent.** The guard is real, well-intentioned, and
+   rests on a precondition that does not hold.
+4. **Untested end-to-end:** the real route was never exercised. The consequence above is
+   a code trace, not an observation. **It must not be described as observed
+   user-visible behaviour.**
+5. **Founder-facing integrity risk: yes, on the code-derived path.** A Founder would see
+   an approval marked approved, with a durable timeline event asserting it, while the
+   downstream workflow is dead and no finalize occurs. **A silently-accepted approval
+   that never continues is worse than an outright failure, because nothing surfaces the
+   loss.**
+6. **Blocking effect: blocks all approval-UX implementation built on the current
+   workflow shape**, pending a replacement design.
+7. **Additional tracing required before stating the exact real-route consequence as
+   fact:** an end-to-end execution of `POST /api/dev-hq/approvals/[id]/approve` against a
+   cancelled run, plus verification of whether the accepted completion actually marked
+   the waitpoint completed or was a silent no-op. The Step 1B probe included a
+   `v2-probe-inspector` task for that second question, but running it would have been a
+   negative control and was correctly forbidden.
+
+### V2S1B-F3 — Client mechanism fully confirmed
+
+1. **Status: CONFIRMED at both source and runtime. No longer inference.** Severity: HIGH.
+2. Source: `EXECUTING_WITH_WAITPOINTS` never calls `runFinished()`, so the controller is
+   never removed. Runtime: `active-runs.json` contained the suspended run's ID.
+3. **This supersedes the Step 1 qualification recorded at §9.4 V2S1-F2**, which held that
+   the finding must not be called a confirmed cancellation defect because server
+   behaviour was unknown. **Server-side cancellation is now confirmed for the Development
+   environment.** No claim is made beyond Development.
+
+### V2S1B-F4 — Suspended Development runs report `executing`, not `WAITING`
+
+1. **Status: CONFIRMED. Severity: LOW — an implementation note, not a Medium defect.**
+2. A `status=WAITING` query returned 0 runs while the probe was suspended.
+3. **Coordinator's independent check:** no Savrio Dev HQ code filters on Trigger.dev run
+   status `WAITING`. A repository-wide search found only `AgentAvailability` values
+   (`"available" | "busy" | "offline" | "waiting"` in `types/domain/common.ts:30`) and UI
+   tone labels — **a different domain concept entirely, unrelated to Trigger.dev run
+   status.**
+4. **No current remediation required.** It matters only for future monitoring or
+   dashboard logic that might key on Trigger.dev run status, and for whichever
+   replacement design is selected.
+
+### V2S1B-F5 — Alternate-config isolation works
+
+1. **Status: CONFIRMED. Severity: favourable finding, recorded as a verified testing
+   technique.**
+2. Directory-scoped isolation via an untracked alternate config successfully prevented
+   every real task and schedule from registering or firing.
+3. **This must not be confused with H-AQ viability.** A successful test harness is not a
+   successful architecture. The harness worked; the architecture failed.
+
+### V2S1B-F6 — `.trigger` residue after forced watchdog cleanup
+
+1. **Status: CONFIRMED. Severity: LOW / informational.**
+2. Forced cleanup left stale `.trigger/active-runs.json` and `.trigger/watchdog.pid`.
+   `.trigger` is gitignored; **no repository impact and no reproducibility risk.**
+
+## 10.5 Complete run inventory
+
+Exactly two Development runs were created, **both disposable**:
+
+```text
+run_06fqb1d5pj0kidda7902lo7501   v2-probe-waiter      canceled    21:41:33 UTC   v20260727.2
+run_06fqb236vqq04csntd3lftrn01   v2-probe-completer   completed   21:43:28 UTC   v20260727.2
+```
+
+Waitpoint: `waitpoint_cms3r3ijz17nd0jok8p36mzxm`.
+
+**No non-disposable run executed at any point.** No run was created in Production or
+staging. These identifiers are cloud-side and were **not** independently re-derived by
+the Coordinator.
+
+## 10.6 Not executed
+
+Under the authorized disqualification rule, the following were correctly **NOT
+EXECUTED**: graceful CLI shutdown; version-lock behaviour; TTL-on-resume; and all four
+negative controls — wrong token, duplicate completion, stale token, and conflicting
+completion.
+
+Recorded incidentally, with no inference drawn: both disposable runs carried a TTL of
+10 minutes.
+
+## 10.7 Repository preservation — independently re-derived
+
+```text
+branch            feature/dev-hq-operating-system
+commit            7f4b5ad31fa6dae48dc704fbc2e7099f55c6b58c
+tree              a2d2d2624c2fd0404df758fdf81f632b5a3d2580
+parent            df72699316cdde04c08206b24e9697cb58d5f35c
+tag               candidate-1f-v2-2 -> 3e17a74a93c0541ec5da4cb852d119ff3c1ebb8f (tag)
+package.json      2f4d485ca84ee7d01a5527d38b3f83ccc31a63fb
+package-lock.json 3a74684e30d93c8046ef1379439289d9003d514a
+status            (zero porcelain lines)
+trigger/          exactly the five original tracked files
+probe paths       trigger-v2-probe/ ABSENT; trigger.v2probe.config.ts ABSENT
+barriers          proxy.ts 728 · internal-guard.ts 1201 · actions.ts 3322
+```
+
+**Residual platform state, disclosed rather than concealed:** Development worker version
+`20260727.2` still exists on the Trigger.dev platform with the three disposable probe
+tasks registered, and is still reported as current. Platform worker versions are
+immutable and removing one would require account mutation, which was forbidden. **No dev
+worker is connected, so nothing can execute.** The next real `npm run trigger:dev` will
+register a superseding version containing the five genuine tasks. No schedule, project,
+branch, or environment was created, modified, enabled, or disabled.
+
+## 10.8 Step 0 and Step 1B reconciliation
+
+The Step 0 documented-limits research was completed and delivered to the Founder, with
+the determination **`DOCUMENTATION DOES NOT SETTLE H-AQ`**. Reconciled as follows:
+
+1. **Step 0 was correct** that documentation did not settle the question.
+2. **Step 0's favourable source inference was provisional** — it suggested runs suspended
+   at `wait.forToken` *might* fall outside CLI exit-cancellation scope.
+3. **Step 1 source inspection showed the opposite at the client layer:** the suspended
+   run remains in the cancellation payload.
+4. **Step 1B runtime evidence confirmed server-side cancellation.**
+5. **Empirical evidence supersedes the earlier favourable inference.** The provisional
+   inference is withdrawn.
+
+This is recorded as the research working correctly: Step 0 declined to settle a question
+documentation could not answer, and flagged its own inference as provisional. That is why
+the empirical step existed.
+
+## 10.9 H-AQ disposition — Main Coordinator classification
+
+```text
+H-AQ: HELD FOR REDESIGN
+```
+
+1. H-AQ's central durable-suspension premise **fails** in the Trigger.dev Development
+   environment, which is the environment the founder-request approval loop currently runs
+   in.
+2. The standing risk rule applies: **a critical workflow must not depend solely on
+   graceful shutdown if an abrupt host loss, crash, power loss, OS update, or forced
+   termination can silently destroy the workflow.** Abrupt loss is exactly what was
+   tested, and it destroyed the workflow silently.
+3. `STILL VIABLE WITH GRACEFUL-SHUTDOWN QUALIFICATION` is **not** selected. Graceful-only
+   operation may not be treated as sufficient durability unless the Architecture Reviewer
+   independently supports it **and** the Founder explicitly accepts the residual risk.
+   Neither has occurred.
+4. `REJECTED AS WRITTEN` is **not** selected either, because the deployed-environment
+   question is genuinely untested and a replacement may retain parts of H-AQ's shape.
+5. **This classification is the Main Coordinator's, not an architecture decision.** It
+   records that revision is required and routes the question to Architecture Review. It
+   ratifies nothing and selects no replacement.
+
+## 10.10 Transmission-integrity assessment of the Step 1B report
+
+**Materially clean — the best-transmitted report in this workstream.** All 25 required
+sections present, none omitted, none empty. `NOT EXECUTED` correctly used for sections 11
+through 17. `V2-CORRECTION-2` was followed.
+
+One duplication defect, non-substantive: §23 repeats three preservation lines
+(`git rev-parse 'HEAD^{tree}'`, `HEAD:package.json`, `HEAD:package-lock.json`). The
+repeated values are identical and correct, and the Coordinator independently re-derived
+all of them. **No conclusion is affected. Not silently repaired.**
+
+## 10.11 What this supplement does not do
+
+1. Ratifies nothing. Selects no replacement architecture.
+2. Does not draft or ratify ADR-0003 beyond recording that revision is required.
+3. Does not decide E-1, E-2, or E-12.
+4. Does not authorize Path A, further Path B tests, or multi-day testing.
+5. Does not extend any finding to staging or production.
+6. Does not weaken, remove, bypass, or consolidate any production barrier.
+7. **Path A remains BLOCKED.**
+
+**Preservation is custody, not approval.**
