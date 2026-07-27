@@ -57,6 +57,9 @@ export function getDevHqAdapters(): DevHqAdapters {
       eventLogger: createDevEventLogger(),
       stateReader: createDevStateReader(),
       agentProvider: createDevAgentProvider(),
+      // Consumed by the agent-execution callback path (claim + heartbeat), which
+      // resolves it here rather than importing the Execution Manager directly —
+      // so the seam is a real substitution point, not a declaration.
       executionRunner: createDevExecutionRunner(),
       evidenceStore: createDevEvidenceStore(),
       escalationStore: createDevEscalationStore(),

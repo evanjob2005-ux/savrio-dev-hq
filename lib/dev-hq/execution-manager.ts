@@ -8,6 +8,7 @@
 // the adapter (dev-execution-runner) and, later, the agent-execution task (1D-5).
 
 import type { AgentSelectionPolicy, AssignmentDecision } from "@/types/contracts";
+import type { ClaimExecutionResult } from "@/types/contracts/execution-runner";
 import type {
   AgentAssignment,
   AgentResult,
@@ -497,16 +498,17 @@ export async function ensureAssignment(
  * the compare-and-set on availability: it succeeds only while the agent is still
  * available, so two claims on the same agent cannot both win.
  *
- * Returns `null` when the compare-and-set loses — the agent was reserved by
- * another attempt between selection and this call. That is an anticipated
- * concurrent outcome, not a caller error: this caller was right when it was
- * dispatched and the world moved. Every other precondition still throws, because
- * no correct caller could have produced it.
+ * Reports one of three outcomes (`ClaimExecutionResult`). `lost_to_concurrent_claim`
+ * is the compare-and-set losing — the agent was reserved by another attempt
+ * between selection and this call. `agent_unavailable` is the assigned agent no
+ * longer taking work at all. Neither is a caller error: this caller was right
+ * when it was dispatched and the world moved. Every other precondition still
+ * throws, because no correct caller could have produced it.
  */
 export async function claimExecution(
   executionId: string,
   agentId: string,
-): Promise<Execution | null> {
+): Promise<ClaimExecutionResult> {
   const execution = requireExecution(executionId);
   if (execution.status !== "queued") {
     throw new Error(
@@ -528,13 +530,22 @@ export async function claimExecution(
   if (!agent) {
     throw new Error(`Agent not found: ${agentId}`);
   }
-  // The compare-and-set lost. Absorbed rather than thrown: a throw becomes a 500
-  // at the callback route, which the worker's postJson turns into an exception
-  // before it can read the answer — so the stand-down path it documents could
-  // never run. Do NOT hoist this check into a caller: it and the reservation
-  // below must stay adjacent and synchronous or the race it closes reopens.
+  // The claim did not get the agent. Absorbed rather than thrown: a throw becomes
+  // a 500 at the callback route, which the worker's postJson turns into an
+  // exception before it can read the answer — so the stand-down path it documents
+  // could never run. Do NOT hoist this check into a caller: it and the
+  // reservation below must stay adjacent and synchronous or the race it closes
+  // reopens.
+  //
+  // The two reasons are reported separately because they are different facts
+  // about the world, and a caller that only ever saw `null` could not tell them
+  // apart: "busy" means another attempt holds the agent and capacity will return
+  // when it finishes, while "offline"/"waiting" means the agent is not taking
+  // work at all and waiting for this one is pointless.
   if (agent.availability !== "available") {
-    return null;
+    return agent.availability === "busy"
+      ? { outcome: "lost_to_concurrent_claim" }
+      : { outcome: "agent_unavailable" };
   }
 
   const timestamp = nowIso();
@@ -551,16 +562,30 @@ export async function claimExecution(
     leaseExpiresAt: leaseExpiryFrom(timestamp),
   });
 
-  return saveExecution({ ...execution, status: "running", startedAt: timestamp });
+  return {
+    outcome: "claimed",
+    execution: saveExecution({
+      ...execution,
+      status: "running",
+      startedAt: timestamp,
+    }),
+  };
 }
 
 /**
  * Extend the lease of a running execution and record the heartbeat.
  *
- * A heartbeat is only meaningful from the worker that holds the current attempt.
+ * A heartbeat is only meaningful from the worker that holds the current attempt,
+ * so **the attempt's assignment id is required**, not optional. An anonymous beat
+ * is indistinguishable from a stale worker's once it is inside this function, and
+ * an omitted argument is the easiest way to produce one by accident; requiring it
+ * makes the caller state which attempt it believes it is beating for.
+ *
  * When the caller names an assignment that is no longer the execution's current
  * one, the beat is a stale worker's and is a **no-op**: honouring it would let an
- * abandoned run keep a successor attempt's lease alive and mask its failure.
+ * abandoned run keep a successor attempt's lease alive and mask its failure. An
+ * execution that holds no assignment at all is covered by the same comparison —
+ * nothing can be the current attempt of an execution that has none.
  *
  * A beat that arrives after its own attempt already ended — reclaimed, completed,
  * or cancelled underneath it — is absorbed for the same reason: the caller was the
@@ -570,23 +595,20 @@ export async function claimExecution(
  */
 export async function heartbeat(
   executionId: string,
-  assignmentId?: string,
+  assignmentId: string,
 ): Promise<Execution> {
   const execution = requireExecution(executionId);
-  if (assignmentId && execution.assignmentId !== assignmentId) {
+  if (execution.assignmentId !== assignmentId) {
     return execution; // stale worker; the current attempt is someone else's
   }
   // The attempt already ended while this beat was in flight.
   if (execution.status !== "running") {
     return execution;
   }
-  // A running execution with no assignment is not a state any caller could have
-  // produced. That is a broken invariant and stays loud.
-  if (!execution.assignmentId) {
-    throw new Error(`Execution has no assignment: ${executionId}`);
-  }
 
-  const assignment = requireAssignment(execution.assignmentId);
+  // The execution names this assignment, so a missing record is a broken
+  // invariant rather than anything a caller could have caused: it stays loud.
+  const assignment = requireAssignment(assignmentId);
   // Same reasoning as the terminal case: released underneath a beat that was
   // legitimate when it was sent.
   if (assignment.status === "released") {
@@ -765,7 +787,12 @@ export async function queueExecution(
 
 /**
  * Start an already-assigned execution by claiming it for its assigned agent.
- * Propagates `claimExecution`'s `null` when the compare-and-set loses.
+ *
+ * Collapses `claimExecution`'s three outcomes back to `Execution | null`: this is
+ * the low-level convenience entry point, and its callers only ask "did it start?".
+ * A caller that must act on *why* a claim did not happen calls `claimExecution`
+ * directly — which is what the agent-execution callback path does, through the
+ * `ExecutionRunner` port.
  */
 export async function runExecution(
   executionId: string,
@@ -777,7 +804,8 @@ export async function runExecution(
   if (!execution.agentId || !execution.assignmentId) {
     throw new Error(`Execution has no assigned agent to run: ${executionId}`);
   }
-  return claimExecution(executionId, execution.agentId);
+  const result = await claimExecution(executionId, execution.agentId);
+  return result.outcome === "claimed" ? result.execution : null;
 }
 
 /** Cancel an execution. Idempotent once terminal; frees the agent if held. */

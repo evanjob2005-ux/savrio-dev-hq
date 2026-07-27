@@ -5,6 +5,7 @@
 
 import { tasks } from "@trigger.dev/sdk";
 import type { AssignmentDecision } from "@/types/contracts";
+import type { ClaimDeclinedOutcome } from "@/types/contracts/execution-runner";
 import type {
   AgentAssignment,
   AgentExecutionStatus,
@@ -17,11 +18,9 @@ import {
   ensureAssignment,
   ensureExecution,
   getExecution,
-  heartbeat,
   reclaimStale,
   releaseAssignmentForReassignment,
   releaseExecution,
-  runExecution,
 } from "@/lib/dev-hq/execution-manager";
 import {
   getAgent,
@@ -240,26 +239,37 @@ export async function ensureAssignmentDeferredEvent(
 }
 
 /**
- * Ensure the timeline records that a dispatched worker lost the compare-and-set
- * for its agent and stood down. Keyed on the assignment: an assignment can lose
- * the claim once, and that run is over.
+ * Ensure the timeline records that a dispatched worker did not get its agent and
+ * stood down. Keyed on the assignment: an assignment can decline the claim once,
+ * and that run is over.
  *
- * Deliberately not exported. Only this module absorbs a lost claim; the review and
- * escalation services never claim, so widening the surface would suggest otherwise.
+ * The two declined outcomes share this event type and this key — the lifecycle
+ * fact is the same ("this run stood down without claiming") — but not the same
+ * message. Reporting "another attempt held the agent" for an agent that had gone
+ * offline would put an untruth on an append-only timeline, which is the defect
+ * class the reclaim message was corrected for.
+ *
+ * Deliberately not exported. Only this module absorbs a declined claim; the review
+ * and escalation services never claim, so widening the surface would suggest
+ * otherwise.
  */
 async function ensureClaimLostEvent(
   execution: Execution,
   assignmentId: string,
   agentId: string | null,
+  outcome: ClaimDeclinedOutcome,
 ): Promise<void> {
   const agent = agentId ? getAgent(agentId) : null;
+  const agentLabel = agent?.name ?? "its assigned agent";
+  const cause =
+    outcome === "lost_to_concurrent_claim"
+      ? "another attempt held the agent"
+      : "the agent was no longer taking work";
   await getDevHqAdapters().eventLogger.log({
     type: EXECUTION_EVENT_TYPE.claimLost,
     entityType: "execution",
     entityId: execution.id,
-    message: `Execution ${execution.id} could not claim ${
-      agent?.name ?? "its assigned agent"
-    } for assignment ${assignmentId}; another attempt held the agent, so this run stood down.`,
+    message: `Execution ${execution.id} could not claim ${agentLabel} for assignment ${assignmentId}; ${cause}, so this run stood down.`,
     actorId: agentId,
     actorLabel: agent?.name ?? "System",
     dedupeKey: `${EXECUTION_EVENT_TYPE.claimLost}:${assignmentId}`,
@@ -808,12 +818,18 @@ export async function dispatchAgentExecution(
  * callback for an already-claimed attempt, or a stale callback naming an assignment
  * that a later attempt has superseded, is a safe no-op (no double-claim, no
  * duplicate event). Keyed on the attempt's `assignmentId` (ADR-0002 E3; Task 1E-2).
+ *
+ * **The claim is taken through the `ExecutionRunner` port**, resolved from the
+ * composition root, rather than by importing the Execution Manager directly. That
+ * is what makes the port a substitutable seam instead of a declaration: swapping
+ * the registered runner changes what this handler observes.
  */
 export async function handleExecutionRunning(
   executionId: string,
   assignmentId?: string,
 ): Promise<Execution> {
-  const existing = await getExecution(executionId);
+  const { executionRunner } = getDevHqAdapters();
+  const existing = await executionRunner.getExecution(executionId);
   if (!existing) {
     throw new Error(`Execution not found: ${executionId}`);
   }
@@ -825,23 +841,32 @@ export async function handleExecutionRunning(
   if (existing.status !== "queued") {
     return existing;
   }
+  // A queued execution with no agent or no assignment is not a state this
+  // callback's own dispatch could have produced, so it stays loud rather than
+  // being folded into a declined claim.
+  if (!existing.agentId || !existing.assignmentId) {
+    throw new Error(`Execution has no assigned agent to run: ${executionId}`);
+  }
 
-  const execution = await runExecution(executionId);
-  if (!execution) {
-    // The compare-and-set lost: another attempt holds the agent. This is a 200
-    // with the unchanged execution, so the worker reads a non-running status and
-    // stands down cleanly; the claim deadline then recovers this assignment. The
-    // guard avoids a non-null assertion — runExecution cannot return null with a
-    // null assignmentId, but the type does not say so.
-    if (existing.assignmentId) {
-      await ensureClaimLostEvent(
-        existing,
-        existing.assignmentId,
-        existing.agentId,
-      );
-    }
+  const result = await executionRunner.claimExecution(
+    executionId,
+    existing.agentId,
+  );
+  if (result.outcome !== "claimed") {
+    // The claim was declined: another attempt holds the agent, or the agent is no
+    // longer taking work. Either way this is a 200 with the unchanged execution,
+    // so the worker reads a non-running status and stands down cleanly; the claim
+    // deadline then recovers this assignment. A throw here would become a 500,
+    // which the worker's postJson raises before it can read the answer.
+    await ensureClaimLostEvent(
+      existing,
+      existing.assignmentId,
+      existing.agentId,
+      result.outcome,
+    );
     return existing;
   }
+  const execution = result.execution;
   await logExecutionEvent(
     EXECUTION_EVENT_TYPE.claimed,
     execution.id,
@@ -852,15 +877,35 @@ export async function handleExecutionRunning(
 }
 
 /**
- * Callback: extend the lease for a still-running execution. The attempt's
- * assignment identifies the caller, so a stale worker's beat cannot keep a
- * successor attempt's lease alive.
+ * Callback: extend the lease for a still-running execution, through the
+ * `ExecutionRunner` port. The attempt's assignment identifies the caller, so a
+ * stale worker's beat cannot keep a successor attempt's lease alive.
+ *
+ * The port requires that identity. This handler still accepts it optionally
+ * because it is the HTTP edge: the internal callback route parses it out of a
+ * request body, where it can legitimately be absent (an older worker, a
+ * hand-issued beat). An omitted identity means "whatever attempt is current", so
+ * it is resolved to the execution's own current assignment **here**, at the edge,
+ * rather than letting an anonymous beat cross the seam and become
+ * indistinguishable from a stale worker's inside the runner.
  */
 export async function handleExecutionHeartbeat(
   executionId: string,
   assignmentId?: string,
 ): Promise<Execution> {
-  return heartbeat(executionId, assignmentId);
+  const { executionRunner } = getDevHqAdapters();
+  const current = await executionRunner.getExecution(executionId);
+  if (!current) {
+    throw new Error(`Execution not found: ${executionId}`);
+  }
+  const attemptId = assignmentId ?? current.assignmentId;
+  if (!attemptId) {
+    // The execution holds no assignment, so there is no lease to extend and
+    // nothing for the runner to compare against. Absorbed, like every other beat
+    // whose attempt has already ended.
+    return current;
+  }
+  return executionRunner.heartbeat(executionId, attemptId);
 }
 
 export interface CompleteExecutionInput {

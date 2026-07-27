@@ -39,6 +39,41 @@ export interface AssignmentDecision {
 }
 
 /**
+ * The outcome of a claim attempt, as a discriminated union rather than
+ * `Execution | null`.
+ *
+ * `null` conflated two materially different situations a caller must be able to
+ * tell apart, and gave neither of them a name. The union states each outcome and
+ * makes the exhaustive handling of them a type error to omit.
+ *
+ * The three members are exactly the outcomes a *correct* caller can encounter:
+ *
+ * - `claimed` — the compare-and-set won; the carried execution is running.
+ * - `lost_to_concurrent_claim` — the agent was reserved by another attempt
+ *   between selection and this call. The caller was right when it was dispatched
+ *   and the world moved, so it stands down rather than failing.
+ * - `agent_unavailable` — the assigned agent is not taking work at all (offline,
+ *   or waiting). Also not the caller's doing: the registry moved underneath a
+ *   dispatch that was valid when it was made.
+ *
+ * Everything else — a missing execution, an execution that is not queued, one
+ * with no assignment, a mismatched agent, an agent that is not in the registry —
+ * **throws**. Those are states no correct caller could have produced, and
+ * absorbing them into an ordinary negative outcome would hide a defect behind a
+ * value the caller is expected to ignore.
+ */
+export type ClaimExecutionResult =
+  | { outcome: "claimed"; execution: Execution }
+  | { outcome: "lost_to_concurrent_claim" }
+  | { outcome: "agent_unavailable" };
+
+/** The non-claiming outcomes, for callers that only branch on the failure side. */
+export type ClaimDeclinedOutcome = Exclude<
+  ClaimExecutionResult["outcome"],
+  "claimed"
+>;
+
+/**
  * The Execution Manager: owner of the agent-backed execution lifecycle
  * (assignment, claim, heartbeat, release, retry, timeout). Distinct from
  * `WorkflowEngine`, which owns founder-request orchestration. See ADR-0001 (D2).
@@ -55,15 +90,25 @@ export interface ExecutionRunner {
     policy?: AgentSelectionPolicy,
   ): Promise<AssignmentDecision>;
   /**
-   * Atomically take ownership of an execution for an available agent. Resolves
-   * `null` when the compare-and-set loses to a concurrent claim.
+   * Atomically take ownership of an execution for an available agent. Reports
+   * which of the three anticipated outcomes occurred; every precondition
+   * violation throws. See `ClaimExecutionResult`.
    */
   claimExecution(
     executionId: string,
     agentId: string,
-  ): Promise<Execution | null>;
-  /** Extend the lease of a running execution. */
-  heartbeat(executionId: string): Promise<Execution>;
+  ): Promise<ClaimExecutionResult>;
+  /**
+   * Extend the lease of a running execution.
+   *
+   * **Assignment identity is required.** A heartbeat is only meaningful from the
+   * worker holding the named attempt: without the identity the runner cannot tell
+   * a live worker's beat from an abandoned one's, and an abandoned run would be
+   * able to keep a successor attempt's lease alive and mask its failure. A beat
+   * naming an assignment that is no longer the execution's current one is a
+   * no-op, not an error.
+   */
+  heartbeat(executionId: string, assignmentId: string): Promise<Execution>;
   /** Record a terminal agent result and free the agent. */
   releaseExecution(executionId: string, result: AgentResult): Promise<Execution>;
   /** Reclaim executions whose lease has expired. Defaults `now` to call time. */
