@@ -318,7 +318,20 @@ texts are supplied.
 | R2 durable persistence | Sequencing | **Expected later destination** — blocked. Adopting now would reverse E-3 and E-5 |
 | R1 deployed worker + callback plane | Sequencing | **Later hosting option** — after E-1, E-6, and E-12 |
 | R4 / R5 | Rejected | R4 disproportionate and not reached; R5 rejected — graceful-only is not acceptable for Founder approvals |
-| P-1 characterization package | **Authorized** | Test-only. Failing false-success control; pin the five-site wait inventory, approve-path ordering, and `triggerRunId` single-field limitation. No Codex review while test-only |
+| P-1 characterization package | **COMPLETE** | `V2_VERIFICATION_RECORD.md` §12. Six test-only additions; 19 tests; `npm test` exits 0 with 357 passed and 1 expected fail. No production change. No Codex review required |
+| P-1 false-success behaviour | **Executed evidence** | First execution of the code trace: `completeToken` returns `{success:true}` against a cancelled run, no continuation, approval reads `approved`, timeline asserts `Evan approved …`, no finalization |
+| P2_TARGET invariant | **Marked `it.fails`** | Asserts the future-correct invariant; fails today for the right reason. **An unexpected pass turns the suite RED**, forcing the `it.fails` → `it` conversion in P-2 to be deliberate |
+| Failing-test representation T3 | Decision | `it.fails` selected over T1 (red CI), T2 (does not execute), T4 (needs production config). Verified against Vitest 4.1.10 by direct probe |
+| `triggerRunId` two-record wording | **Corrected** | Written onto **two separate single-valued fields on two records** — `Execution.triggerRunId` and `WorkflowRunRecord.triggerRunId` — not twice onto one field. Lineage must address both |
+| P-1 test-local characterization types | Clarification | `DecisionApplication`, `RunAttempt`, `RunLineage`, `LineageBearingRun` are characterization only. **Not an approved P-2 design** |
+| `rejectFounderRequest` false-success | **ABSORB INTO P-2** | Structurally identical to the approve path; same ordering, same comment, same exposure |
+| `replayDecisionToken` false-success | **ABSORB INTO P-2** | Third `completeToken` site; returns the read model unconditionally |
+| Discarded `completeToken` return values | **ABSORB INTO P-2** | All three sites discard `success`; even a truthful signal would be dropped |
+| Inverse convergence | **P-2 inverts, P-4 executes** | Existing convergence handles *token completed, decision not recorded*; the defect is the mirror case and that path never runs |
+| `registerApprovalGate` first-token retention | **ABSORB INTO P-2** | `:292-294` silently retains the first token; premise disappears with `attachWaitToken` |
+| D-2 line-location snapshot | **P-2 obligation** | Must be updated when P-2 edits either file, **without weakening the count invariants** |
+| P-1 accidental external write | Procedural | Disclosed unprompted, deleted, confirmed absent. Outside the repository; no repository effect |
+| P-1 worktree clarification | Process | Engineer identified the correct worktree by matching content anchors, not by name. **Future prompts must state the worktree path explicitly** |
 | P-2 split-run redesign | **BLOCKED** | One package, do not split. Must include the `unconfirmed` state, its visibility, and the timeline-truthfulness fix |
 | P-3 process-start marker | **BLOCKED** | **May run parallel to P-2.** Correctness-critical under R3. Belongs to the Dev HQ state contract. Discharges the V2-F8 obligation |
 | P-4 continuation reconciliation | **BLOCKED** | Depends on P-2 only. The state ships in P-2; P-4 adds the sweep |

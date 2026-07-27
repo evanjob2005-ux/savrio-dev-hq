@@ -1246,3 +1246,253 @@ decisions E-1, E-2, E-6 through E-10, and E-12.
 
 **Advisory recommendations in §11.2 are not ratified except where §11.4 explicitly
 ratifies them.**
+
+---
+
+# 12. PACKAGE P-1 — APPROVAL CHARACTERIZATION TESTS. COMPLETE
+
+Sections 0 through 11 stand unchanged. **P-1 is the first implementation package
+executed under the E-11 package-scoped authority model and Founder Decision D1.**
+
+## 12.1 Status
+
+```text
+P-1 COMPLETE
+```
+
+Test-only. **No production behaviour changed, no contract changed, no barrier touched.**
+Delivered in two passes: an initial delivery, then one narrowly scoped correction to the
+failing-test representation.
+
+## 12.2 The six additions
+
+```text
+lib/dev-hq/founder-request-terminal-run.test.ts        D-1  negative control + characterization
+lib/dev-hq/wait-token-inventory.test.ts                D-2  structural wait inventory
+lib/dev-hq/approve-path-ordering.test.ts               D-3  approve-path ordering
+lib/dev-hq/trigger-run-lineage.test.ts                 D-4  triggerRunId lineage limitation
+lib/dev-hq/duplicate-decision-lineage.types.test.ts    D-5  type-level characterization
+test/fixtures/trigger-platform.ts                      test-only platform fixture
+```
+
+**Six additions. No seventh file.**
+
+## 12.3 The executed false-success behaviour
+
+**This is the first execution of a code trace that had only ever been argued by reading.**
+It confirms the trace. Recorded by the passing characterization test in D-1, against the
+real service path with real adapters and a real store:
+
+1. `wait.completeToken` is called once against a run whose status at call time is
+   `cancelled`, and returns `{ success: true }` — **the false-success semantic**.
+2. **No continuation is produced.** The run remains `cancelled`.
+3. The approval nonetheless reads `approved`, with non-null `decidedAt` and
+   non-null `decidedByUserId`.
+4. A timeline event asserts a completed approval: type `approval.approved`, message
+   exactly `` `Evan approved ${approval.title}.` ``, actor label `Evan`.
+5. **No finalization occurs.** Run stage remains `founder_approval_required`, run
+   `decision` is null, the execution is still running with a null `completedAt`, and
+   neither `workflow.completed` nor `founder_request.approved` events exist.
+
+## 12.4 The future-correct P2_TARGET invariant
+
+Test name: `P2_TARGET: renders no completed approval while the workflow has not advanced`.
+
+It establishes its premise **before** drawing its conclusion — first that the workflow did
+not advance (`platform.continuations` empty, run still `cancelled`), then that nothing
+renders as a completed approval: approval status not `approved`, `decidedAt` null,
+`decidedByUserId` null, no `approval.approved` event, run `decision` not `approved`, run
+`stage` not `completed`.
+
+**Design-neutral by construction.** It calls
+`await approveFounderRequest(approval.id).catch(() => undefined)`, so it does not
+presuppose whether P-2 refuses by throwing or by returning a non-success state. **P-1
+asserts the invariant and leaves the mechanism to P-2.**
+
+Before the correction, the target failed with
+`AssertionError: expected 'approved' not to be 'approved'` on the rendering invariant, not
+on the setup — independently confirmed by the Coordinator by execution.
+
+## 12.5 The `it.fails` representation, and why T3 was selected
+
+The target is marked `it.fails(...)`. The wrapper is the **only** change made in the
+correction pass; every assertion, its order, and the design-neutral `.catch` are
+byte-identical to the original delivery.
+
+**The rule this creates:** a `.fails` test that fails is reported as an *expected fail* and
+the suite stays green. **A `.fails` test that unexpectedly PASSES throws
+`Error: Expect test to fail` and turns the suite RED.** The Coordinator verified both
+halves directly against the installed Vitest 4.1.10 with a throwaway probe, then deleted
+it.
+
+**Consequence, and the reason this representation was chosen:** when P-2 lands correctly,
+this test will pass, the suite will go red, and the conversion from `it.fails` back to
+`it` becomes a **forced, deliberate, reviewed step** rather than something that can be
+forgotten.
+
+Why the alternatives were rejected:
+
+1. **T1, commit an actively failing test — rejected.** The required check
+   `Unit and Static Validation` runs `npx vitest run --project node`,
+   `npx vitest run --project dom`, **and** `npm test`, all unconditionally. A red default
+   suite would turn a required check red on the protected branch until P-2 landed, and
+   once red is normal a real regression becomes invisible.
+2. **T2, `skip` or `todo` — rejected.** Keeps the branch green and the target named, but
+   **the test does not execute**, so an early unexpected pass would be invisible.
+3. **T4, a separate characterization project or command — rejected.** Would require
+   changes to `vitest.config.ts` or `package.json` scripts. **Both are production
+   configuration and outside P-1's test-only authority.**
+4. **T3, `it.fails` — selected.** The test executes; the suite stays green; an unexpected
+   pass is loud; no production file, config, or script changes.
+
+**The gap that made the correction necessary was in the Coordinator's P-1 prompt**, which
+asked for a test that "MUST FAIL at this commit" without specifying how to represent that
+without breaking CI. The engineer delivered what was asked and flagged the problem itself.
+
+## 12.6 Final validation
+
+```text
+npx tsc --noEmit                exit 0
+npx eslint .                    exit 0
+npx vitest run --project node   exit 0   27 files | 354 passed | 1 expected fail (355)
+npx vitest run --project dom    exit 0    1 file  |   3 passed (3)
+npm test                        exit 0   28 files | 357 passed | 1 expected fail (358)
+npx next build                  exit 0
+npx playwright test             exit 0    1 passed
+```
+
+Baseline before P-1 was 23 files / 339 tests. **19 tests added across 5 files** — D-1: 2,
+D-2: 6, D-3: 4, D-4: 3, D-5: 4. **Zero ordinary failures. Exactly one expected fail. No
+pre-existing test changed status.** Independently re-run by the Coordinator: `npm test`
+exits 0 with `357 passed | 1 expected fail (358)`.
+
+## 12.7 The five-site wait inventory, pinned
+
+D-2 pins exactly three `wait.completeToken` sites (all in
+`lib/dev-hq/founder-request-service.ts`), one `wait.createToken`, and one `wait.forToken`
+(both in `trigger/founder-request-workflow.ts`), and asserts the total is five and the
+method set is exactly those three — so **a newly introduced wait primitive also fails the
+test**.
+
+**It cannot pass vacuously:** an anti-vacuity test asserts the scan reached more than ten
+files and includes both wait-bearing files, and that no scanned path is a test file.
+`.test.ts(x)` and `.d.ts` are excluded, so **the inventory cannot count its own literals**.
+
+**Line-location snapshots are kept in a separate test from the count invariants**, so a
+benign line shift is diagnosable as distinct from an added or removed call site. **P-2
+must update the snapshot and must not weaken the count invariants to avoid doing so.**
+
+## 12.8 Approve-path ordering
+
+D-3 pins that `wait.completeToken` is called **before** `approvalManager.approve`, both
+behaviourally by call log and by source pin over `founder-request-service.ts:486-496`
+including the rationale comment.
+
+Two further tests make the **boundary of that comment's correctness argument executable**:
+when completion throws, the approval correctly stays pending; **when completion returns a
+non-throwing `{ success: true }`, the approval is recorded regardless.** The ordering
+protects only against a throw, and the platform does not throw.
+
+## 12.9 The two-record `triggerRunId` limitation — corrected wording
+
+**Binding wording, correcting an earlier imprecise Coordinator phrasing:**
+
+> The id is written onto **two separate single-valued fields on two different records** —
+> `Execution.triggerRunId` via `markExecutionRunning`, and `WorkflowRunRecord.triggerRunId`
+> via `updateRun`. It is **not** written twice onto one field.
+
+Both are `string | null`. `WorkflowRunPatch = Partial<Omit<WorkflowRunRecord,
+"executionId" | "updatedAt">>` permits `triggerRunId`, so a later write **succeeds
+silently and the prior id is unrecoverable**. No timeline event mentions either run id, so
+the Founder cannot observe that an earlier run existed.
+
+**A lineage model must address both records, not just `WorkflowRunRecord`.**
+
+## 12.10 Type-level limitations, and what they are not
+
+D-5 establishes, with assertions proven non-vacuous by a deliberate-false probe
+(`TS2344`) and a deliberate-unnecessary `@ts-expect-error` (`TS2578`), both since deleted:
+
+1. **Duplicate decisions are type-indistinguishable** — both `approveFounderRequest` and
+   `rejectFounderRequest` resolve to exactly `DevHqState`, the whole read model, saying
+   nothing about what the call did.
+2. **No outcome discriminant exists** — `Extract<ApproveResult, { kind: unknown }>` is
+   `never`.
+3. **No ordered lineage exists** — `triggerRunId` is exactly `string | null`; there is no
+   `runLineage` or `runAttempts` key.
+4. **No replay representation exists** — `Approval` has no `decisionCount`,
+   `appliedToRunId`, or `idempotencyKey`.
+
+**The test-local types `DecisionApplication`, `RunAttempt`, `RunLineage`, and
+`LineageBearingRun` are CHARACTERIZATION ONLY.** They are declared inside the test file,
+exported to nothing, and exist solely to prove what today's types cannot express. **They
+are not an approved P-2 design and must not be treated as one.**
+
+## 12.11 Findings assigned to later packages
+
+Recorded by the engineer, disposition set by the Coordinator. **None was added to P-1** —
+characterizing a second instance of an already-characterized defect buys nothing.
+
+1. **`rejectFounderRequest` (`:528`) — ABSORB INTO P-2.** Structurally identical to the
+   approve path: same ordering, same rationale comment, same false-success exposure.
+2. **`replayDecisionToken` (`:463-468`) — ABSORB INTO P-2.** A third `completeToken` site,
+   reached when an approval is already decided, returning the read model unconditionally.
+3. **All three `completeToken` return values are discarded — ABSORB INTO P-2.** Nothing in
+   the current code inspects `success`, so **even a truthful platform signal would be
+   dropped.** This directly informs the `confirmed` versus `unconfirmed` distinction.
+4. **Inverse convergence — PRESERVE FOR P-2, EXECUTE IN P-4.** The comment at `:349-352`
+   anticipates *token completed, decision not recorded*. The defect is the mirror case —
+   *decision recorded, token completed, run never resumed* — which that convergence
+   **cannot reach because it never runs.** P-2 inverts the direction; P-4's sweep executes
+   it.
+5. **Both `Execution` and `WorkflowRunRecord` need lineage — ABSORB INTO P-2.**
+6. **`registerApprovalGate` (`:292-294`) silently retains the first token when a different
+   one arrives — ABSORB INTO P-2.** Under R3 its premise disappears with
+   `attachWaitToken`.
+7. **The D-2 line-location snapshot will need updating when P-2 edits either file —
+   ABSORB INTO P-2**, with the count invariants preserved.
+
+## 12.12 Procedural disclosures — recorded, not concealed
+
+1. **Accidental external write, original P-1 pass.** An errant tool call wrote a
+   one-line placeholder into the user's Documents folder, **outside the repository**. The
+   engineer **disclosed it unprompted**, deleted it, and confirmed absence. **No
+   repository effect**; it appears in no preservation proof. The Coordinator accepts the
+   disclosure and records that it could not independently re-verify deletion without
+   reading a directory outside scope. **Classified: procedural, disclosed, corrected.**
+2. **Worktree clarification, correction pass.** The engineer's primary session directory
+   was `savrio-dev-hq` at `fbe4eb6d` on the validation branch, which does **not** contain
+   the P-1 additions. The engineer enumerated `git worktree list` and **identified the
+   correct worktree by matching all four content anchors rather than by name**, then ran
+   every command in `savrio-advance-1f`. **This is a disclosed environment detail handled
+   correctly, not a procedural defect.** The engineer's suggestion is adopted: **future
+   prompts state the worktree path explicitly**, since eleven worktrees are currently
+   registered.
+3. **Two unprompted self-corrections during the original pass:** the engineer removed an
+   eslint warning it had introduced rather than leaving it, and **proved its own type
+   assertions were non-vacuous** before relying on them.
+
+## 12.13 Transmission-integrity defects — seventh and eighth occurrences
+
+**Original P-1 return:** duplicated sections 1 through 3; tool-transcript bleed spliced
+between the fragments; §3 truncated; §5's heading missing; truncations in §5, §7, §11,
+§14, and §17.
+
+**Correction return:** duplicated sections 1 through 2; tool-transcript bleed; truncations
+in §1, §2, §5, §8, and §9; §4's heading missing.
+
+**No defect changed a conclusion in either return.** Every deliverable, count, verdict, and
+disclosure survived and was independently confirmed against the repository. **Not
+repaired.**
+
+## 12.14 What P-1 does not do
+
+1. Changes **no** production behaviour, source, contract, route, workflow, config,
+   dependency, script, or ruleset.
+2. Does **not** implement, design, or presuppose R3.
+3. Does **not** authorize P-2, P-3, P-4, or P-5.
+4. Does **not** decide E-1, E-2, E-6 through E-10, or E-12.
+5. Does **not** weaken, remove, bypass, or consolidate any production barrier.
+
+**Independent Codex review was not required and was not sought**, because P-1 remained
+test-only throughout and its scope never expanded.
