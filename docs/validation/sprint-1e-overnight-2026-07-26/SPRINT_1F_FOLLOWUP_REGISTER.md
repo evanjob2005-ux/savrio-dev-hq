@@ -285,6 +285,14 @@ texts are supplied.
 | PKG-3 package E workflow follow-up | Future package | **Open** — includes UNVALIDATED concurrency cancellation |
 | PKG-3 package F deferred PKG-2 test config | Future package | **Open** — M-1…M-4 unchanged |
 | PKG-3-CORRECTION-1 tag annotation | Governance correction | **Recorded; supersedes the annotation. Tag must not be re-frozen** |
+| Package C Track B plan preservation | Documentation custody | **Closed** — `candidate-1f-pkgc-1`, both gates approved. Four planning documents preserved byte-for-byte |
+| PKGC-OBLIGATION-A custody note | **Mandatory** custody clarification | **Discharged** — `docs/plans/SPRINT_1F_TRACK_B_CUSTODY_NOTE.md`, additive and forward-only |
+| PKGC-ICR-002 stale custody statements | Coordinator correction | **Recorded** — freeze report disclosed 2 of 6; corrected in the custody note §3 |
+| PKGC-ICR-003 heading-level skip | Deferred NOTE | **Open by decision** — `SPRINT_1F_MISSION_CONTROL_LITE.md:287`; not fixed, to preserve byte-for-byte custody |
+| PKGC-CORRECTION-1 evidence transmission | Process | **Binding on future briefs** — full-width hashes go in a fenced block, one per line, with the derivation command; never in a wrapping table cell |
+| Eight FD / ACR-001 X-8 decisions | Founder decision | **Open** — tracked entry package governs; no durable Founder decision record exists |
+| Timeline tie-break and assembly location | Architecture | **Open** — corpus self-contradicts; ADR-0002 §E5 unamended. AA-1 owed |
+| Entry package "frontend test infrastructure absent" | Tracked-document staleness | **Open** — pre-existing defect in `SPRINT_1F_ENTRY_PACKAGE.md`; outside Package C scope |
 | RAT-5 | Record-only observation | Logged for triage |
 | RAT-4 | Process | Logged |
 | RAT-7 | Process | Logged |
