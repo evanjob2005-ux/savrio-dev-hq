@@ -302,6 +302,7 @@ jobs:
           python <<'PYTHON'
           import json
           import os
+          import re
           import sys
 
           # PyYAML is installed by an earlier step. A missing parser is a hard
@@ -335,7 +336,14 @@ jobs:
                       checked["markdown"] += 1
                       with open(name, "r", encoding="utf-8") as handle:
                           text = handle.read()
-                      fences = text.count("\n```")
+                      # Count fence lines rather than a byte sequence. The
+                      # previous text.count("\n```") required a preceding
+                      # newline, so it missed a fence opening on line 1, and it
+                      # required the fence at column 0, so it missed indented
+                      # fences entirely. That could both fail a balanced file
+                      # and pass an unbalanced one. Policy, severity and error
+                      # message are unchanged.
+                      fences = len(re.findall(r"(?m)^[ \t]*```", text))
                       if fences % 2 != 0:
                           raise ValueError("Unbalanced Markdown code fences (```).")
               except Exception as error:  # noqa: BLE001 - report all validation errors
