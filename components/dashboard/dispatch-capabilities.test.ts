@@ -36,7 +36,7 @@ describe("dispatch capability vocabulary", () => {
 
   it("offers ten capabilities and no review-lens vocabulary", () => {
     const offered = datalistCapabilities();
-    expect(offered).toHaveLength(10);
+    expect(offered).toHaveLength(11);
     for (const unfrozen of [
       "architecture-review",
       "reliability-review",
