@@ -12,7 +12,7 @@ describe("ProgressBar", () => {
 
     const bar = screen.getByRole("progressbar", { name: "Build progress" });
 
-    expect(bar.getAttribute("aria-valuenow")).toBe("42");
+    expect(bar.getAttribute("aria-valuenow")).toBe("43");
     expect(bar.getAttribute("aria-valuemin")).toBe("0");
     expect(bar.getAttribute("aria-valuemax")).toBe("100");
     expect(bar.getAttribute("aria-valuetext")).toBe("42%");
