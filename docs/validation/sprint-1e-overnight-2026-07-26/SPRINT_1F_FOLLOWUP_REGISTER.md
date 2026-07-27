@@ -308,7 +308,16 @@ texts are supplied.
 | E-11 / A-P4 implementation authority | Governance | **RESOLVED** 2026-07-27 — granted to the Lead Software Engineer, package-scoped under the Main Coordinator. Does not permit self-selected or expanded scope |
 | E-1 / E-2 hosting target and Web Push scope | Founder decision | **HELD OPEN** — H-AQ is the provisional direction, not ratified; pending V-2 |
 | E-12 `NODE_ENV=production` internal-route barrier | Founder decision | **HELD OPEN — newly surfaced.** H-AQ requires non-production mode; the guard must not be weakened or conditioned while open |
-| V-2 Trigger.dev Development-worker viability | **HIGH** | **Open — first attempt UNABLE TO VERIFY.** `V2_VERIFICATION_RECORD.md`. Blocks H-AQ ratification and all deployment; does not block E-3 or ADR drafting |
+| V-2 Trigger.dev Development-worker viability | **HIGH** | **Open — two attempts, both UNABLE TO VERIFY.** `V2_VERIFICATION_RECORD.md` §9. Blocks H-AQ ratification and all deployment; does not block E-3 or ADR drafting |
+| V2S1-F1 normal CLI startup runs the real sweeper | **HIGH for testing** | **Open** — `trigger.config.ts:5` `dirs: ["./trigger"]`; no task-filter flag exists in the 4.5.7 CLI. Blocks Step 1 and Path A unisolated. Not an H-AQ defect |
+| V2S1-F2 suspended runs in the watchdog disconnect payload | **HIGH** | **Open — confirmed at the 4.5.7 client layer, server behaviour UNKNOWN.** Not a confirmed cancellation defect. **Blocks H-AQ ratification.** Highest-value unknown in V-2 |
+| V2S1-F3 graceful vs abrupt CLI exit differ | **MEDIUM** | **Open — confirmed at source.** Abrupt exit lets the watchdog fire disconnect; graceful exit kills it first. May make enforced graceful shutdown load-bearing for H-AQ |
+| V2S1-F4 24-hour watchdog lifetime | **LOW** | **Open** — bounds the detached watchdog, not the CLI session. H-AQ must not be designed to depend on it |
+| V2S1-F5 `enabledInDev: false` for application failures | **LOW** | **Open, confirmatory** — first attempt terminal. Says nothing about infrastructure recovery; the V2-F5 unknown is untouched |
+| V2S1-F6 npm wrapper vs CLI vs watchdog processes | **INFO** | **Open** — any H-AQ runbook must target the actual CLI and stop the detached watchdog; stopping the wrapper is insufficient |
+| V-2 Step 1 incidental sweeper runs | Evidence | **Recorded** — `run_06fqap9djhp1c3glmnib4mp001`, `run_06fqapfldjul56am8evlskdh01`, `run_06fqapl8prd27d5remgimp8n01`. No Dev HQ state mutated; Next.js was never started |
+| V2-CORRECTION-2 report section completeness | Process | **Binding** — no required numbered section may be omitted or left empty; state `NOT EXECUTED` where no result exists |
+| Step 1B isolation method | Gate | **Authorized — Option E only.** Untracked alternate config plus isolated probe directory, 150-second isolation gate. Options A, B, C, D not authorized, including as fallbacks |
 | V2-F1 anchor not provisioned to run | High for V-2 only | **Closed by authorization** — exact worktree and `npm ci` granted 2026-07-27. Not a product defect |
 | V2-F2 credentials unavailable to V-2 | High for V-2 only | **Closed by authorization** — Development credential granted for Path B; `DEV_HQ_INTERNAL_TOKEN` not needed for Path B |
 | V2-F3 wait-inventory correction | **MEDIUM** | **Recorded** — one `wait.forToken` at `:83`, preceded by `wait.createToken` at `:69-74`. The prior two-wait wording was a Main Coordinator error, preserved openly |
