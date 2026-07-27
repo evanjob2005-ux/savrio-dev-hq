@@ -3,9 +3,13 @@
 
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
 import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
-import type { DevHqState, DevHqStoreData } from "@/lib/dev-hq/types";
+import type {
+  DevHqState,
+  DevHqStoreData,
+  ProcessStartMarker,
+} from "@/lib/dev-hq/types";
 import { toPublicReviews } from "@/lib/dev-hq/review-projection";
-import { nowIso } from "@/lib/dev-hq/id";
+import { nextId, nowIso } from "@/lib/dev-hq/id";
 import type {
   Agent,
   AgentAssignment,
@@ -82,6 +86,22 @@ function createSeedAgents(): Map<string, Agent> {
   return agents;
 }
 
+/**
+ * Stamps a fresh store instance with its identity.
+ *
+ * Produced here, on the server, at the moment the instance is created — the only
+ * place that can observe a lifetime beginning. Nothing a caller or a request
+ * supplies reaches this value.
+ *
+ * `nextId` carries a process-local sequence, so two instances created in the
+ * same millisecond — a reset, in practice — are still distinct. Across a real
+ * process restart the sequence begins again but the clock has moved, and a
+ * restart does not complete inside one millisecond.
+ */
+function createProcessStartMarker(): ProcessStartMarker {
+  return { id: nextId("process"), startedAt: nowIso() };
+}
+
 function createEmptyStore(): DevHqStoreData {
   const workflows = new Map<string, Workflow>();
   workflows.set(FOUNDER_REQUEST_WORKFLOW_ID, createSeedWorkflow());
@@ -101,6 +121,7 @@ function createEmptyStore(): DevHqStoreData {
     reviews: new Map(),
     reviewFindings: new Map(),
     eventKeys: new Map(),
+    processStart: createProcessStartMarker(),
   };
 }
 
@@ -194,6 +215,9 @@ export function buildDevHqState(store: DevHqStoreData = getDevHqStore()): DevHqS
       connectedServices: MISSION_CONTROL_PLACEHOLDERS.overview.connectedServices,
       runningExecutions,
     },
+    // Copied rather than shared, like every other field here, so a reader cannot
+    // edit the store's own record of which lifetime it is.
+    processStart: { ...store.processStart },
   };
 }
 
