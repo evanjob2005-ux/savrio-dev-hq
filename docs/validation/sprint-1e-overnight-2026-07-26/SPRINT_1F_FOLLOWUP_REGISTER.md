@@ -301,6 +301,19 @@ texts are supplied.
 | FD-5 low set: unauthenticated read routes, client text in timeline, single-process guarantees | **LOW / INFO** | **Open** — later hardening; single-process becomes CRITICAL if hosting goes multi-instance |
 | Production barriers `proxy.ts` / `internal-guard.ts` / `actions.ts` | **Standing control** | **Must not be weakened, removed, bypassed, or consolidated** until approved replacement authentication and authorization exist |
 | PKGD-CORRECTION-1 read-only audits leave no artifact | Process | **Binding** — a read-only audit writes nothing, so verification must be by independent reproduction from the authorized commit, or a transcript must be returned for preservation |
+| Package E architecture brief | Advisory input | **Preserved** — `PACKAGE_E_ARCHITECTURE_RECORD.md`. Advisory only; ratifies nothing |
+| E-3 persistence posture P-A | Founder decision | **APPROVED** 2026-07-27 — non-durable, process-start marker mandatory, not a system of record |
+| E-4 Sprint 1C-B disposition | Founder decision | **APPROVED** 2026-07-27 — do not adopt; verified not a shortcut on eight grounds |
+| E-5 `@supabase/supabase-js` gate | Founder decision | **APPROVED** 2026-07-27 — not required under P-A; durable persistence deferred to its own workstream |
+| E-11 / A-P4 implementation authority | Governance | **RESOLVED** 2026-07-27 — granted to the Lead Software Engineer, package-scoped under the Main Coordinator. Does not permit self-selected or expanded scope |
+| E-1 / E-2 hosting target and Web Push scope | Founder decision | **HELD OPEN** — H-AQ is the provisional direction, not ratified; pending V-2 |
+| E-12 `NODE_ENV=production` internal-route barrier | Founder decision | **HELD OPEN — newly surfaced.** H-AQ requires non-production mode; the guard must not be weakened or conditioned while open |
+| V-2 Trigger.dev Development-worker viability | **HIGH** | **Open — authorized.** Blocks H-AQ ratification and all deployment; does not block E-3 or ADR drafting |
+| PKGE-HAZARD-1 worker-bundle second store | **MEDIUM** architectural constraint | **Open** — helpers pure at anchor; worker imports must be limited to pure functions, types, and safe utilities |
+| SEC-1…SEC-14 reconciliation obligation | **Mandatory** for ADR-0003 | **Open** — readable at `SPRINT_1F_MISSION_CONTROL_LITE.md` §10.2:707-720. Package E wrongly recorded them unreadable |
+| SEC-6 / CR-1 predictable capability minting | **HIGH** — pre-deployment blocker | **Open** — `review-service.ts:354` uses `nextId("rvt")`; CSPRNG required before generalizing the capability pattern |
+| SEC-12 conversation-surface prompt injection | **HIGH** | **Open** — no Package E topic covers it; structured confirmed commands only |
+| PKGE-CORRECTION-1 transmission format | Process | **Binding** — no load-bearing content preserved only inside wide Markdown tables |
 | Eight FD / ACR-001 X-8 decisions | Founder decision | **Open** — tracked entry package governs; no durable Founder decision record exists |
 | Timeline tie-break and assembly location | Architecture | **Open** — corpus self-contradicts; ADR-0002 §E5 unamended. AA-1 owed |
 | Entry package "frontend test infrastructure absent" | Tracked-document staleness | **Open** — pre-existing defect in `SPRINT_1F_ENTRY_PACKAGE.md`; outside Package C scope |
