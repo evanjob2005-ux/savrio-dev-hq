@@ -959,3 +959,290 @@ all of them. **No conclusion is affected. Not silently repaired.**
 7. **Path A remains BLOCKED.**
 
 **Preservation is custody, not approval.**
+
+---
+
+# 11. H-AQ REPLACEMENT ARCHITECTURE REVIEW AND FOUNDER DECISIONS, 2026-07-27
+
+Sections 0 through 10 stand unchanged.
+
+**This section contains three distinct classes of content and the distinction is
+binding.** §11.2 is **Architecture Reviewer advisory recommendation** — it ratifies
+nothing. §11.3 is **Main Coordinator reconciliation** — verification and correction, also
+not ratification. §11.4 is **Founder-ratified decisions A1, B1, C1, and D1** — these and
+only these are decided. §11.7 lists what remains unauthorized.
+
+## 11.1 Provenance and integrity
+
+The Architecture Review was produced in a separate tab by an independent Claude
+Architecture Reviewer, read-only and advisory, at anchor commit
+`1469467a8d6fb75ce5a16febb2785dd067417b28`, tree
+`8725a0fc2655cb03049c0c8b64bb6a20563e50f2`. It made no repository change.
+
+**Transmission defects — the sixth occurrence in this project. Recorded, not repaired.**
+
+1. The report arrived **duplicated**: sections 1 through 3 appear twice, once as a
+   truncated leading fragment and once in full. The full rendering was reconciled.
+2. **A block of the Coordinator's own dispatch prompt was spliced into the middle of the
+   transmission** between the fragments — transmission bleed, not reviewer content.
+3. Mid-word truncations in the leading fragment, including the CSPRNG reference and the
+   ancestry check.
+4. Truncations inside the full rendering: §12.1, §14, §16's opening line, §18 items 3-4,
+   §20's consequence list items 2 and 3, §22's opening, §23's heading, §25 items 4 and 15.
+5. §16 lost its heading text.
+
+**No defect changed a conclusion.** All 26 sections were present, none empty, every
+verdict and evidence citation survived, and no contradiction was found between sections.
+
+**The reviewer remained within read-only advisory authority** — no `Write` or `Edit`, no
+worktree, anchor read via `git show`, no ADR authored or numbered, no implementation
+authorized, no barrier change proposed, no Founder-reserved question decided. It
+disclosed its own working-directory deviation unprompted, and it **explicitly declined**
+to provide the support that would have been a precondition for reauthorizing the
+graceful-shutdown test as a route to rescuing H-AQ.
+
+## 11.2 Architecture Reviewer recommendations — ADVISORY, not ratified
+
+1. **Preferred: R3** — eliminate long-lived Trigger.dev token suspension by splitting the
+   Founder-request workflow at the approval boundary.
+2. **Runner-up: R2** — durable database-backed approval state with resumable
+   orchestration. The expected later durability destination.
+3. **R1** — deployed worker with a secure callback plane. Not the immediate replacement;
+   may later form part of the hosting solution after E-1, E-6, and E-12.
+4. **R4** — managed durable queue or workflow engine. Not reached; disproportionate at
+   this scale.
+5. **R5** — graceful-only Development operation. **Rejected.** The reviewer declined to
+   support it, on the grounds that the failure it asks the Founder to accept is
+   undetectable by the Founder, that its favourable half is untested, and that its safety
+   property changes at an undocumented 24-hour watchdog boundary.
+6. **Core analysis:** the defect is **misplaced continuation authority**, not durability.
+   The waitpoint holds all continuation authority; the approval record holds all
+   Founder-facing meaning; neither can repair the other.
+7. **Package decomposition:** P-1 characterization, P-2 split-run redesign, P-3
+   process-start marker, P-4 continuation reconciliation, P-5 provenance repair.
+8. **E-3 disposition:** remains valid, should be narrowed, must not be superseded.
+9. **Sprint 1F:** may continue around this work with a boundary.
+
+## 11.3 Main Coordinator reconciliation — verification and corrections, not ratification
+
+**Every locally verifiable claim in the Architecture Review was independently re-derived
+and checked out. No error was found.** Verified: the anchor; production barriers at 728,
+1201, and 3322 bytes (22, 40, and 87 lines — the reviewer's byte-versus-line
+clarification is correct, and earlier records carry byte counts unlabelled); the
+five-site `wait.*` inventory; the single nullable `triggerRunId` at
+`types/domain/founder-request-workflow.ts:30` written twice per execution; `WorkflowRunPatch`
+permitting `triggerRunId` overwrite; the `tasks.trigger` pattern at `:128-134`; the
+`ApprovalManager` contract; `decidePendingApproval`'s documented convergence semantics;
+the absent process-start marker; 13 contract files; and the existence of
+`lib/dev-hq/review-scope.test.ts`.
+
+**Five Coordinator corrections and additions to the advisory:**
+
+1. **`attachWaitToken` becomes dead contract surface under R3.** Its only purpose is
+   binding a waitpoint to an approval. The review did not enumerate this contract
+   deletion; it belongs in P-2's scope.
+2. **`decidePendingApproval` points the wrong way for R3.** It converges *approval →
+   workflow already advanced*. R3 needs the inverse. The primitive is reusable in shape,
+   but its semantics and source comment must be re-derived, not carried forward.
+3. **The E-3 change is an AMENDMENT, not a narrowing.** See §11.4.2.
+4. **The three-state false-success contract is insufficient — but a fourth state is the
+   wrong fix.** See §11.4.3.
+5. **P-3 may run in parallel with P-2**, correcting the review's sequencing. The marker is
+   a process-lifetime identifier on the state snapshot; its content does not depend on
+   R3. **And P-5 must be split** — see §11.4.4.
+
+## 11.4 FOUNDER-RATIFIED DECISIONS — 2026-07-27
+
+### 11.4.1 Decision A1 — RATIFIED. Replacement direction
+
+**R3 is the selected replacement direction:** eliminate the long-lived Trigger.dev token
+suspension by splitting the Founder-request workflow at the approval boundary.
+
+**This establishes direction only.** It does not authorize P-2 implementation, ADR
+drafting, deployment, persistence, authentication work, or hosting changes.
+
+Recorded alongside it:
+
+1. R3 is the selected replacement direction.
+2. R2 is the expected later durability destination.
+3. R1 remains a later hosting option after E-1, E-6, and E-12 are resolved.
+4. R4 and R5 are **not selected**.
+5. **H-AQ remains HELD FOR REDESIGN and is not ratified.**
+
+### 11.4.2 Decision B1 — RATIFIED. E-3 amendment
+
+E-3 (P-A) **remains in force unchanged as to persistence posture:**
+
+1. Sprint 1F Dev HQ state remains explicitly non-durable and in-memory.
+2. Mission Control is not a durable system of record.
+3. Audit and idempotency guarantees are bounded by the current process lifetime.
+4. A mandatory server-supplied process-start marker must distinguish restart-cleared
+   state from genuinely empty state.
+
+**The following continuation-authority constraint is ADDED:**
+
+> P-A governs process-lifetime operational state and read-model guarantees.
+>
+> No workflow may place its sole continuation authority in P-A state, and no workflow may
+> leave durable external work suspended in a condition that only P-A state can resolve.
+>
+> A workflow must instead either **own its continuation authority durably**, or **hold no
+> resumable durable obligation while awaiting P-A state**.
+
+**This is an AMENDMENT — not a clarification and not a supersession.** It adds a
+constraint on workflow design that E-3 did not previously contain. Classifying it as a
+clarification would let a genuinely new constraint enter the corpus without a
+ratification event.
+
+**Rationale:** the current Founder-request workflow violates the added constraint. It
+suspends a durable Trigger.dev run whose only resumption path runs through an approval
+record held in non-durable P-A state. Losing that state strands a live durable obligation
+P-A cannot discharge.
+
+**It selects no specific implementation and grants no implementation authority beyond
+Decision D1.**
+
+### 11.4.3 The two-field decision and continuation contract
+
+Ratified as part of the direction. The three-state proposal conflated two orthogonal
+dimensions; **approval state and continuation state are separate fields.**
+
+```text
+Principle: "success" means the workflow advanced. It never means a provider
+call returned without throwing.
+
+FIELD 1 — decision (what the Founder decided)
+  pending | approved | rejected | escalated
+
+FIELD 2 — continuation (whether the workflow advanced)
+  not_attempted   no decision recorded; nothing was started
+  confirmed       continuation run confirmed started
+  unconfirmed     decision recorded; continuation not confirmed.
+                  Visible, retryable, reconcilable.
+                  MUST NOT render as a completed approval.
+  failed          continuation attempt returned a typed failure.
+                  Distinct from unconfirmed: we know, rather than not knowing.
+
+ONLY decision != pending AND continuation == confirmed may render as a
+completed approval.
+
+Ordering: record the decision in the current process-lifetime authority
+first, then attempt the continuation, then record the continuation outcome.
+
+Silence is prohibited. A decision that could not take effect must surface to
+the Founder without the Founder going looking.
+
+Provider success shapes are unconfirmed until independently observed.
+```
+
+**Phrasing constraint, binding:** the contract says **"recorded in the current
+process-lifetime authority"**, never "durably recorded". Under P-A nothing is durable,
+and asserting otherwise would claim a property the ratified posture explicitly denies.
+
+### 11.4.4 Package decomposition as ratified in direction
+
+1. **P-1** — characterization and negative-control tests. **Authorized by D1.**
+2. **P-2** — split-run approval-continuation redesign. One package; **do not split**,
+   because the contract changes are genuinely coupled. **Must include the `unconfirmed`
+   state and its visibility** — shipping P-2 without it would ship a state nothing
+   surfaces. **Must include the timeline-truthfulness fix** (see below).
+3. **P-3** — E-3 process-start marker. **May run in PARALLEL with P-2.**
+   **Correctness-critical under R3, not merely disclosure:** R3 makes store loss the
+   correct and total failure mode for pending approvals, so without the marker the UI
+   cannot distinguish "no approvals pending" from "your approval queue was destroyed."
+   Belongs to the **Dev HQ state contract**, not to Mission Control read models.
+   Discharges the unassigned E-3 obligation recorded at V2-F8.
+4. **P-4** — continuation reconciliation. Separate package, depends on **P-2 only**. The
+   `unconfirmed` **state** belongs in P-2; **P-4 adds the sweep that resolves it.**
+5. **P-5 — SPLIT.** The single-package framing is corrected:
+   - **P-5a, timeline truthfulness — MOVED INTO P-2.** The message strings at
+     `founder-request-service.ts:502` and `:541` assert a completed effect. P-2 creates a
+     state where that assertion can be false. **P-2 must change what the event asserts.**
+   - **P-5b, identity remediation — REMAINS BLOCKED on E-6.** Hardcoded `decidedByUserId`
+     (`:495`, `:534`) and hardcoded `actorId` / `actorLabel` (`:503-504`, `:542-543`).
+   - The distinction: **"who acted" is blocked because there is no way to know. "What
+     happened" is not blocked — we know, and we can stop asserting otherwise.** A
+     misleading timeline string does not survive because a different defect is blocked.
+
+### 11.4.5 Decision C1 — RATIFIED. Sprint 1F sequencing
+
+Sprint 1F **continues around** the approval redesign, with the boundary in §11.5. **The
+Main Coordinator must enforce this boundary before dispatching any package.**
+
+### 11.4.6 Decision D1 — RATIFIED. First implementation authorization
+
+**P-1 only.** Test-only characterization and negative-control package.
+
+**P-1 may:** add a failing characterization test for the current false-success path; pin
+the current five-site wait-token inventory; pin the current approve-path ordering; pin
+the current single-field `triggerRunId` lineage limitation; add type-level
+duplicate-decision and lineage characterization.
+
+**P-1 may not:** change production behaviour; modify workflow or domain contracts; remove
+wait-token code; add continuation tasks; implement R3; modify routes; change barriers,
+authentication, or persistence; or begin P-2 through P-5.
+
+**If any source change is required merely to make the characterization observable, P-1
+stops and returns for reauthorization.** Codex independent review is not required for P-1
+while it remains test-only.
+
+## 11.5 Ratified Sprint 1F continuation boundary
+
+**MUST PAUSE:**
+
+1. Approval UX built on the current suspended-token workflow.
+2. Any panel, contract, or view model assuming token completion means continuation.
+3. Work encoding the current approve-then-record ordering at
+   `founder-request-service.ts:486-496`.
+4. Approval-outcome portions of DESIGN-001 that P-2 would rewrite — **DA-4's
+   `UNCONFIRMED` treatment and DA-7's capability-absent rendering cross this line.**
+5. **Group 3's approve, reject, and escalation idempotency items** — they touch exactly
+   the routes P-2 rewrites. They must fold into P-2 or defer. Group 3's `approval-gate`
+   binding and dispatch-boundary `idempotencyKey` items do **not** cross.
+6. Any work whose correctness depends on the current wait-token architecture.
+
+**MAY CONTINUE:** test infrastructure and the deferred PKG-2 findings M-1 through M-4; CI
+enforcement; governance, custody, and documentation; unrelated Mission Control panels;
+Sprint 1E carried obligations not touching approval continuation; Package D and E
+follow-ups independent of P-2; **CR-1 and SEC-6 on their separate track when otherwise
+authorized** — verified as not crossing, and still a pre-deployment blocker in its own
+right.
+
+**FD-26's phone-action inventory is approval-adjacent** and should be reviewed against
+the §11.4.3 contract before it is finalised.
+
+## 11.6 Evidence limitations carried forward
+
+1. Deployed-environment durability is **untested**. Every Step 1B finding is
+   Development-only and must not be generalized.
+2. Whether the accepted completion actually marked the waitpoint completed or was a
+   silent no-op is **unknown**, and is the one open item that could change a design
+   decision if any token wait is retained.
+3. Whether `tasks.trigger` accepts an idempotency key with the semantics R3 needs is
+   **unverified** — the call site at `:128-132` passes no options.
+4. Whether infrastructure recovery is separate from task retry policy (V2-F5) remains
+   **open**.
+5. `SEC-1` through `SEC-14` were **not read** by the Architecture Reviewer. No
+   recommendation is reconciled against them, and no ADR may claim otherwise on this
+   review's account.
+6. Trigger.dev SDK internals under `node_modules` were **reproduced, not re-derived**, by
+   both the reviewer and the Coordinator.
+7. `execution-sweeper` has **never been observed to execute** in this project (V2-F9), so
+   the pattern P-4 would reuse is proven in design only.
+8. The R3 structural claim is sound; **the claim that the resulting system behaves
+   correctly end-to-end is a prediction.** P-1's negative control exists to make that
+   prediction falsifiable before it is trusted.
+
+## 11.7 What remains unauthorized
+
+P-2, P-3, P-4, and P-5 implementation · ADR drafting or ratification beyond the E-3
+amendment ratified above · Path A · further Path B tests · multi-day testing ·
+authentication implementation · durable persistence · deployment · public ingress ·
+production-barrier changes · ruleset changes · Trigger.dev provider contact · and
+decisions E-1, E-2, E-6 through E-10, and E-12.
+
+**Production barriers unchanged and verified:** `proxy.ts`, `lib/dev-hq/internal-guard.ts`,
+`lib/dev-hq/actions.ts`.
+
+**Advisory recommendations in §11.2 are not ratified except where §11.4 explicitly
+ratifies them.**

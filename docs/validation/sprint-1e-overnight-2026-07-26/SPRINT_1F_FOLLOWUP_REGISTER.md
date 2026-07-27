@@ -309,7 +309,26 @@ texts are supplied.
 | E-1 / E-2 hosting target and Web Push scope | Founder decision | **HELD OPEN** — H-AQ is the provisional direction, not ratified; pending V-2 |
 | E-12 `NODE_ENV=production` internal-route barrier | Founder decision | **HELD OPEN — newly surfaced.** H-AQ requires non-production mode; the guard must not be weakened or conditioned while open |
 | V-2 Trigger.dev Development-worker viability | **HIGH** | **ANSWERED — `PATH B FAILED`.** `V2_VERIFICATION_RECORD.md` §10. Abrupt CLI loss cancels a suspended Development waitpoint in ~1s |
-| **H-AQ disposition** | **CRITICAL** | **HELD FOR REDESIGN** — durable-suspension premise falsified in the Development environment. Not ratified, not rejected. Routed to Architecture Review |
+| **H-AQ disposition** | **CRITICAL** | **HELD FOR REDESIGN** — not ratified, not rejected. Architecture Review complete; replacement direction selected. `V2_VERIFICATION_RECORD.md` §11 |
+| **Decision A1 — R3 replacement direction** | Founder decision | **RATIFIED** 2026-07-27 — split the Founder-request workflow at the approval boundary; eliminate the long-lived token suspension. Direction only; authorizes no implementation |
+| **Decision B1 — E-3 continuation-authority amendment** | Founder decision | **RATIFIED** 2026-07-27 — **AMENDMENT**, not a clarification or supersession. No workflow may place sole continuation authority in P-A state, or leave durable work suspended when only P-A state can resolve it |
+| **Decision C1 — Sprint 1F sequencing** | Founder decision | **RATIFIED** 2026-07-27 — continue around the approval redesign; Coordinator enforces the §11.5 boundary before dispatching any package |
+| **Decision D1 — P-1 authorization** | Founder decision | **RATIFIED** 2026-07-27 — P-1 test-only characterization authorized. P-2 through P-5 remain unauthorized |
+| Two-field decision/continuation contract | Architecture | **Ratified in direction** — `decision` and `continuation` are separate fields; continuation values `not_attempted`, `confirmed`, `unconfirmed`, `failed`. Only decided + confirmed may render complete |
+| R2 durable persistence | Sequencing | **Expected later destination** — blocked. Adopting now would reverse E-3 and E-5 |
+| R1 deployed worker + callback plane | Sequencing | **Later hosting option** — after E-1, E-6, and E-12 |
+| R4 / R5 | Rejected | R4 disproportionate and not reached; R5 rejected — graceful-only is not acceptable for Founder approvals |
+| P-1 characterization package | **Authorized** | Test-only. Failing false-success control; pin the five-site wait inventory, approve-path ordering, and `triggerRunId` single-field limitation. No Codex review while test-only |
+| P-2 split-run redesign | **BLOCKED** | One package, do not split. Must include the `unconfirmed` state, its visibility, and the timeline-truthfulness fix |
+| P-3 process-start marker | **BLOCKED** | **May run parallel to P-2.** Correctness-critical under R3. Belongs to the Dev HQ state contract. Discharges the V2-F8 obligation |
+| P-4 continuation reconciliation | **BLOCKED** | Depends on P-2 only. The state ships in P-2; P-4 adds the sweep |
+| P-5a timeline truthfulness | **MOVED INTO P-2** | The `Evan approved …` string asserts a completed effect; P-2 must change what it asserts. Not deferred behind E-6 |
+| P-5b identity remediation | **BLOCKED on E-6** | Hardcoded `decidedByUserId`, `actorId`, `actorLabel`. "Who acted" needs an authenticated principal |
+| Group 3 approve/reject/escalation idempotency | **Crosses the boundary** | Must fold into P-2 or defer. `approval-gate` binding and dispatch `idempotencyKey` items do not cross |
+| DESIGN-001 DA-4 / DA-7 | **Crosses the boundary** | Approval-outcome rendering would be rewritten by P-2 |
+| `attachWaitToken` dead surface | Contract | **Open** — Coordinator addition; becomes dead under R3 and belongs in P-2's scope |
+| `decidePendingApproval` direction | Contract | **Open** — Coordinator addition; converges the wrong way for R3; semantics must be re-derived, not carried forward |
+| Architecture Review transmission defects | Process | **Recorded** — sixth occurrence; duplicated sections, prompt bleed, nine truncated spans. No conclusion affected |
 | V2S1B-F1 abrupt CLI loss cancels the suspended run | **CRITICAL** | **Confirmed, Development-only.** Status `canceled`, error `Dev session ended (CLI exited)`. Must not be generalized to staging or production |
 | V2S1B-F2 completeToken returns success against a cancelled run | **CRITICAL** | **Confirmed as a Trigger.dev primitive.** False-success semantic. `founder-request-service.ts:486-489`'s correctness comment depends on it throwing. **Blocks approval-UX implementation on the current workflow.** Real-route consequence is code-derived, not executed |
 | V2S1B-F3 client cancellation mechanism | **HIGH** | **Fully confirmed at source and runtime.** Supersedes the V2S1-F2 "must not be called a defect" qualification, for Development only |
