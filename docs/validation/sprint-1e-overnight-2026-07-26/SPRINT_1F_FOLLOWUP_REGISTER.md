@@ -95,7 +95,10 @@ required** and none was performed.
 approval.** Each item is a quality, consistency, or operability improvement
 deferred under the F-A7 freeze policy
 (`docs/plans/SPRINT_1F_ENTRY_PACKAGE.md:554`) rather than used to force a third
-candidate. Evidence: `AR_1F_PKG2_CANDIDATE_2.md`, `ICR_1F_PKG2_CANDIDATE_2.md`.
+candidate. Evidence, by author: `AR_1F_PKG2_CANDIDATE_2.md` (AGENT-019 Architecture
+Reviewer), `ICR_1F_PKG2_CANDIDATE_2.md` (AGENT-008 Independent Code Reviewer),
+`RECONCILIATION_1F_PKG2_CANDIDATE_2.md` (Main Coordinator — reconciliation and
+approval decision).
 
 ### Deferred MINOR findings — one small follow-up package
 

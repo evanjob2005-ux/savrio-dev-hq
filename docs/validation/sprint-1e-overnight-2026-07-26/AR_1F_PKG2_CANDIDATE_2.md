@@ -3,7 +3,26 @@
 **Reviewer:** AGENT-019 Architecture Reviewer · fresh, independent session
 **Worktree:** `C:\Users\evanj\Documents\Projects\savrio-review-pkg2r` (detached, read-only)
 **Date:** 2026-07-26
-**Preservation note:** Complete inline response as returned by the Architecture Reviewer, preserved verbatim by the Main Coordinator. The reviewer wrote no file to disk. Coordinator reconciliation is appended at the end of this document under "Coordinator Reconciliation".
+
+> **Preservation note — written by the Main Coordinator, not by the reviewer.**
+>
+> Everything below this note is the **complete inline response as returned by the
+> Architecture Reviewer**, preserved verbatim. The reviewer has no `Write` tool and
+> wrote no file to disk; preservation is the Main Coordinator's duty, not the
+> reviewer's. Custody before preservation was the reviewer transcript only.
+>
+> **This document is single-author reviewer material.** Coordinator reconciliation
+> was briefly appended here beneath a `# Coordinator Reconciliation` heading and has
+> since been moved, unaltered, to its own document —
+> [`RECONCILIATION_1F_PKG2_CANDIDATE_2.md`](./RECONCILIATION_1F_PKG2_CANDIDATE_2.md) —
+> so that no Coordinator-written material is presented as reviewer-authored. The
+> reviewer's report was left byte-identical minus that appended block: it occupied
+> lines 1–507 of the combined file and all 507 are retained here. No reviewer
+> finding, count, command output, or clean-state proof was altered, summarized away,
+> or overwritten.
+>
+> The companion gate report is
+> [`ICR_1F_PKG2_CANDIDATE_2.md`](./ICR_1F_PKG2_CANDIDATE_2.md).
 
 ---
 
@@ -505,228 +524,3 @@ Both tags unmoved and still annotated; HEAD and tree byte-identical to the start
 - **One measurement anomaly, disclosed.** The first probe of `.next/` collection appeared to show the files were *not* collected. Two subsequent runs, including one listing the probe files by name, showed `[node] .next/zzprobe.test.ts` and `[dom] .next/zzprobe.test.tsx`. The first observation could not be explained (likely a stale directory read or Vite cache) and was not chased. M-3 reports the reproduced result; treat the single contrary observation as unexplained rather than as evidence either way.
 
 Every command result reported above came from a command the reviewer actually executed in its session. Nothing is inferred or fabricated.
-
----
-
-# Coordinator Reconciliation
-
-Performed by the Main Coordinator against the frozen candidate in `C:\Users\evanj\Documents\Projects\savrio-review-pkg2r`, independently of the reviewer, using read-only commands.
-
-## R1. Candidate identity — RECONCILED, all values match
-
-```
-git cat-file -t candidate-1f-pkg2-2          → tag
-git rev-parse candidate-1f-pkg2-2            → aec584e310b094de93458b380b3e45eee0eb6600
-git rev-parse candidate-1f-pkg2-2^{commit}   → 5c1fd6590160dd9bf41212868ed946bb9fb12123
-git rev-parse candidate-1f-pkg2-2^{tree}     → 2804e06ec495f976aa6cf86e45ea83ae9bbab904
-git rev-list -n 1 --parents …^{commit}       → 5c1fd659… a3d8d194effd08e74394f38e2ee4388348e0b482
-git rev-parse HEAD                           → 5c1fd6590160dd9bf41212868ed946bb9fb12123
-git symbolic-ref -q HEAD                     → exit 1 (detached)
-git status --porcelain -uall                 → empty
-```
-
-All four expected values confirmed. Worktree clean and detached.
-
-## R2. Changed paths and diffstat — RECONCILED, byte-identical to the reviewer's report
-
-Cumulative (`6eefff7f…` → `5c1fd659…`) and remediation-only (`candidate-1f-pkg2-1` → `candidate-1f-pkg2-2`) `--name-status` and `--stat` output reproduced exactly as reported. `git diff --check` exit 0.
-
-## R3. Cited line references — RECONCILED against the frozen blobs
-
-Read via `git show 5c1fd659…:<path>`. Every load-bearing citation is accurate:
-
-| Citation | Frozen content | Verdict |
-|---|---|---|
-| `playwright.config.ts:3` | `const PORT = Number(process.env.E2E_PORT ?? 3100);` | confirmed (M-4) |
-| `playwright.config.ts:6-9` | the "collected by neither runner" invariant comment | confirmed |
-| `playwright.config.ts:11-12` | `testDir: "./e2e"`, `testMatch: "**/*.spec.ts"` | confirmed (M-1) |
-| `playwright.config.ts:13,16` | `fullyParallel: true`, `workers: 1` | confirmed (N-5) |
-| `playwright.config.ts:14` | `forbidOnly: !!process.env.CI` | confirmed (N-6) |
-| `playwright.config.ts:22` | `trace: "retain-on-failure"` | confirmed |
-| `playwright.config.ts:27-35` | `npm run build && npx next start --hostname 127.0.0.1 --port ${PORT}`, `reuseExistingServer: false`, `timeout: 300_000` | confirmed |
-| `vitest.config.ts:23-25` | the "e2e/ belongs to Playwright" invariant comment | confirmed |
-| `vitest.config.ts:26` | `exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"]` — no `**/.git/**`, no `**/.next/**`, `**/dist/**` present | confirmed (M-3) |
-| `vitest.config.ts:31-41` | dom project — no `exclude` key at all | confirmed (M-2) |
-| `e2e/smoke.spec.ts:19` | `exact: true,` | confirmed |
-
-No citation in the report was found to misstate the frozen candidate.
-
-## R4. Package scope — RECONCILED
-
-`git diff … -- package.json` confirms: `test: "vitest run"` preserved; three scripts added (`test:node`, `test:dom`, `test:e2e`); two devDependencies added (`@testing-library/react ^16.3.2`, `jsdom ^29.1.1`). **Zero additions to `dependencies`.** `@playwright/test` already present at baseline.
-
-## R5. Headline count claim — INDEPENDENTLY REPRODUCED
-
-```
-npx vitest run --project node  → Test Files 22 passed (22) / Tests 326 passed (326)   exit 0
-npx vitest run --project dom   → Test Files  1 passed  (1) / Tests   3 passed   (3)   exit 0
-npx vitest run                 → Test Files 23 passed (23) / Tests 329 passed (329)   exit 0
-```
-
-22 + 1 = 23 and 326 + 3 = 329. Isolation and additivity confirmed; the pre-existing node baseline is preserved exactly.
-
-## R6. Tag integrity — RECONCILED, unchanged
-
-```
-git tag -l → candidate-1f-ar2-6-1, candidate-1f-pkg2-1, candidate-1f-pkg2-2,
-             candidate-1f-tracka-1, sprint-1e-baseline, sprint-1e-remediated,
-             sprint-1f-ar2-6-approved, sprint-1f-tracka-approved
-candidate-1f-pkg2-1 → tag 3efca4b50c9a1b7a2d2e5bbed90ae0b594f66ec8 → commit a3d8d194…
-candidate-1f-pkg2-2 → tag aec584e310b094de93458b380b3e45eee0eb6600 → commit 5c1fd659…
-```
-
-Eight tags, both PKG-2 tags annotated and unmoved. No tag created, moved, or deleted.
-
-## R7. Final worktree state — CLEAN
-
-```
-git status --porcelain -uall → (empty)
-git rev-parse HEAD           → 5c1fd6590160dd9bf41212868ed946bb9fb12123
-git rev-parse HEAD^{tree}    → 2804e06ec495f976aa6cf86e45ea83ae9bbab904
-```
-
-Byte-identical to the start of review, after both the reviewer's session and the coordinator's reconciliation runs.
-
-## R8. Reconciliation not performed
-
-The coordinator did **not** independently re-execute: `npx playwright test`, the four negative controls (NC-1, NC-1b, NC-2 through NC-7), `npx next build`, `npx tsc --noEmit`, `npx eslint .`, or the lockfile structural comparison. Those results stand on the reviewer's reported execution and on the reviewer's disclosed UNVALIDATED list above. Reconciliation covered identity, changed paths, diffstat, every cited line reference, package scope, the Vitest count claim, tag integrity, and final tree state.
-
-## R9. Final reconciliation — Independent Code Review against Architecture Review
-
-Performed by the Main Coordinator on Founder direction after the Architecture Review
-completed. No additional reviewer was launched and the validation battery was not
-repeated, because reconciliation revealed no concrete contradiction requiring it.
-
-### R9.1 Gate results side by side
-
-| | Independent Code Review (AGENT-008) | Architecture Review (AGENT-019) |
-|---|---|---|
-| Candidate | `candidate-1f-pkg2-2` | `candidate-1f-pkg2-2` |
-| Tag object | `aec584e310b094de93458b380b3e45eee0eb6600` | `aec584e310b094de93458b380b3e45eee0eb6600` |
-| Peeled commit | `5c1fd6590160dd9bf41212868ed946bb9fb12123` | `5c1fd6590160dd9bf41212868ed946bb9fb12123` |
-| Tree | `2804e06ec495f976aa6cf86e45ea83ae9bbab904` | `2804e06ec495f976aa6cf86e45ea83ae9bbab904` |
-| Parent | `a3d8d194effd08e74394f38e2ee4388348e0b482` | `a3d8d194effd08e74394f38e2ee4388348e0b482` |
-| Verdict | **APPROVE WITH FINDINGS** | **APPROVE WITH FINDINGS** |
-| BLOCKER / MAJOR | **0 / 0** | **0 / 0** |
-| MINOR / NOTE | 3 / 8 | 4 / 9 |
-| Remediation required | **No** | **No** |
-| Candidate left unchanged | **Yes**, verified | **Yes**, verified |
-
-Both gates were run in the same detached worktree at different times, each after its
-own `npm ci`, each verifying identity before reviewing and tree state after.
-
-### R9.2 Validation results — no contradiction
-
-| Validation | ICR | AR | Reconciled |
-|---|---|---|---|
-| `tsc --noEmit` | exit 0 | exit 0 | agree |
-| `eslint` | exit 0 | exit 0 (also `npm run lint` 0) | agree |
-| Vitest node | **326 / 22** | **326 / 22** | agree — baseline preserved exactly |
-| Vitest dom | **3 / 1** | **3 / 1** | agree |
-| Vitest aggregate | **329 / 23** | **329 / 23** | agree — additive, 326+3 and 22+1 |
-| Playwright | 1 passed (16.8s, then 22.6s) | 1 passed (24.7s, then 24.6s) | agree on result; wall-clock differs across sessions, which is not a contradiction |
-| Production build | `npm run build` 0 | `npx next build` 0 | agree |
-| `git diff --check` | exit 0 | exit 0 | agree |
-| Lockfile | 47 added, 0 version-changed, 0 removed | same, plus **47 of 47 `dev: true`** | agree; AR strictly stronger |
-
-The single headline claim — that the pre-existing node baseline is preserved at
-exactly 326 tests across 22 files — was reproduced by three independent parties:
-the ICR, the AR, and the Coordinator (R5). **No validation result contradicts
-another.**
-
-### R9.3 Negative controls — no contradiction
-
-| Control | ICR | AR | Reconciled |
-|---|---|---|---|
-| Decoy holding port 3100 with a satisfying `h1` | **FIRED**, exit 1, no test ran | **FIRED**, exit 1, BUILD_ID unchanged | agree |
-| 404-serving squatter (evades readiness probe) | **FIRED**, `EADDRINUSE` | **FIRED**, `EADDRINUSE` | agree |
-| `exact: true` discrimination | **FIRED** — 4 cases, 2 failed / 2 passed | **FIRED** — 5 cases, 2 failed / 3 passed | agree; AR added a whitespace-normalization case. Different case counts are a difference in test design, **not** a difference in outcome |
-| Candidate-1 false positive reproduced side by side | Case B passes where case A fails | Case 2 passes where case 1 fails | agree |
-| `e2e/*.test.ts` collected by neither runner | **FIRED**; exposed the `.test.tsx` gap | **FIRED**; exposed `.test.tsx`, plus `.spec.tsx`, `.next/`, root-anchoring | agree; AR is a strict superset |
-| Vitest runtime `defaultExclude` | `["**/node_modules/**", "**/.git/**"]` read from `defaults.9aQKnqFk.js:6` | identical constant, identical file and line | agree |
-| Zero-collection fails closed | NC-5a / NC-5b **FIRED** | confirmed by inspection, not re-executed | no conflict |
-| dom-in-node, no-setup, trace behaviour | NC-4 / NC-6 / NC-7 / NC-8 **FIRED** | not re-run | no conflict — complementary coverage |
-| Per-file `@vitest-environment` hatch; `E2E_PORT` coercion | not run | **FIRED** | no conflict — AR-only |
-
-**Both gates independently answered the central question the same way:** the E2E
-false-positive path that failed candidate 1 is closed on both halves — the run
-cannot pass without building and starting the app (BUILD_ID evidence plus two
-fail-closed decoys), and the heading assertion genuinely rejects a superstring.
-Each proved it by construction rather than by reading configuration.
-
-**One disclosed measurement anomaly, internal to the AR and not a cross-gate
-conflict.** The AR's first `.next/` collection probe appeared to show the files
-were not collected; two later runs, one naming the files, showed they were. The AR
-disclosed this openly, reported the reproduced result, and labelled the single
-contrary observation unexplained. It bears only on M-3's `.next/` leg, which the AR
-explicitly classifies as **pre-existing** and therefore **not** introduced by this
-candidate. It does not affect the approval decision.
-
-### R9.4 Finding-by-finding reconciliation
-
-| ICR | AR | Severity | Disposition |
-|---|---|---|---|
-| MINOR-1 — `vitest.config.ts:26` drops `**/.git/**` | **M-3**, extended | MINOR ↔ MINOR — **agree** | Real, confirmed by both, each proving it in an isolated scratch project. **Fix recommendation differs and the AR's is adopted**: the ICR proposes adding the single token `"**/.git/**"`; the AR proposes composing from `configDefaults` in **both** projects, which also covers `.next/`, removes the dead `**/dist/**`, restores node/dom symmetry, and cannot drift on a Vitest upgrade. Same edit size, strictly larger closure. **A refinement of the fix, not a disagreement about the finding.** |
-| MINOR-2 — dom project has no `e2e/**` exclude | **M-2** | MINOR ↔ MINOR — **agree** | Real, reproduced independently by both (`[dom] e2e/*.test.tsx`). Both agree it cannot produce a false green: such a file importing `@playwright/test` throws loudly outside the Playwright runner. AR sharpens the framing to "the `e2e/` ownership boundary has two enforcement points and only one is implemented." |
-| MINOR-3 — `E2E_PORT` coercion | **M-4** | MINOR ↔ MINOR — **agree** | Arithmetic confirmed by both (`""` → `0`, `"abc"` → `NaN`); both label the downstream Playwright behaviour **plausible, not executed**. **The AR corrects the fix**: the ICR's `\|\|` closes `""` but leaves `"abc"` → `NaN`, so it is partial; validate-and-throw is complete. The AR also raises the rationale — with `reuseExistingServer: false`, port 3100 is exclusive and `E2E_PORT` is the only concurrent-worktree escape. **Severity unchanged.** |
-| *not reported* | **M-1 — Playwright `testMatch` narrowing** | MINOR | **New in the AR; the one substantive gap in the ICR.** `testMatch: "**/*.spec.ts"` means `e2e/foo.spec.tsx` is collected by nothing while both gates report green — proven by execution. Not a contradiction of anything the ICR said: the ICR's only `testMatch` remark (that it correctly ignores `e2e/*.test.tsx`) is true and compatible. |
-| NOTE-1 comment accuracy | confirmed in AR §5 | NOTE | Agree — every load-bearing comment in the diff was tested by both; none overstates the code |
-| NOTE-2 prerendered HTML, not hydration | confirmed in AR §5 | NOTE | Agree — `/` is `○ (Static)`; not a defect, the spec claims only that the harness works |
-| NOTE-3 nothing in CI runs any test | **N-1**, elevated | NOTE | Agree, and both rule it **outside PKG-2's authorized envelope**. Routed to its own package |
-| NOTE-4 `forbidOnly` inert | **N-6** | NOTE | Agree |
-| NOTE-5 `fullyParallel` + `workers: 1` | **N-5**, extended | NOTE | Agree factually; AR adds that it is a latent constraint rather than inert |
-| NOTE-6 missing ICR handbook | **N-8**, re-routed | NOTE | Agree it is absent; AR routes it to existing dependency **D-8** rather than opening a new item |
-| NOTE-7 trace artifacts contained | **N-9** | NOTE | Agree |
-| NOTE-8 `e2e/**` root-anchored | **N-4** | NOTE | Agree; both call it almost certainly intended |
-| *not reported* | **N-2** TopBar nesting coupling · **N-3** `@vitest-environment` hatch bypasses `setupFiles` · **N-7** D-6 jsdom ledger leg | NOTE | New in the AR; additive, none contradicts the ICR |
-| Security attribution — 0 of 47 added packages carry an advisory | **explicitly not adopted** | — | **A scope declination, not a contradiction.** The AR did not run `npm audit` and declined to endorse a claim it had not verified — correct conduct. Both gates independently verified the narrower sufficient fact: all 47 additions are `dev: true`, so **zero production runtime surface**. The ICR's attribution stands as ICR-only evidence and is recorded as such |
-
-**Count reconciliation.** MINOR 3 → 4: the ICR's three findings map one-to-one onto
-AR M-2, M-3, M-4, and M-1 is genuinely new. NOTE 8 → 9: six ICR notes are carried as
-numbered AR notes (N-1, N-4, N-5, N-6, N-8, N-9), two (NOTE-1, NOTE-2) are confirmed
-in the AR's §5 pass without renumbering, and three are new (N-2, N-3, N-7).
-**No ICR finding was dropped, downgraded, or left without a disposition. There is no
-severity disagreement on any finding either gate raised.**
-
-### R9.5 Verdict-flipping conditions — tested, none holds
-
-The AR named three conditions that would convert its verdict to
-**REJECT — REMEDIATION REQUIRED**. The Coordinator tested all three:
-
-| Condition | Test | Result |
-|---|---|---|
-| A `.spec.tsx`/`.spec.mts` E2E file already planned for Track B, making M-1 active rather than latent | `grep -rn "spec\.tsx\|spec\.mts\|\.spec\." docs/plans/` | **Zero matches.** Condition not met |
-| `output: "standalone"` enabled in `next.config.ts` this sprint, making M-3's duplicate-collection hazard active | Read `next.config.ts` in the working tree and at `5c1fd659` | Byte-identical, empty config object, **no `output` key**. The `standalone` occurrences in `docs/plans/` are the PWA manifest's `display: standalone` and a "standalone Tasks view" — unrelated to Next's `output` option. Condition not met |
-| A demonstrated path by which any MINOR produces a green run that should be red | Both gates searched explicitly and reported none; M-1's worst case is that a *newly added* spec does not run, which cannot suppress an existing failure, and Playwright fails closed on zero collection | **None demonstrated.** Condition not met |
-
-**These conditions are recorded in the follow-up register.** If any becomes true
-before M-1 and M-3 land, the deferral must be revisited.
-
-### R9.6 Blocking-condition sweep
-
-| Condition | Finding |
-|---|---|
-| BLOCKER in either review | **None.** 0 and 0 |
-| MAJOR in either review | **None.** 0 and 0 |
-| Unresolved contradiction between the gates | **None.** Every difference is an addition (M-1, three new NOTEs), a refinement of a fix (M-3, M-4), or a declared non-adoption (security attribution). No fact asserted by one gate is denied by the other |
-| Identity mismatch | **None.** Tag object, peeled commit, tree, and parent are identical across the ICR, the AR, the Founder's direction, and the Coordinator's own `rev-parse` |
-| Candidate mutation | **None.** Both reviewers created probes and deleted them; both verified HEAD, tree, and tag afterward. Coordinator re-verified tree `2804e06e…` |
-| Tag movement | **None.** Eight tags before reconciliation; both PKG-2 tags annotated and at their originally reported objects |
-| Dirty-worktree condition | **None in the review worktree** — `git status --porcelain -uall` empty at every checkpoint in both sessions |
-| Evidence that changes the approval decision | **None found** |
-
-### R9.7 Final remediation decision
-
-**Remediation is NOT required. No third candidate.** Both independent gates support
-approval, and the reconciliation surfaced no blocking condition. All four MINOR
-findings are deferred to a follow-up package under the F-A7 freeze policy and are
-recorded in `SPRINT_1F_FOLLOWUP_REGISTER.md`.
-
-## R10. Approval checkpoint
-
-**`candidate-1f-pkg2-2` is APPROVED** as the Sprint 1F frontend-test foundation.
-
-The protected checkpoint `sprint-1f-pkg2-approved` was created as an annotated tag
-pointing at commit `5c1fd6590160dd9bf41212868ed946bb9fb12123`, following the
-convention of `sprint-1f-tracka-approved` and `sprint-1f-ar2-6-approved`. **Neither
-candidate tag was moved.** Identity is recorded in the checkpoint tag's own message.
