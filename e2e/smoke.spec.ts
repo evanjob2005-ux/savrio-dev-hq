@@ -15,7 +15,7 @@ test("mission control shell renders its heading for a visitor", async ({
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Savrio Dev HQ",
+      name: "NC3 Heading That Cannot Match",
       exact: true,
     }),
   ).toBeVisible();
