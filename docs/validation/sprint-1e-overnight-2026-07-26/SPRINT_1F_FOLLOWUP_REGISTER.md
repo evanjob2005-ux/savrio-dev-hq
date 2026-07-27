@@ -290,6 +290,17 @@ texts are supplied.
 | PKGC-ICR-002 stale custody statements | Coordinator correction | **Recorded** — freeze report disclosed 2 of 6; corrected in the custody note §3 |
 | PKGC-ICR-003 heading-level skip | Deferred NOTE | **Open by decision** — `SPRINT_1F_MISSION_CONTROL_LITE.md:287`; not fixed, to preserve byte-for-byte custody |
 | PKGC-CORRECTION-1 evidence transmission | Process | **Binding on future briefs** — full-width hashes go in a fenced block, one per line, with the derivation command; never in a wrapping table cell |
+| Package D FD-5 route audit | Evidence prerequisite | **Closed** — independently verified; `PACKAGE_D_CLOSURE_RECORD.md`. No implementation commit |
+| FD5-01 approve/reject unauthenticated, hardcoded Founder | **CRITICAL** | **Open** — blocks Track B, deployment, phone actions. Fix sequenced through ADR-0003 |
+| FD5-02 escalation accept/revise/abandon unauthenticated | **CRITICAL** | **Open** — same; `revise` dispatches a durable execution. Compounded by NB-1 |
+| FD5-03 finalize attributes a client decision to the Founder | **HIGH** | **Open** — provenance integrity; needs the ADR-0003 actor model |
+| FD5-04 founder-requests unauthenticated, no idempotency | **HIGH** | **Open** — auth half needs ADR-0003; idempotency half is Group 3 |
+| FD5-05 non-uniform duplicated production boundary | **MEDIUM** | **Open** — corrected down from HIGH by Codex; five qualifications binding |
+| FD5-06 no general authorization layer, 16 of 17 units | **HIGH** | **Open** — architecture gap, decided in ADR-0003, not fixed |
+| FD-5 medium set: CSRF, internal-token scope, optional idempotencyKey, approval-gate binding | **MEDIUM** | **Open** — CSRF and token scope to ADR-0003; idempotency and approval-gate binding are Group 3 |
+| FD-5 low set: unauthenticated read routes, client text in timeline, single-process guarantees | **LOW / INFO** | **Open** — later hardening; single-process becomes CRITICAL if hosting goes multi-instance |
+| Production barriers `proxy.ts` / `internal-guard.ts` / `actions.ts` | **Standing control** | **Must not be weakened, removed, bypassed, or consolidated** until approved replacement authentication and authorization exist |
+| PKGD-CORRECTION-1 read-only audits leave no artifact | Process | **Binding** — a read-only audit writes nothing, so verification must be by independent reproduction from the authorized commit, or a transcript must be returned for preservation |
 | Eight FD / ACR-001 X-8 decisions | Founder decision | **Open** — tracked entry package governs; no durable Founder decision record exists |
 | Timeline tie-break and assembly location | Architecture | **Open** — corpus self-contradicts; ADR-0002 §E5 unamended. AA-1 owed |
 | Entry package "frontend test infrastructure absent" | Tracked-document staleness | **Open** — pre-existing defect in `SPRINT_1F_ENTRY_PACKAGE.md`; outside Package C scope |
