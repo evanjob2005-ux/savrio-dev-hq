@@ -334,7 +334,14 @@ jobs:
                           json.load(handle)
                   elif lower.endswith(".md"):
                       checked["markdown"] += 1
-                      with open(name, "r", encoding="utf-8") as handle:
+                      # utf-8-sig strips an optional leading byte-order mark.
+                      # With plain utf-8 the BOM survives as U+FEFF at index 0,
+                      # so a fence opening on line 1 no longer matches the
+                      # line-anchored pattern below: a balanced file was
+                      # rejected and an unbalanced one accepted. Three tracked
+                      # documents carry a BOM. utf-8-sig is a superset of utf-8
+                      # for BOM-less input, so nothing else changes.
+                      with open(name, "r", encoding="utf-8-sig") as handle:
                           text = handle.read()
                       # Count fence lines rather than a byte sequence. The
                       # previous text.count("\n```") required a preceding
