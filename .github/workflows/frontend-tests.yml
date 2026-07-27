@@ -1,0 +1,261 @@
+name: Frontend Tests
+
+# CI enforcement for the frontend test foundation approved as Sprint 1F PKG-2
+# (candidate-1f-pkg2-2, commit 5c1fd6590160dd9bf41212868ed946bb9fb12123).
+#
+# Before this workflow, no gate in this repository ran the Vitest harnesses,
+# installed a browser, or executed Playwright. Every harness PKG-2 built
+# depended on a human remembering to run the command locally, which is what
+# both independent gates identified as the highest-value follow-up.
+#
+# Lint, type check, and build are re-run here rather than delegated to the
+# application-validation job in ci.yml, so this workflow is a complete,
+# self-contained frontend gate instead of a partial one that reads green while
+# silently depending on another workflow's coverage.
+#
+# Every enforcement step below is unconditional. There is no file-existence or
+# script-existence guard that can skip a required command and still report
+# success: a check that skips and reports green is worse than no check at all,
+# because it manufactures confidence. Preconditions are asserted in the
+# opposite direction, so a missing harness file or a missing local binary
+# fails the run rather than shrinking it.
+#
+# No test or file counts are hardcoded anywhere. Counts change legitimately as
+# packages land, and a pinned count would turn a correct merge into a red build.
+
+on:
+  push:
+    branches:
+      - main
+      - feature/dev-hq-operating-system
+  pull_request:
+    branches:
+      - main
+      - feature/dev-hq-operating-system
+  # Required for authoritative Linux validation of temporary scratch branches
+  # before a candidate is frozen. Local Windows execution does not establish
+  # Linux behaviour.
+  workflow_dispatch:
+
+# Least privilege: this workflow only reads the repository. Artifact upload
+# does not require contents: write.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref. Each pull request and each branch
+# push gets its own group.
+concurrency:
+  group: frontend-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Suppress Next.js telemetry so the build writes nothing outside the
+  # repository and produces no first-run prompt in the logs.
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  unit:
+    name: Unit and Static Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          # The only cache in this workflow. The action keys it on the
+          # lockfile, and npm ci still validates against that lockfile, so a
+          # stale cache cannot survive into an install.
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify harness preconditions
+        run: |
+          set -euo pipefail
+          # Fail closed rather than skip. If a harness file or a local binary
+          # is absent, the correct outcome is a red run, not a green one that
+          # quietly validated less than it claims to have validated.
+          missing=0
+
+          for file in vitest.config.ts playwright.config.ts test/setup-dom.ts; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=${file}::Required test harness file is missing."
+              missing=1
+            fi
+          done
+
+          # npx falls back to fetching a package from the registry when it is
+          # not installed locally. That would let CI pass against software
+          # which is not the software in this lockfile, so require local
+          # resolution of every binary the following steps invoke.
+          for binary in tsc eslint vitest next; do
+            if [[ ! -x "node_modules/.bin/${binary}" ]]; then
+              echo "::error::node_modules/.bin/${binary} is missing or not executable after npm ci."
+              missing=1
+            fi
+          done
+
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "Harness files and local binaries are present."
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Vitest node project
+        run: npx vitest run --project node
+
+      - name: Vitest DOM project
+        run: npx vitest run --project dom
+
+      - name: Vitest aggregate
+        # Enforces the repository's aggregate npm test contract. This
+        # deliberately re-executes the tests the two project steps already ran:
+        # the duplicate cost buys proof that the single documented entry point
+        # still resolves and still collects both projects.
+        run: npm test
+
+      - name: Build application
+        # Deliberately ordered after Vitest. The build populates .next/, which
+        # neither Vitest project excludes, so building last keeps generated
+        # output out of test collection without modifying PKG-2 configuration.
+        run: npx next build
+
+      - name: Verify repository hygiene
+        if: always()
+        run: |
+          set -euo pipefail
+          # Runs even when an earlier step failed, so a failing run is held to
+          # the same cleanliness standard as a passing one.
+          #
+          # git status --untracked-files=all lists every untracked path while
+          # still honouring .gitignore, so ignored generated output
+          # (node_modules/, .next/, test-results/, playwright-report/,
+          # next-env.d.ts, *.tsbuildinfo) is correctly excluded, while any
+          # tracked modification or unexpected untracked file is reported
+          # instead of passing silently.
+          if ! git diff --check HEAD --; then
+            echo "::error::git diff --check reported whitespace errors or conflict markers."
+            exit 1
+          fi
+
+          dirty=$(git status --porcelain --untracked-files=all)
+          if [[ -n "$dirty" ]]; then
+            echo "::error::The working tree is not clean after this job. Offending paths:"
+            echo "$dirty"
+            exit 1
+          fi
+
+          {
+            echo "## Unit and Static Validation"
+            echo ""
+            echo "- Type check, lint, Vitest node, Vitest DOM, aggregate npm test and build all executed unconditionally"
+            echo "- Working tree clean; every generated artifact is ignored"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    name: End-to-End Smoke
+    # Independent of the unit job on purpose. Chaining would add latency
+    # without adding information, and a broken build surfaces in both.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify harness preconditions
+        run: |
+          set -euo pipefail
+          missing=0
+
+          for file in playwright.config.ts e2e/smoke.spec.ts; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=${file}::Required E2E harness file is missing."
+              missing=1
+            fi
+          done
+
+          if [[ ! -x "node_modules/.bin/playwright" ]]; then
+            echo "::error::node_modules/.bin/playwright is missing or not executable after npm ci."
+            missing=1
+          fi
+
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "E2E harness files and local binaries are present."
+
+      - name: Install Playwright browser and OS dependencies
+        # Chromium only: playwright.config.ts declares exactly one project.
+        # Browser binaries are intentionally not cached, so every run installs
+        # and verifies the browser matching the locked Playwright version.
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright smoke test
+        # The committed webServer configuration is used unchanged. It always
+        # builds and starts the application and never reuses an existing
+        # server, which is the property that closed the false positive in
+        # candidate 1. GitHub sets CI=true, so forbidOnly is live here.
+        run: npx playwright test
+
+      - name: Upload Playwright failure artifacts
+        # Failure only. Traces are diagnostics for a red run, not deliverables
+        # of a green one.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Verify repository hygiene
+        if: always()
+        run: |
+          set -euo pipefail
+          # Also runs after a failed attempt, which is the case that matters
+          # most here: a failing run writes traces into test-results/, and this
+          # proves that output is ignored rather than left as repository dirt.
+          if ! git diff --check HEAD --; then
+            echo "::error::git diff --check reported whitespace errors or conflict markers."
+            exit 1
+          fi
+
+          dirty=$(git status --porcelain --untracked-files=all)
+          if [[ -n "$dirty" ]]; then
+            echo "::error::The working tree is not clean after this job. Offending paths:"
+            echo "$dirty"
+            exit 1
+          fi
+
+          {
+            echo "## End-to-End Smoke"
+            echo ""
+            echo "- Chromium and OS dependencies installed on every run; no browser cache"
+            echo "- Playwright executed with the committed webServer configuration, unchanged"
+            echo "- Working tree clean; trace output is ignored"
+          } >> "$GITHUB_STEP_SUMMARY"
