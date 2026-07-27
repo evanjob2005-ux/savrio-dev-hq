@@ -253,6 +253,39 @@ jobs:
         # and verifies the browser matching the locked Playwright version.
         run: npx playwright install --with-deps chromium
 
+      - name: NC-4 TEMPORARY decoy server on port 3100
+        # Validation-only mutation. Occupies 127.0.0.1:3100 with a server that
+        # serves an h1 satisfying the smoke assertion exactly, so a run that
+        # attached to a pre-existing server instead of building its own would
+        # pass. reuseExistingServer: false must refuse. Reverted after this run.
+        run: |
+          set -euo pipefail
+          cat > /tmp/nc4-decoy.js <<'JS'
+          const http = require("http");
+          const body =
+            "<!doctype html><html><body><h1>Savrio Dev HQ</h1></body></html>";
+          http
+            .createServer((_req, res) => {
+              res.writeHead(200, { "Content-Type": "text/html" });
+              res.end(body);
+            })
+            .listen(3100, "127.0.0.1", () => {
+              console.log("NC-4 decoy listening on 127.0.0.1:3100");
+            });
+          JS
+          nohup node /tmp/nc4-decoy.js > /tmp/nc4-decoy.log 2>&1 &
+          for _ in $(seq 1 20); do
+            if curl -sSf http://127.0.0.1:3100 -o /tmp/nc4-probe.html; then
+              break
+            fi
+            sleep 1
+          done
+          echo "--- decoy is serving ---"
+          cat /tmp/nc4-probe.html
+          echo ""
+          echo "--- listeners on 3100 ---"
+          (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep ":3100" || true
+
       - name: Playwright smoke test
         # The committed webServer configuration is used unchanged. It always
         # builds and starts the application and never reuses an existing
