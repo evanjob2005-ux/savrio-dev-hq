@@ -1,6 +1,5 @@
-import { tasks, wait } from "@trigger.dev/sdk";
+import { tasks } from "@trigger.dev/sdk";
 import {
-  DEV_HQ_ACTORS,
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_REQUEST_WORKFLOW_ID,
   FOUNDER_USER_ID,
@@ -10,13 +9,20 @@ import { nowIso, slugify } from "@/lib/dev-hq/id";
 import type { DevHqState } from "@/lib/dev-hq/types";
 import type {
   Approval,
+  ContinuationState,
   Execution,
   FounderRequestInput,
   Project,
   Task,
+  WorkflowDecision,
   WorkflowRejectionKind,
   WorkflowRunRecord,
 } from "@/types/domain";
+
+/** Run 1: carries the request to the approval gate and ends. */
+const FOUNDER_REQUEST_TASK_ID = "founder-request-workflow";
+/** Run 2: started by the founder's decision. */
+const FOUNDER_REQUEST_CONTINUATION_TASK_ID = "founder-request-continuation";
 
 function deterministicExecutiveReview(task: Task): {
   passed: boolean;
@@ -125,7 +131,7 @@ export async function createFounderRequest(
     actorLabel: "Evan",
   });
 
-  const handle = await tasks.trigger("founder-request-workflow", {
+  const handle = await tasks.trigger(FOUNDER_REQUEST_TASK_ID, {
     executionId: execution.id,
     taskId: task.id,
     projectId: project.id,
@@ -135,6 +141,16 @@ export async function createFounderRequest(
   await workflowEngine.markExecutionRunning(execution.id, {
     at: timestamp,
     triggerRunId,
+  });
+  // Execution.triggerRunId is owned by the workflow engine and the run record's
+  // by the repository — two single-valued fields on two different records. The
+  // engine's write is recorded here so both land in one ordered history instead
+  // of each record forgetting independently. The repository records its own.
+  await workflowRunRepository.appendRunLineage(execution.id, {
+    runId: triggerRunId,
+    role: "initial",
+    record: "execution",
+    at: timestamp,
   });
   await workflowRunRepository.updateRun(execution.id, {
     triggerRunId,
@@ -264,10 +280,16 @@ export async function runExecutiveReview(executionId: string): Promise<{
   return { passed: true, summary: review.summary, approvalId: approval.id };
 }
 
+/**
+ * Opens the founder decision gate. Run 1 calls this and then ends.
+ *
+ * There is no token to attach. The gate is now a stage on the run record and a
+ * pending approval — both readable, neither holding exclusive authority to
+ * resume anything.
+ */
 export async function registerApprovalGate(input: {
   executionId: string;
   approvalId: string;
-  waitTokenId: string;
 }): Promise<Approval> {
   const { approvalManager, workflowRunRepository, eventLogger } =
     getDevHqAdapters();
@@ -281,37 +303,31 @@ export async function registerApprovalGate(input: {
     throw new Error(`Approval not found: ${input.approvalId}`);
   }
 
-  if (approval.waitTokenId === input.waitTokenId) {
-    return approval;
-  }
-
   if (isWorkflowCompleted(run)) {
     return approval;
   }
 
-  if (approval.waitTokenId && approval.waitTokenId !== input.waitTokenId) {
-    return approval;
-  }
-
-  const updated = await approvalManager.attachWaitToken(
-    input.approvalId,
-    input.waitTokenId,
-  );
+  // This path used to return early when a *different* wait token was already
+  // attached, to protect the first token's exclusive right to resume the run.
+  // That premise is gone with the token: nothing now holds an exclusive right to
+  // resume, so there is nothing for a second registration to steal. Re-opening an
+  // already-open gate is simply idempotent — the stage is already correct, and
+  // the dedupe key keeps the timeline to one entry per approval.
   await workflowRunRepository.updateRun(input.executionId, {
     stage: "founder_approval_required",
-    waitTokenId: input.waitTokenId,
   });
 
   await eventLogger.log({
     type: "approval.requested",
     entityType: "approval",
-    entityId: updated.id,
-    message: `Founder approval required for ${updated.title}.`,
+    entityId: approval.id,
+    message: `Founder approval required for ${approval.title}.`,
     actorId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
     actorLabel: "Executive Orchestrator",
+    dedupeKey: `approval-requested-${approval.id}`,
   });
 
-  return updated;
+  return approval;
 }
 
 export async function finalizeWorkflowOutcome(input: {
@@ -346,11 +362,31 @@ export async function finalizeWorkflowOutcome(input: {
   const timestamp = nowIso();
   const penultimateStage = terminalStageForOutcome(input.decision, rejectionKind);
 
-  // Converge the approval record on the decision the workflow acted on. In the
-  // normal flow it is already decided and this is a no-op; it only takes effect
-  // when the token was completed but the decision was not recorded. Validation
-  // rejections pass no approvalId and are unaffected.
+  // Two convergences run here, in opposite directions. Both exist because the
+  // approval record and the durable run are written by different processes, and
+  // either one can be the side that got through.
+  //
+  // Forward — the workflow advanced, so an approval still carrying no decision is
+  // converged onto the decision the workflow acted on. In the normal flow the
+  // founder's decision is already recorded and this is a no-op.
+  //
+  // Inverse — the approval already carries the decision but records no confirmed
+  // continuation, because the trigger call told us nothing. Executing this
+  // function *is* the confirmation: the continuation ran, or nothing would be
+  // finalising. So the continuation converges to confirmed here and only here,
+  // this being the sole point at which the workflow has been observed to advance
+  // rather than merely reported to have been asked to.
+  //
+  // Validation rejections pass no approvalId and are unaffected by either.
   if (input.approvalId) {
+    await approvalManager.recordDecisionIntent({
+      approvalId: input.approvalId,
+      decision: input.decision,
+    });
+    await approvalManager.recordContinuation({
+      approvalId: input.approvalId,
+      continuation: "confirmed",
+    });
     await approvalManager.decidePendingApproval({
       approvalId: input.approvalId,
       decidedByUserId: FOUNDER_USER_ID,
@@ -373,11 +409,34 @@ export async function finalizeWorkflowOutcome(input: {
     {
       stage: penultimateStage,
       decision: input.decision,
+      // Same inverse convergence on the run record: reaching this point is the
+      // observation that the continuation ran.
+      continuation: "confirmed",
+      continuationDetail: null,
       rejectionKind,
       reviewSummary: run.reviewSummary,
     },
     { at: timestamp },
   );
+
+  if (input.approvalId) {
+    // A confirmed effect, not an assumed one: this event exists only because the
+    // workflow advanced far enough to finalise. The equivalent statement at
+    // decision time asserts an attempt instead.
+    await eventLogger.log({
+      type:
+        input.decision === "approved" ? "approval.approved" : "approval.rejected",
+      entityType: "approval",
+      entityId: input.approvalId,
+      message:
+        input.decision === "approved"
+          ? `Evan's approval of "${task.title}" took effect: the workflow advanced and finalised.`
+          : `Evan's rejection of "${task.title}" took effect: the workflow advanced and finalised.`,
+      actorId: FOUNDER_USER_ID,
+      actorLabel: "Evan",
+      dedupeKey: `approval-${input.decision}-${input.approvalId}`,
+    });
+  }
 
   if (input.decision === "approved") {
     await eventLogger.log({
@@ -453,97 +512,213 @@ export async function failWorkflowExecution(
   );
 }
 
+/** What a continuation attempt established, which is not the same as what it returned. */
+interface ContinuationAttempt {
+  continuation: ContinuationState;
+  runId: string | null;
+  detail: string | null;
+}
+
+function describeThrown(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
- * Re-completes the wait token for an already-decided approval. A prior attempt
- * may have recorded the decision but failed before completing the token, which
- * would block the run until it times out. Completing an already-completed token
- * is a no-op, so replaying it is safe and always uses the recorded decision
- * rather than the one the caller asked for.
+ * Classifies what the provider told us about the continuation run.
+ *
+ * "Success" means the workflow advanced. It never means a provider call returned
+ * without throwing — that conflation is the whole defect this package exists to
+ * remove, and it is why the only path to `confirmed` here is an actual run id.
+ *
+ * `failed` requires the provider to have said so in the shape of its own result.
+ * Today's SDK signals dispatch errors by throwing, so `failed` is reached only by
+ * a provider that returns a typed failure; that is deliberate, because the state
+ * means "we know it did not start", and a throw does not establish that.
  */
-async function replayDecisionToken(approval: Approval): Promise<void> {
-  if (!approval.waitTokenId) return;
-  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
-    approved: approval.status === "approved",
+function classifyContinuationResult(result: unknown): ContinuationAttempt {
+  if (result && typeof result === "object") {
+    const shape = result as { id?: unknown; ok?: unknown; error?: unknown };
+    if (shape.ok === false) {
+      return {
+        continuation: "failed",
+        runId: null,
+        detail:
+          typeof shape.error === "string"
+            ? shape.error
+            : "The continuation trigger returned a typed failure.",
+      };
+    }
+    if (typeof shape.id === "string" && shape.id.length > 0) {
+      return { continuation: "confirmed", runId: shape.id, detail: null };
+    }
+  }
+  return {
+    continuation: "unconfirmed",
+    runId: null,
+    detail:
+      "The continuation trigger returned no run id, so no run is confirmed started.",
+  };
+}
+
+/**
+ * Starts the run that carries the founder's decision forward.
+ *
+ * Keyed on the execution, so a duplicate decision, a retry of an unconfirmed one,
+ * and two tabs racing all resolve to the same continuation instead of starting a
+ * second one.
+ */
+async function attemptContinuation(input: {
+  executionId: string;
+  approvalId: string;
+  decision: WorkflowDecision;
+}): Promise<ContinuationAttempt> {
+  try {
+    const handle = await tasks.trigger(
+      FOUNDER_REQUEST_CONTINUATION_TASK_ID,
+      {
+        executionId: input.executionId,
+        approvalId: input.approvalId,
+        decision: input.decision,
+      },
+      { idempotencyKey: `founder-continuation-${input.executionId}` },
+    );
+    return classifyContinuationResult(handle as unknown);
+  } catch (error) {
+    // A throw is not a typed failure. The call did not come back, so whether a
+    // run started is unknown — which is `unconfirmed`, not `failed`. Claiming
+    // `failed` here would assert knowledge we do not have.
+    return {
+      continuation: "unconfirmed",
+      runId: null,
+      detail: describeThrown(error),
+    };
+  }
+}
+
+/** Timeline wording per outcome. Each asserts an attempt or a confirmed start, never an effect. */
+function continuationMessage(
+  attempt: ContinuationAttempt,
+  decision: WorkflowDecision,
+  title: string,
+): string {
+  const choice = `Evan recorded a ${decision} decision for ${title}.`;
+  if (attempt.continuation === "confirmed") {
+    return `${choice} Continuation run ${attempt.runId} confirmed started.`;
+  }
+  if (attempt.continuation === "failed") {
+    return `${choice} The continuation did not start: ${attempt.detail}`;
+  }
+  return `${choice} The continuation is unconfirmed and the workflow is not known to have advanced: ${attempt.detail}`;
+}
+
+/**
+ * Records the founder's decision, then attempts the continuation, then records
+ * what the attempt established — in that order.
+ *
+ * The ordering is inverted from the wait-token design, which completed the token
+ * first so that a throw would leave the approval pending. That protection only
+ * ever engaged on a throw, and the empirically established failure returns
+ * success without throwing, so it did not cover the case that mattered. The
+ * concern it was reaching for — a decided approval whose workflow never
+ * advances — is answered by the continuation field instead: such an approval is
+ * representable, visible, and retryable rather than prevented by an ordering that
+ * could not prevent it.
+ *
+ * Note "recorded", not "recorded durably". Under the ratified P-A posture nothing
+ * here is durable; this is the authority that exists for the current process
+ * lifetime, and the record says only what it can support.
+ *
+ * This is also the replay path. An approval whose decision is recorded but whose
+ * continuation is not confirmed is exactly the case the removed
+ * `replayDecisionToken` existed for, and it is handled here rather than in a
+ * parallel branch that could drift from this one.
+ */
+async function decideFounderRequest(
+  approvalId: string,
+  decision: WorkflowDecision,
+): Promise<DevHqState> {
+  const { approvalManager, workflowRunRepository, eventLogger, stateReader } =
+    getDevHqAdapters();
+  const approval = await approvalManager.getApproval(approvalId);
+  if (!approval) {
+    throw new Error(`Approval not found: ${approvalId}`);
+  }
+
+  if (!approval.executionId) {
+    throw new Error(`Approval is not attached to an execution: ${approvalId}`);
+  }
+
+  // A conflicting decision. The recorded one stands: it is the decision the
+  // continuation was started for, and overwriting it would leave the record
+  // saying one thing while the run does another. Nothing is started, and the
+  // approval never holds both.
+  if (approval.decision && approval.decision !== decision) {
+    await eventLogger.log({
+      type: "approval.decision_conflicted",
+      entityType: "approval",
+      entityId: approvalId,
+      message: `A ${decision} decision was submitted for ${approval.title}, which already carries a ${approval.decision} decision. The recorded decision stands and no second continuation was started.`,
+      actorId: FOUNDER_USER_ID,
+      actorLabel: "Evan",
+      dedupeKey: `approval-conflict-${approvalId}-${decision}`,
+    });
+    return stateReader.getState();
+  }
+
+  // Already confirmed started. Re-triggering would collapse onto the same run
+  // behind the idempotency key, but not calling at all is what makes "exactly one
+  // continuation per decision" a property of this path rather than a property we
+  // are trusting the provider to have.
+  if (approval.decision === decision && approval.continuation === "confirmed") {
+    return stateReader.getState();
+  }
+
+  if (!approval.decision) {
+    const recorded = await approvalManager.recordDecisionIntent({
+      approvalId,
+      decision,
+    });
+    // Refused: another caller recorded a decision between this read and this
+    // write. Whatever they recorded is authoritative, so nothing is started here.
+    if (!recorded) {
+      return stateReader.getState();
+    }
+  }
+
+  const attempt = await attemptContinuation({
+    executionId: approval.executionId,
+    approvalId,
+    decision,
   });
+
+  await approvalManager.recordContinuation({
+    approvalId,
+    continuation: attempt.continuation,
+  });
+  await workflowRunRepository.updateRun(approval.executionId, {
+    continuation: attempt.continuation,
+    continuationDetail: attempt.detail,
+    ...(attempt.runId ? { continuationRunId: attempt.runId } : {}),
+  });
+
+  await eventLogger.log({
+    type: "approval.decision_recorded",
+    entityType: "approval",
+    entityId: approvalId,
+    message: continuationMessage(attempt, decision, approval.title),
+    actorId: FOUNDER_USER_ID,
+    actorLabel: "Evan",
+  });
+
+  return stateReader.getState();
 }
 
 export async function approveFounderRequest(approvalId: string): Promise<DevHqState> {
-  const { approvalManager, eventLogger, stateReader } = getDevHqAdapters();
-  const approval = await approvalManager.getApproval(approvalId);
-  if (!approval) {
-    throw new Error(`Approval not found: ${approvalId}`);
-  }
-
-  if (approval.status === "approved" || approval.status === "rejected") {
-    await replayDecisionToken(approval);
-    return stateReader.getState();
-  }
-
-  if (!approval.waitTokenId) {
-    throw new Error(`Approval is missing wait token: ${approvalId}`);
-  }
-
-  // Complete the token before recording the decision. If this throws, the
-  // approval stays pending and the founder can retry; recording first would
-  // leave a decided approval whose run never resumes.
-  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
-    approved: true,
-  });
-
-  await approvalManager.approve({
-    approvalId,
-    decidedByUserId: DEV_HQ_ACTORS.founderUserId,
-  });
-
-  await eventLogger.log({
-    type: "approval.approved",
-    entityType: "approval",
-    entityId: approvalId,
-    message: `Evan approved ${approval.title}.`,
-    actorId: FOUNDER_USER_ID,
-    actorLabel: "Evan",
-  });
-
-  return stateReader.getState();
+  return decideFounderRequest(approvalId, "approved");
 }
 
 export async function rejectFounderRequest(approvalId: string): Promise<DevHqState> {
-  const { approvalManager, eventLogger, stateReader } = getDevHqAdapters();
-  const approval = await approvalManager.getApproval(approvalId);
-  if (!approval) {
-    throw new Error(`Approval not found: ${approvalId}`);
-  }
-
-  if (approval.status === "rejected" || approval.status === "approved") {
-    await replayDecisionToken(approval);
-    return stateReader.getState();
-  }
-
-  if (!approval.waitTokenId) {
-    throw new Error(`Approval is missing wait token: ${approvalId}`);
-  }
-
-  // Complete the token before recording the decision, for the same reason as
-  // approveFounderRequest.
-  await wait.completeToken<{ approved: boolean }>(approval.waitTokenId, {
-    approved: false,
-  });
-
-  await approvalManager.reject({
-    approvalId,
-    decidedByUserId: DEV_HQ_ACTORS.founderUserId,
-  });
-
-  await eventLogger.log({
-    type: "approval.rejected",
-    entityType: "approval",
-    entityId: approvalId,
-    message: `Evan rejected ${approval.title}.`,
-    actorId: FOUNDER_USER_ID,
-    actorLabel: "Evan",
-  });
-
-  return stateReader.getState();
+  return decideFounderRequest(approvalId, "rejected");
 }
 
 export async function getDevHqStateSnapshot(): Promise<DevHqState> {

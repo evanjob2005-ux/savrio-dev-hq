@@ -1,13 +1,20 @@
-// P-1 D-1: the negative control, plus the current-behaviour characterization.
+// P-1 D-1, carried onto the split workflow by P-2.
 //
-// Setup for both: an approval with a wait token attached, whose Trigger.dev run
-// is already terminal (cancelled by the Development CLI exiting), with the Dev HQ
-// approval record intact. Then the approve path is exercised.
+// Setup for both tests: an approval whose run 1 ended at the approval gate and
+// was then cancelled by the Development CLI exiting, with the Dev HQ approval
+// record intact. That is the V-2 Step 1B condition — a dead run and a live
+// approval — and it is reproduced here exactly, because what changed is not
+// whether the run can die but what happens when the founder decides afterwards.
 //
-// The first test asserts the CORRECT future behaviour and therefore FAILS at this
-// commit. It is prefixed P2_TARGET so it is unmistakably a target, not a
-// regression. The second test records what the system does today, so the defect
-// is documented as executable fact rather than as a code-trace argument.
+// The first test is P-1's negative control. It asserts the invariant P-2 had to
+// establish and it now passes, so it is an ordinary test rather than an expected
+// fail; see the conversion note in the P-2 report. Not one of its assertions was
+// relaxed in the process.
+//
+// The second test replaces P-1's characterization of the defect. The behaviour it
+// characterized — a decision reported as complete while the run stayed dead — no
+// longer exists to characterize, so what stands in its place is the refutation:
+// the same dead run, and the workflow advances correctly anyway.
 //
 // This file changes no production behaviour and imports no production source it
 // does not already exercise through the public service functions.
@@ -15,22 +22,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 interface SdkHooks {
-  trigger: (id: string, payload: unknown) => Promise<{ id: string }>;
-  completeToken: (
-    tokenId: string,
+  trigger: (
+    id: string,
     payload: unknown,
-  ) => Promise<{ success: boolean }>;
+    options?: { idempotencyKey?: string },
+  ) => Promise<unknown>;
 }
 
 const { hooks } = vi.hoisted(() => ({ hooks: {} as SdkHooks }));
 
 vi.mock("@trigger.dev/sdk", () => ({
   tasks: {
-    trigger: (id: string, payload: unknown) => hooks.trigger(id, payload),
-  },
-  wait: {
-    completeToken: (tokenId: string, payload: unknown) =>
-      hooks.completeToken(tokenId, payload),
+    trigger: (
+      id: string,
+      payload: unknown,
+      options?: { idempotencyKey?: string },
+    ) => hooks.trigger(id, payload, options),
   },
 }));
 
@@ -38,6 +45,7 @@ import { resetDevHqAdapters } from "@/lib/dev-hq/adapters";
 import {
   approveFounderRequest,
   createFounderRequest,
+  finalizeWorkflowOutcome,
   getDevHqStateSnapshot,
   registerApprovalGate,
   runExecutiveReview,
@@ -49,13 +57,13 @@ import {
 } from "@/test/fixtures/trigger-platform";
 
 const RUN_ID = "run_terminal_1f";
-const TOKEN_ID = "wait_token_terminal_1f";
+const CONTINUATION_TASK_ID = "founder-request-continuation";
 
 let platform: FakeTriggerPlatform;
 
 /**
- * Drives the real service path up to the approval gate, then kills the run the
- * way the Development CLI exiting kills it.
+ * Drives the real service path up to the approval gate, ends run 1 the way the
+ * split intends, then kills it the way the Development CLI exiting kills it.
  */
 async function seedApprovalOnCancelledRun() {
   const created = await createFounderRequest({
@@ -72,11 +80,10 @@ async function seedApprovalOnCancelledRun() {
   const approval = await registerApprovalGate({
     executionId: created.execution.id,
     approvalId: review.approvalId!,
-    waitTokenId: TOKEN_ID,
   });
 
-  // The run reaches wait.forToken and suspends there.
-  platform.suspendAtToken(RUN_ID, TOKEN_ID);
+  // Run 1 registers the gate and ends. Nothing is suspended.
+  platform.completeRun(RUN_ID);
   // Then the Development CLI goes away and the platform cancels it.
   platform.endDevSession(RUN_ID);
 
@@ -88,23 +95,21 @@ describe("approve path against an already-terminal Trigger.dev run", () => {
     resetDevHqStore();
     resetDevHqAdapters();
     platform = new FakeTriggerPlatform();
-    hooks.trigger = async () => platform.startRun(RUN_ID);
-    hooks.completeToken = (tokenId, payload) =>
-      platform.completeToken(tokenId, payload);
+    hooks.trigger = async (id, payload, options) => {
+      if (id === CONTINUATION_TASK_ID) {
+        return platform.triggerContinuation(payload, options);
+      }
+      return platform.startRun(RUN_ID);
+    };
   });
 
-  // Marked `.fails` deliberately. This asserts the invariant P-2 must establish,
-  // and it does not hold at this commit — so the expected outcome today is
-  // failure, and Vitest reports it as an expected fail rather than a red suite.
-  // If P-2 lands correctly this test will PASS, which makes `.fails` throw
-  // "Expect test to fail" and turns the suite red. That is intended: it forces
-  // the conversion from `it.fails` to `it` to be a deliberate, reviewed step
-  // rather than something that can be forgotten.
-  it.fails("P2_TARGET: renders no completed approval while the workflow has not advanced", async () => {
+  it("P2_TARGET: renders no completed approval while the workflow has not advanced", async () => {
     const { created, approval } = await seedApprovalOnCancelledRun();
 
-    // Preconditions: token attached, approval intact, run dead.
-    expect(approval.waitTokenId).toBe(TOKEN_ID);
+    // The continuation cannot be confirmed to have started.
+    platform.continuationBehaviour = "no_run_id";
+
+    // Preconditions: approval intact, run dead.
     expect(approval.status).toBe("pending");
     expect(platform.statusOf(RUN_ID)).toBe("cancelled");
     expect(platform.errorOf(RUN_ID)).toBe(DEV_SESSION_ENDED);
@@ -135,58 +140,68 @@ describe("approve path against an already-terminal Trigger.dev run", () => {
     ).toBe(false);
     expect(run?.decision).not.toBe("approved");
     expect(run?.stage).not.toBe("completed");
+
+    // And the state that replaced the false success is visible rather than
+    // merely absent: the decision is recorded, the continuation is not confirmed,
+    // and both are readable so the condition can be retried and reconciled.
+    expect(stored?.decision).toBe("approved");
+    expect(stored?.continuation).toBe("unconfirmed");
+    expect(run?.continuation).toBe("unconfirmed");
+    expect(run?.continuationDetail).toContain("no run id");
+    expect(run?.continuationRunId).toBeNull();
   });
 
-  it("characterizes current behaviour: reports a decision while the run stays dead", async () => {
+  it("advances correctly on the same dead run, which the split makes harmless", async () => {
     const { created, approval } = await seedApprovalOnCancelledRun();
 
-    const state = await approveFounderRequest(approval.id);
+    await approveFounderRequest(approval.id);
 
-    // 1. The token was completed against the dead run, and returned success.
-    expect(platform.completeTokenCalls).toHaveLength(1);
-    expect(platform.completeTokenCalls[0]).toMatchObject({
-      tokenId: TOKEN_ID,
-      payload: { approved: true },
-      runStatusAtCall: "cancelled",
-      result: { success: true },
+    // 1. A continuation run started. It is a new run, not a resumption of the
+    //    dead one, which is why the dead one no longer matters.
+    expect(platform.continuations).toHaveLength(1);
+    expect(platform.continuations[0].payload).toMatchObject({
+      executionId: created.execution.id,
+      approvalId: approval.id,
+      decision: "approved",
+    });
+    expect(platform.statusOf(RUN_ID)).toBe("cancelled");
+    expect(platform.statusOf(platform.continuations[0].runId)).toBe("executing");
+
+    // 2. The decision is recorded and the continuation is confirmed started, but
+    //    the approval is not yet complete: starting is not finishing.
+    const midflight = await getDevHqStateSnapshot();
+    const inProgress = midflight.approvals.find((a) => a.id === approval.id);
+    expect(inProgress?.decision).toBe("approved");
+    expect(inProgress?.continuation).toBe("confirmed");
+    expect(inProgress?.status).toBe("pending");
+    expect(inProgress?.decidedAt).toBeNull();
+
+    // 3. The continuation does what the continuation task does: it finalises.
+    await finalizeWorkflowOutcome({
+      executionId: created.execution.id,
+      decision: "approved",
+      approvalId: approval.id,
     });
 
-    // 2. No continuation. The run never resumed, so the workflow never advanced.
-    expect(platform.continuations).toHaveLength(0);
-    expect(platform.statusOf(RUN_ID)).toBe("cancelled");
-
-    // 3. The approval nonetheless reads approved.
+    const state = await getDevHqStateSnapshot();
     const stored = state.approvals.find((a) => a.id === approval.id);
-    expect(stored?.status).toBe("approved");
-    expect(stored?.decidedAt).not.toBeNull();
-    expect(stored?.decidedByUserId).not.toBeNull();
-
-    // 4. A timeline event asserts a completed approval to the founder.
-    const event = state.events.find(
-      (e) => e.type === "approval.approved" && e.entityId === approval.id,
-    );
-    expect(event?.message).toBe(`Evan approved ${approval.title}.`);
-    expect(event?.actorLabel).toBe("Evan");
-
-    // 5. No finalization occurred. The run is still parked at the approval gate,
-    //    the execution never completed, and no workflow.completed event exists.
     const run = state.workflowRuns.find(
       (r) => r.executionId === created.execution.id,
     );
-    expect(run?.stage).toBe("founder_approval_required");
-    expect(run?.decision).toBeNull();
+    const execution = state.executions.find((e) => e.id === created.execution.id);
 
-    const execution = state.executions.find(
-      (e) => e.id === created.execution.id,
-    );
-    expect(execution?.status).toBe("running");
-    expect(execution?.completedAt).toBeNull();
-
-    expect(state.events.some((e) => e.type === "workflow.completed")).toBe(
-      false,
-    );
+    // 4. Only now does anything read as a completed approval.
+    expect(stored?.status).toBe("approved");
+    expect(stored?.decidedAt).not.toBeNull();
+    expect(stored?.decidedByUserId).not.toBeNull();
+    expect(run?.stage).toBe("completed");
+    expect(run?.decision).toBe("approved");
+    expect(execution?.status).toBe("succeeded");
     expect(
-      state.events.some((e) => e.type === "founder_request.approved"),
-    ).toBe(false);
+      state.events.some(
+        (e) => e.type === "approval.approved" && e.entityId === approval.id,
+      ),
+    ).toBe(true);
+    expect(state.events.some((e) => e.type === "workflow.completed")).toBe(true);
   });
 });

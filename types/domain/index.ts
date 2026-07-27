@@ -62,8 +62,12 @@ export type {
   ConnectedServiceKind,
 } from "./connected-service";
 export type {
+  ContinuationState,
   FounderRequestInput,
   FounderRequestWorkflowStage,
+  RunLineageEntry,
+  RunLineageRecordName,
+  RunLineageRole,
   WorkflowDecision,
   WorkflowRejectionKind,
   WorkflowRunRecord,

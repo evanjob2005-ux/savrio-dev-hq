@@ -4,9 +4,17 @@
 // it references — because the invariant is about the shape of the repository, not
 // about runtime behaviour.
 //
-// Exactly five wait.* sites exist: three wait.completeToken, one wait.createToken,
-// one wait.forToken. P-2 removes or relocates these. This test fails if any is
-// added or removed, so that change is deliberate and visible rather than silent.
+// At P-1 exactly five wait.* sites existed: three wait.completeToken, one
+// wait.createToken, one wait.forToken. P-2 removed all five, so the inventory is
+// now empty and each count invariant is zero — the strongest form each of them
+// can take, not a relaxed one.
+//
+// Zero is the invariant that matters. Founder Decision A1 (R3) eliminated the
+// long-lived token suspension and Decision B1 amended E-3 so no workflow may
+// place its sole continuation authority in P-A state; reintroducing wait.forToken
+// or wait.completeToken would reinstate exactly that, so it requires an ADR
+// change and must not pass unnoticed. This test fails the build if any wait.*
+// site reappears.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -109,42 +117,34 @@ describe("wait.* call-site inventory", () => {
     expect(files.some((file) => /\.test\.tsx?$/.test(file))).toBe(false);
   });
 
-  it("has exactly three wait.completeToken sites, all in the founder-request service", () => {
-    const found = sitesFor("completeToken");
-    expect(found).toHaveLength(3);
-    expect([...new Set(found.map((site) => site.file))]).toEqual([SERVICE]);
+  it("has no wait.completeToken site, in the founder-request service or anywhere else", () => {
+    // Was three, all in SERVICE. Completing a token was the call that returned
+    // success while producing no continuation.
+    expect(sitesFor("completeToken")).toEqual([]);
   });
 
-  it("has exactly one wait.createToken site, in the founder-request workflow", () => {
-    const found = sitesFor("createToken");
-    expect(found).toHaveLength(1);
-    expect(found[0].file).toBe(WORKFLOW);
+  it("has no wait.createToken site, in the founder-request workflow or anywhere else", () => {
+    // Was one, in WORKFLOW. Nothing mints a waitpoint any more.
+    expect(sitesFor("createToken")).toEqual([]);
   });
 
-  it("has exactly one wait.forToken site, in the founder-request workflow", () => {
-    const found = sitesFor("forToken");
-    expect(found).toHaveLength(1);
-    expect(found[0].file).toBe(WORKFLOW);
+  it("has no wait.forToken site, in the founder-request workflow or anywhere else", () => {
+    // Was one, in WORKFLOW. This was the suspension itself: the run parked here
+    // and its only way forward was a token nothing durable guaranteed.
+    expect(sitesFor("forToken")).toEqual([]);
   });
 
   it("introduces no other wait.* primitive anywhere in production source", () => {
-    expect([...new Set(sites.map((site) => site.method))].sort()).toEqual([
-      "completeToken",
-      "createToken",
-      "forToken",
-    ]);
-    expect(sites).toHaveLength(5);
+    expect([...new Set(sites.map((site) => site.method))].sort()).toEqual([]);
+    expect(sites).toHaveLength(0);
   });
 
   it("records the line locations as they stand at this commit", () => {
-    // Kept separate from the count invariants above so an unrelated line shift in
-    // either file is distinguishable from a call site being added or removed.
-    expect(sites).toEqual([
-      { file: SERVICE, line: 465, method: "completeToken" },
-      { file: SERVICE, line: 489, method: "completeToken" },
-      { file: SERVICE, line: 528, method: "completeToken" },
-      { file: WORKFLOW, line: 69, method: "createToken" },
-      { file: WORKFLOW, line: 83, method: "forToken" },
-    ]);
+    // Kept separate from the count invariants above, and kept even though it is
+    // now empty. The counts say how many sites exist; this says where. While the
+    // inventory is empty the two agree trivially, but the moment a site is
+    // reintroduced this is what names the file and line, and a benign line shift
+    // in either file stays distinguishable from a call site being added.
+    expect(sites).toEqual([]);
   });
 });

@@ -1,18 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { triggerMock, completeTokenMock } = vi.hoisted(() => ({
-  triggerMock: vi.fn(async () => ({ id: "run-test-1" })),
-  completeTokenMock: vi.fn(async () => undefined),
+const { triggerMock } = vi.hoisted(() => ({
+  triggerMock: vi.fn(
+    async (...args: [string, unknown, { idempotencyKey?: string }?]) => ({
+      id:
+        args[0] === "founder-request-continuation"
+          ? "run-continuation-1"
+          : "run-test-1",
+    }),
+  ),
 }));
 
 vi.mock("@trigger.dev/sdk", () => ({
   tasks: {
     trigger: triggerMock,
   },
-  wait: {
-    completeToken: completeTokenMock,
-  },
 }));
+
+/** Continuation dispatches only, so the "exactly one" assertions are unambiguous. */
+function continuationCalls() {
+  return triggerMock.mock.calls.filter(
+    (call) => call[0] === "founder-request-continuation",
+  );
+}
 
 import { getDevHqAdapters, resetDevHqAdapters } from "@/lib/dev-hq/adapters";
 import {
@@ -46,7 +56,6 @@ async function seedPendingApproval(options?: {
   const approval = await registerApprovalGate({
     executionId: created.execution.id,
     approvalId: review.approvalId!,
-    waitTokenId: "wait-token-1",
   });
 
   return { created, review, approval };
@@ -57,8 +66,6 @@ describe("founder-request repository abstraction", () => {
     resetDevHqStore();
     resetDevHqAdapters();
     triggerMock.mockClear();
-    completeTokenMock.mockClear();
-    triggerMock.mockResolvedValue({ id: "run-test-1" });
   });
 
   it("creates a founder request through the repository adapters", async () => {
@@ -139,19 +146,30 @@ describe("founder-request repository abstraction", () => {
     const { created, approval } = await seedPendingApproval();
 
     const first = await approveFounderRequest(approval.id);
-    expect(
-      first.approvals.find((item) => item.id === approval.id)?.status,
-    ).toBe("approved");
-    expect(completeTokenMock).toHaveBeenCalledWith("wait-token-1", {
-      approved: true,
+    const afterFirst = first.approvals.find((item) => item.id === approval.id);
+    // The decision is recorded and the continuation is confirmed started. The
+    // approval is not complete yet: starting is not finishing.
+    expect(afterFirst?.decision).toBe("approved");
+    expect(afterFirst?.continuation).toBe("confirmed");
+    expect(afterFirst?.status).toBe("pending");
+    expect(continuationCalls()).toHaveLength(1);
+    expect(continuationCalls()[0][1]).toMatchObject({
+      executionId: created.execution.id,
+      approvalId: approval.id,
+      decision: "approved",
+    });
+    expect(continuationCalls()[0][2]).toMatchObject({
+      idempotencyKey: `founder-continuation-${created.execution.id}`,
     });
 
+    // A repeat starts nothing further.
     const second = await approveFounderRequest(approval.id);
     expect(
-      second.approvals.find((item) => item.id === approval.id)?.status,
+      second.approvals.find((item) => item.id === approval.id)?.decision,
     ).toBe("approved");
-    expect(completeTokenMock).toHaveBeenCalledTimes(2);
+    expect(continuationCalls()).toHaveLength(1);
 
+    // The continuation run finalises, which is what completes the approval.
     const finalized = await finalizeWorkflowOutcome({
       executionId: created.execution.id,
       decision: "approved",
@@ -159,6 +177,12 @@ describe("founder-request repository abstraction", () => {
     });
     expect(finalized.stage).toBe("completed");
     expect(finalized.decision).toBe("approved");
+    expect(finalized.continuation).toBe("confirmed");
+
+    const settled = await getDevHqStateSnapshot();
+    expect(
+      settled.approvals.find((item) => item.id === approval.id)?.status,
+    ).toBe("approved");
 
     const again = await finalizeWorkflowOutcome({
       executionId: created.execution.id,
@@ -175,18 +199,18 @@ describe("founder-request repository abstraction", () => {
     });
 
     const first = await rejectFounderRequest(approval.id);
-    expect(
-      first.approvals.find((item) => item.id === approval.id)?.status,
-    ).toBe("rejected");
-    expect(completeTokenMock).toHaveBeenCalledWith("wait-token-1", {
-      approved: false,
-    });
+    const afterFirst = first.approvals.find((item) => item.id === approval.id);
+    expect(afterFirst?.decision).toBe("rejected");
+    expect(afterFirst?.continuation).toBe("confirmed");
+    expect(afterFirst?.status).toBe("pending");
+    expect(continuationCalls()).toHaveLength(1);
+    expect(continuationCalls()[0][1]).toMatchObject({ decision: "rejected" });
 
     const second = await rejectFounderRequest(approval.id);
     expect(
-      second.approvals.find((item) => item.id === approval.id)?.status,
+      second.approvals.find((item) => item.id === approval.id)?.decision,
     ).toBe("rejected");
-    expect(completeTokenMock).toHaveBeenCalledTimes(2);
+    expect(continuationCalls()).toHaveLength(1);
 
     const finalized = await finalizeWorkflowOutcome({
       executionId: created.execution.id,
@@ -197,6 +221,11 @@ describe("founder-request repository abstraction", () => {
     expect(finalized.stage).toBe("completed");
     expect(finalized.decision).toBe("rejected");
     expect(finalized.rejectionKind).toBe("founder");
+
+    const settled = await getDevHqStateSnapshot();
+    expect(
+      settled.approvals.find((item) => item.id === approval.id)?.status,
+    ).toBe("rejected");
   });
 
   it("reuses a pending approval when executive review is retried", async () => {
@@ -234,7 +263,6 @@ describe("founder-request repository abstraction", () => {
       registerApprovalGate({
         executionId: "exec-missing",
         approvalId: "appr-missing",
-        waitTokenId: "wait-1",
       }),
     ).rejects.toThrow("Workflow run not found: exec-missing");
   });

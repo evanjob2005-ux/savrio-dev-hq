@@ -134,6 +134,8 @@ export const MISSION_CONTROL_PLACEHOLDERS: MissionControlPlaceholders = {
       decidedByUserId: null,
       requestedAt: "2026-07-24T19:45:00.000Z",
       decidedAt: null,
+      decision: null,
+      continuation: "not_attempted",
     },
     {
       id: "appr-498",
@@ -146,6 +148,8 @@ export const MISSION_CONTROL_PLACEHOLDERS: MissionControlPlaceholders = {
       decidedByUserId: null,
       requestedAt: "2026-07-24T17:20:00.000Z",
       decidedAt: null,
+      decision: null,
+      continuation: "not_attempted",
     },
   ],
   recentActivity: [

@@ -2,6 +2,8 @@ import type {
   ApprovalDecisionInput,
   ApprovalManager,
   CreateApprovalInput,
+  RecordContinuationInput,
+  RecordDecisionIntentInput,
 } from "@/types/contracts";
 import type { Approval } from "@/types/domain";
 import { getDevHqStore, saveApproval } from "@/lib/dev-hq/store";
@@ -39,20 +41,32 @@ export class DevApprovalManager implements ApprovalManager {
       decidedByUserId: null,
       requestedAt: input.at ?? nowIso(),
       decidedAt: null,
-      waitTokenId: null,
+      decision: null,
+      continuation: "not_attempted",
     };
     return saveApproval(approval);
   }
 
-  async attachWaitToken(
-    approvalId: string,
-    waitTokenId: string,
-  ): Promise<Approval> {
-    const existing = await this.getApproval(approvalId);
-    if (!existing) {
-      throw new Error(`Approval not found: ${approvalId}`);
+  async recordDecisionIntent(
+    input: RecordDecisionIntentInput,
+  ): Promise<Approval | null> {
+    const existing = await this.getApproval(input.approvalId);
+    // The read and the write are synchronous with no await between them, so two
+    // concurrent deciders cannot both pass this check. A second, conflicting
+    // decision is refused rather than merged: there is no decided-both state to
+    // render, and nothing downstream has to reconcile one.
+    if (!existing || existing.decision) {
+      return null;
     }
-    return saveApproval({ ...existing, waitTokenId });
+    return saveApproval({ ...existing, decision: input.decision });
+  }
+
+  async recordContinuation(input: RecordContinuationInput): Promise<Approval> {
+    const existing = await this.getApproval(input.approvalId);
+    if (!existing) {
+      throw new Error(`Approval not found: ${input.approvalId}`);
+    }
+    return saveApproval({ ...existing, continuation: input.continuation });
   }
 
   async decidePendingApproval(

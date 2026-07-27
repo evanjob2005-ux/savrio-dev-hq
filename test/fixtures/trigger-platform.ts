@@ -1,20 +1,30 @@
-// Test-only fixture added by P-1 (characterization and negative-control tests).
+// Test-only fixture. Introduced by P-1 for the characterization and
+// negative-control tests, and carried forward by P-2 onto the split workflow.
 //
-// It represents the Trigger.dev platform behaviour that Dev HQ's approve path
-// depends on, so the terminal-run condition is expressible at the service
-// boundary without a real Development execution.
+// It represents the Trigger.dev platform behaviour that Dev HQ's decision path
+// depends on, so the conditions that defeated the old design stay expressible at
+// the service boundary without a real Development execution.
 //
-// It models exactly two empirically established facts (V-2 Step 1B, Development
-// environment only) and invents nothing else:
+// EMPIRICALLY ESTABLISHED (V-2 Step 1B, Development environment only):
 //
-//   1. Abrupt loss of the Development CLI cancels a run suspended at
-//      wait.forToken within about one second, with the platform error
-//      "Dev session ended (CLI exited)".
-//   2. wait.completeToken against an already-cancelled run returns
-//      { success: true } and produces NO continuation. It does not throw.
+//   1. Abrupt loss of the Development CLI cancels a run within about one second,
+//      with the platform error "Dev session ended (CLI exited)".
+//   2. wait.completeToken against an already-cancelled run returned
+//      { success: true } and produced NO continuation. It did not throw.
 //
-// Fact 2 is the false-success semantic the approve path's correctness argument
-// depends on being absent. Nothing here is production code, and nothing here is
+// Fact 2 is why the wait-token design was removed: it made "the provider call
+// returned" indistinguishable from "the workflow advanced". Production source no
+// longer calls any wait.* primitive, so this fixture no longer models one — the
+// fact is recorded here because it is the reason the design changed, not because
+// anything still exercises it.
+//
+// Fact 1 is still modelled, and still matters: under the split workflow a run can
+// still die, and the tests assert that a dead run 1 is now harmless.
+//
+// The continuation failure modes below are MODELLED, not empirical. No claim is
+// made that Trigger.dev behaves any particular way when a continuation cannot be
+// dispatched; they exist so the service's own classification of a non-confirming
+// attempt is testable. Nothing here is production code, and nothing here is
 // imported by production source.
 
 /** Platform error recorded when the Development CLI goes away. */
@@ -26,31 +36,48 @@ export type FakeRunStatus =
   | "cancelled"
   | "completed";
 
-/** A run actually resuming from its waitpoint. Absent when the run is dead. */
+/** A continuation run that actually started. Absent when nothing was dispatched. */
 export interface FakeContinuation {
-  tokenId: string;
   runId: string;
   payload: unknown;
+  idempotencyKey: string | null;
 }
 
-export interface FakeCompleteTokenCall {
-  tokenId: string;
+/** Every continuation dispatch attempt, with what the caller was told. */
+export interface FakeContinuationCall {
   payload: unknown;
-  /** Status of the target run at the moment the call was made. */
-  runStatusAtCall: FakeRunStatus | null;
-  /** What the caller was told. */
-  result: { success: boolean };
+  idempotencyKey: string | null;
+  outcome: "started" | "reused" | "no_run_id" | "typed_failure" | "threw";
 }
+
+/**
+ * How the next continuation dispatch behaves.
+ *
+ * - `start`         — a run is created and returned.
+ * - `no_run_id`     — the call returns, carrying nothing that identifies a run.
+ * - `typed_failure` — the call returns an explicit failure result.
+ * - `throw`         — the call does not come back at all.
+ */
+export type FakeContinuationBehaviour =
+  | "start"
+  | "no_run_id"
+  | "typed_failure"
+  | "throw";
 
 export class FakeTriggerPlatform {
   private readonly runs = new Map<string, FakeRunStatus>();
   private readonly runErrors = new Map<string, string>();
-  private readonly tokenRuns = new Map<string, string>();
+  /** Continuation runs already created for an idempotency key. */
+  private readonly keyedRuns = new Map<string, string>();
+  private continuationSeq = 0;
 
-  /** Every resume that actually happened. */
+  /** How the next continuation dispatch behaves. */
+  continuationBehaviour: FakeContinuationBehaviour = "start";
+
+  /** Every continuation that actually started. */
   readonly continuations: FakeContinuation[] = [];
-  /** Every completion attempt, with the run status it really met. */
-  readonly completeTokenCalls: FakeCompleteTokenCall[] = [];
+  /** Every continuation dispatch attempt, started or not. */
+  readonly continuationCalls: FakeContinuationCall[] = [];
 
   /** The workflow run is triggered and begins executing. */
   startRun(runId: string): { id: string } {
@@ -58,13 +85,12 @@ export class FakeTriggerPlatform {
     return { id: runId };
   }
 
-  /** The run reaches wait.forToken and suspends on `tokenId`. */
-  suspendAtToken(runId: string, tokenId: string): void {
-    this.runs.set(runId, "suspended");
-    this.tokenRuns.set(tokenId, runId);
+  /** Run 1 reaches the approval gate and ends normally. This is the split. */
+  completeRun(runId: string): void {
+    this.runs.set(runId, "completed");
   }
 
-  /** Fact 1: the Development CLI exits and the suspended run is cancelled. */
+  /** Fact 1: the Development CLI exits and the run is cancelled. */
   endDevSession(runId: string): void {
     this.runs.set(runId, "cancelled");
     this.runErrors.set(runId, DEV_SESSION_ENDED);
@@ -79,31 +105,59 @@ export class FakeTriggerPlatform {
   }
 
   /**
-   * Fact 2. Reports success regardless of whether anything resumed.
+   * Models tasks.trigger for the continuation task.
    *
-   * A suspended run resumes and records a continuation. A cancelled run resumes
-   * nothing, records no continuation, and the caller is still told success. That
-   * asymmetry — success without continuation — is what P-1 characterizes.
+   * An idempotency key that has already produced a run resolves to that same run
+   * and creates no second one, which is how "exactly one continuation" is
+   * observable here rather than merely asserted.
    */
-  async completeToken(
-    tokenId: string,
+  async triggerContinuation(
     payload: unknown,
-  ): Promise<{ success: boolean }> {
-    const runId = this.tokenRuns.get(tokenId) ?? null;
-    const runStatusAtCall = runId ? this.statusOf(runId) : null;
-    const result = { success: true };
+    options?: { idempotencyKey?: string },
+  ): Promise<{ id: string } | { ok: false; error: string }> {
+    const idempotencyKey = options?.idempotencyKey ?? null;
 
-    if (runId && runStatusAtCall === "suspended") {
-      this.runs.set(runId, "executing");
-      this.continuations.push({ tokenId, runId, payload });
+    if (idempotencyKey) {
+      const existing = this.keyedRuns.get(idempotencyKey);
+      if (existing) {
+        this.continuationCalls.push({
+          payload,
+          idempotencyKey,
+          outcome: "reused",
+        });
+        return { id: existing };
+      }
     }
 
-    this.completeTokenCalls.push({
-      tokenId,
-      payload,
-      runStatusAtCall,
-      result,
-    });
-    return result;
+    if (this.continuationBehaviour === "throw") {
+      this.continuationCalls.push({ payload, idempotencyKey, outcome: "threw" });
+      throw new Error(DEV_SESSION_ENDED);
+    }
+
+    if (this.continuationBehaviour === "typed_failure") {
+      this.continuationCalls.push({
+        payload,
+        idempotencyKey,
+        outcome: "typed_failure",
+      });
+      return { ok: false, error: "No worker is available to run the continuation." };
+    }
+
+    if (this.continuationBehaviour === "no_run_id") {
+      this.continuationCalls.push({
+        payload,
+        idempotencyKey,
+        outcome: "no_run_id",
+      });
+      return { id: "" };
+    }
+
+    this.continuationSeq += 1;
+    const runId = `run_continuation_${this.continuationSeq}`;
+    this.runs.set(runId, "executing");
+    if (idempotencyKey) this.keyedRuns.set(idempotencyKey, runId);
+    this.continuations.push({ runId, payload, idempotencyKey });
+    this.continuationCalls.push({ payload, idempotencyKey, outcome: "started" });
+    return { id: runId };
   }
 }

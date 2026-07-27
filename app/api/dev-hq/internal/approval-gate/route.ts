@@ -10,18 +10,16 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       executionId?: string;
       approvalId?: string;
-      waitTokenId?: string;
     };
-    if (!body.executionId || !body.approvalId || !body.waitTokenId) {
+    if (!body.executionId || !body.approvalId) {
       return NextResponse.json(
-        { error: "executionId, approvalId, and waitTokenId are required." },
+        { error: "executionId and approvalId are required." },
         { status: 400 },
       );
     }
     const approval = await registerApprovalGate({
       executionId: body.executionId,
       approvalId: body.approvalId,
-      waitTokenId: body.waitTokenId,
     });
     return NextResponse.json({ approval });
   } catch (error) {

@@ -39,6 +39,8 @@ export type {
   ApprovalDecisionInput,
   ApprovalManager,
   CreateApprovalInput,
+  RecordContinuationInput,
+  RecordDecisionIntentInput,
 } from "./approval-manager";
 export type {
   EventLogger,

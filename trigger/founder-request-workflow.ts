@@ -1,4 +1,4 @@
-import { metadata, task, wait } from "@trigger.dev/sdk";
+import { metadata, task } from "@trigger.dev/sdk";
 import { getDevHqBaseUrl } from "@/lib/dev-hq/constants";
 import { getDevHqInternalHeaders } from "@/lib/dev-hq/internal-headers";
 
@@ -28,7 +28,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** First real Dev HQ workflow — deterministic, no AI, no code execution. */
+/**
+ * First real Dev HQ workflow — deterministic, no AI, no code execution.
+ *
+ * Run 1 of two. It carries the request through executive review and, when review
+ * passes, registers the approval gate and ends. It does not wait.
+ *
+ * The split is the point (Founder Decision A1, R3). Previously this run suspended
+ * at a waitpoint that held the workflow's only continuation authority, so the run
+ * could die while the approval record survived and neither could repair the
+ * other. Ending here means there is nothing suspended to lose: the founder's
+ * decision starts a fresh run rather than resuming a parked one.
+ */
 export const founderRequestWorkflow = task({
   id: "founder-request-workflow",
   // Only runs once the run has exhausted its retries, so Dev HQ is not marked
@@ -57,45 +68,29 @@ export const founderRequestWorkflow = task({
       metadata.set("stage", "completed");
       return {
         executionId: payload.executionId,
+        outcome: "decided" as const,
         decision: "rejected" as const,
         rejectionKind: "validation" as const,
         summary: review.summary,
       };
     }
 
-    // Keyed so a retry resumes the original waitpoint instead of minting a
-    // second one that nothing will ever complete. The TTL matches the timeout
-    // so a late retry still resolves to the same token.
-    const token = await wait.createToken({
-      timeout: "7d",
-      idempotencyKey: `founder-approval-${payload.executionId}`,
-      idempotencyKeyTTL: "7d",
-      tags: [`execution-${payload.executionId}`],
-    });
-
     metadata.set("stage", "founder_approval_required");
     await postJson("/api/dev-hq/internal/approval-gate", {
       executionId: payload.executionId,
       approvalId: review.approvalId,
-      waitTokenId: token.id,
     });
 
-    const decision = await wait.forToken<{ approved: boolean }>(token).unwrap();
-    const outcome = decision.approved ? "approved" : "rejected";
-    metadata.set("stage", outcome === "approved" ? "approved" : "rejected");
-
-    await postJson("/api/dev-hq/internal/finalize", {
-      executionId: payload.executionId,
-      decision: outcome,
-      rejectionKind: outcome === "rejected" ? "founder" : null,
-      approvalId: review.approvalId,
-    });
-
-    metadata.set("stage", "completed");
+    // Terminal and successful. The workflow has not been abandoned — it has
+    // reached a boundary it is not this run's job to cross. Returning normally is
+    // what makes that boundary observable: a completed run means the gate was
+    // registered, and nothing about the founder's answer is asserted here.
     return {
       executionId: payload.executionId,
-      decision: outcome,
-      rejectionKind: outcome === "rejected" ? ("founder" as const) : null,
+      outcome: "awaiting_founder_decision" as const,
+      decision: null,
+      rejectionKind: null,
+      approvalId: review.approvalId,
       summary: review.summary,
     };
   },

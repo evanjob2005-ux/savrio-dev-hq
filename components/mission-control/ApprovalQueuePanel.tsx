@@ -1,9 +1,10 @@
 // Founder decision gates. Each item is a real pending approval whose workflow
-// run is blocked until a decision is recorded.
+// is waiting on a decision.
 //
-// An approval can only be actioned once its Trigger.dev wait token is attached,
-// so that precondition is shown rather than letting the founder press a button
-// that would fail.
+// An approval can only be actioned once its run has opened the gate, so that
+// precondition is shown rather than letting the founder press a button that
+// would fail. The gate is a run stage, not a wait token: the run that opened it
+// has already ended, and a decision starts a new one.
 
 import { Panel, Badge } from "@/components/ui/primitives";
 import { DataSourceBadge } from "@/components/mission-control/DataSourceBadge";
@@ -39,7 +40,7 @@ export function ApprovalQueuePanel({
       {approvals.length === 0 ? (
         <EmptyState
           title="No pending approvals"
-          detail="When the Executive Orchestrator passes a request through validation it opens a gate here and pauses the run until you approve or reject."
+          detail="When the Executive Orchestrator passes a request through validation it opens a gate here and ends its run. Your decision starts the run that carries the request forward."
         />
       ) : (
         <ul className="divide-y divide-[var(--border)]" role="list">
@@ -114,8 +115,8 @@ export function ApprovalQueuePanel({
                     }}
                     role="status"
                   >
-                    Not actionable yet: the workflow has not attached a wait token to this
-                    approval. Decisions are accepted once the run reaches the approval gate.
+                    Not actionable yet: the workflow has not opened the approval gate for
+                    this request. Decisions are accepted once the run reaches the gate.
                   </p>
                 )}
               </li>

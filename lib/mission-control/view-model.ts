@@ -83,7 +83,11 @@ export interface ApprovalItem {
   task: Task | null;
   project: Project | null;
   run: WorkflowRunRecord | null;
-  /** A pending approval can only be actioned once its wait token is attached. */
+  /**
+   * A pending approval can only be actioned once its run has opened the gate.
+   * There is no wait token to attach any more: the gate is the run stage, and a
+   * decision starts a new run rather than resuming a parked one.
+   */
   actionable: boolean;
 }
 
@@ -96,9 +100,12 @@ export interface AuditRecord {
   status: StatusToken;
   reviewSummary: string | null;
   decision: WorkflowRunRecord["decision"];
+  /** Orthogonal to `decision`: whether the workflow advanced on it. */
+  continuation: WorkflowRunRecord["continuation"];
+  continuationDetail: string | null;
   rejectionKind: WorkflowRunRecord["rejectionKind"];
   triggerRunId: string | null;
-  waitTokenId: string | null;
+  continuationRunId: string | null;
   execution: Execution | null;
   approval: Approval | null;
   updatedAt: string;
@@ -476,14 +483,15 @@ export function buildCommandCenterModel(state: DevHqState): CommandCenterModel {
     .filter((a) => a.status === "pending")
     .map((approval) => {
       const task = taskById.get(approval.taskId) ?? null;
+      const run = approval.executionId
+        ? runByExecutionId.get(approval.executionId) ?? null
+        : null;
       return {
         approval,
         task,
         project: task ? projectById.get(task.projectId) ?? null : null,
-        run: approval.executionId
-          ? runByExecutionId.get(approval.executionId) ?? null
-          : null,
-        actionable: Boolean(approval.waitTokenId),
+        run,
+        actionable: run?.stage === "founder_approval_required",
       };
     });
 
@@ -499,9 +507,11 @@ export function buildCommandCenterModel(state: DevHqState): CommandCenterModel {
       status: WORKFLOW_STAGE[run.stage],
       reviewSummary: run.reviewSummary,
       decision: run.decision,
+      continuation: run.continuation,
+      continuationDetail: run.continuationDetail,
       rejectionKind: run.rejectionKind,
       triggerRunId: run.triggerRunId,
-      waitTokenId: run.waitTokenId,
+      continuationRunId: run.continuationRunId,
       execution: executionById.get(run.executionId) ?? null,
       approval: approvalByExecutionId.get(run.executionId) ?? null,
       updatedAt: run.updatedAt,

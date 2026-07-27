@@ -13,6 +13,18 @@ import { shortStampFromIso } from "@/lib/format";
 import { APPROVAL_STATUS, EXECUTION_STATUS, actorName } from "@/lib/mission-control/status";
 import type { AuditRecord } from "@/lib/mission-control/view-model";
 
+/**
+ * Wording for the continuation dimension. Only `confirmed` says a run started;
+ * the others say plainly that it did not, or that we do not know — which is the
+ * distinction the audit trail exists to preserve.
+ */
+const CONTINUATION_LABEL: Record<AuditRecord["continuation"], string> = {
+  not_attempted: "Not attempted — no decision recorded",
+  confirmed: "Confirmed started",
+  unconfirmed: "Unconfirmed — not known to have started",
+  failed: "Failed — did not start",
+};
+
 function validationOutcome(record: AuditRecord): {
   label: string;
   color: string;
@@ -147,7 +159,14 @@ export function AuditTrailPanel({ records }: { records: AuditRecord[] }) {
                     label="Trigger.dev run"
                     value={record.triggerRunId ?? "Not dispatched"}
                   />
-                  <MetaRow label="Wait token" value={record.waitTokenId ?? "None"} />
+                  <MetaRow
+                    label="Continuation"
+                    value={
+                      record.continuationRunId
+                        ? `${CONTINUATION_LABEL[record.continuation]} — ${record.continuationRunId}`
+                        : CONTINUATION_LABEL[record.continuation]
+                    }
+                  />
                   <MetaRow
                     label="Last updated"
                     value={`${shortStampFromIso(record.updatedAt)} UTC`}
