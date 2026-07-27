@@ -308,7 +308,19 @@ texts are supplied.
 | E-11 / A-P4 implementation authority | Governance | **RESOLVED** 2026-07-27 — granted to the Lead Software Engineer, package-scoped under the Main Coordinator. Does not permit self-selected or expanded scope |
 | E-1 / E-2 hosting target and Web Push scope | Founder decision | **HELD OPEN** — H-AQ is the provisional direction, not ratified; pending V-2 |
 | E-12 `NODE_ENV=production` internal-route barrier | Founder decision | **HELD OPEN — newly surfaced.** H-AQ requires non-production mode; the guard must not be weakened or conditioned while open |
-| V-2 Trigger.dev Development-worker viability | **HIGH** | **Open — authorized.** Blocks H-AQ ratification and all deployment; does not block E-3 or ADR drafting |
+| V-2 Trigger.dev Development-worker viability | **HIGH** | **Open — first attempt UNABLE TO VERIFY.** `V2_VERIFICATION_RECORD.md`. Blocks H-AQ ratification and all deployment; does not block E-3 or ADR drafting |
+| V2-F1 anchor not provisioned to run | High for V-2 only | **Closed by authorization** — exact worktree and `npm ci` granted 2026-07-27. Not a product defect |
+| V2-F2 credentials unavailable to V-2 | High for V-2 only | **Closed by authorization** — Development credential granted for Path B; `DEV_HQ_INTERNAL_TOKEN` not needed for Path B |
+| V2-F3 wait-inventory correction | **MEDIUM** | **Recorded** — one `wait.forToken` at `:83`, preceded by `wait.createToken` at `:69-74`. The prior two-wait wording was a Main Coordinator error, preserved openly |
+| V2-F4 suspend/resume at second-scale only | **MEDIUM** | **Recorded** — 6.7s and 41.7s, single CLI session, no interruption. Must not be cited as restart evidence. Cloud-side, not re-derived by the Coordinator |
+| V2-F5 retries disabled in the Development environment | **HIGH** | **Open** — `trigger.config.ts:8` `enabledInDev: false` confirmed. Whether infrastructure recovery is separate from task retry policy is UNKNOWN. Blocks H-AQ ratification |
+| V2-F6 P-A restart strands in-flight runs | **HIGH** | **Open — code-derived inference, never observed.** Material input to E-1; needs empirical confirmation and an explicit Founder acceptance condition |
+| V2-F7 npx resolves off the pinned CLI version | **LOW** | **Open** — H-AQ runbook must use `npm run trigger:dev`, never network-resolving `npx` |
+| V2-F8 E-3 process-start marker absent | **MEDIUM — unassigned obligation** | **Open** — confirmed absent; no package owns it. Assign to whichever package first implements Mission Control read models or the persistence-disclosure surface |
+| V2-F9 sweeper has never executed | **LOW / MEDIUM** | **Open — cloud-side, not re-derived.** Leaves V2-5 unanswered; needs an uninterrupted baseline first |
+| V2-CORRECTION-1 long-report transmission | Process | **Binding** — deliver long reports in numbered, independently parseable sections so duplication or truncation is detectable. Fourth transmission failure in this project |
+| Path A real end-to-end V-2 | Gate | **BLOCKED** — not authorized until Path B is complete and reconciled. A synthetic probe must not substitute for it |
+| Multi-day V-2 observation | Gate | **BLOCKED** — not authorized; only warranted if Step 0, Path B, and Path A all pass |
 | PKGE-HAZARD-1 worker-bundle second store | **MEDIUM** architectural constraint | **Open** — helpers pure at anchor; worker imports must be limited to pure functions, types, and safe utilities |
 | SEC-1…SEC-14 reconciliation obligation | **Mandatory** for ADR-0003 | **Open** — readable at `SPRINT_1F_MISSION_CONTROL_LITE.md` §10.2:707-720. Package E wrongly recorded them unreadable |
 | SEC-6 / CR-1 predictable capability minting | **HIGH** — pre-deployment blocker | **Open** — `review-service.ts:354` uses `nextId("rvt")`; CSPRNG required before generalizing the capability pattern |
