@@ -158,14 +158,7 @@ jobs:
           export AUDIT_EXIT="$audit_exit"
           echo "npm audit exited with code ${audit_exit}."
 
-          # Production-only pass, so an advisory that ships can be distinguished
-          # from one that exists solely in the build toolchain. A failure here is
-          # non-fatal: the policy below treats a missing prod report as "cannot
-          # prove dev-only", which is the conservative direction.
-          npm audit --omit=dev --json > audit-prod.json 2> audit-prod.err || true
-
           python <<'PYTHON'
-          import datetime
           import json
           import os
           import sys
@@ -217,95 +210,22 @@ jobs:
           counts = {level: vulns[level] for level in order}
           critical = counts["critical"]
           high = counts["high"]
-
-          # ---- Accepted-exception policy -------------------------------------
-          # A blanket "block on high or critical" gate is only honest while every
-          # high and critical is fixable. Here they are not: npm offers a "fix"
-          # for each one that is a MAJOR DOWNGRADE (Next 16 -> 9, Trigger.dev
-          # 4.5 -> 1.0), which would break the application to satisfy a scanner.
-          # So the gate accepts a dated, reasoned exception list and fails on:
-          #   * any critical/high NOT on the list           (something new)
-          #   * any exception past its expiry               (stale acceptance)
-          #   * any exception no longer matching an advisory (stale entry)
-          # The result still fails closed; it just fails on new risk instead of
-          # on a permanent backlog nobody can action.
-          EXCEPTIONS_PATH = ".github/audit-exceptions.json"
-
-          try:
-              with open(EXCEPTIONS_PATH, "r", encoding="utf-8") as handle:
-                  accepted_doc = json.load(handle)
-          except (OSError, ValueError) as error:
-              fail_scanner(f"could not read {EXCEPTIONS_PATH} ({error})")
-
-          accepted = {e["package"]: e for e in accepted_doc.get("exceptions", [])}
-
-          # Which packages actually ship. If the production report is unusable,
-          # every advisory is treated as production scope.
-          try:
-              with open("audit-prod.json", "r", encoding="utf-8") as handle:
-                  prod_packages = set(json.load(handle).get("vulnerabilities", {}))
-              prod_known = True
-          except (OSError, ValueError):
-              prod_packages = None
-              prod_known = False
-              print("::warning::Production-only audit unavailable; treating all "
-                    "advisories as production scope.")
-
-          blocking = {
-              name: entry for name, entry in report.get("vulnerabilities", {}).items()
-              if entry.get("severity") in ("critical", "high")
-          }
-
-          today = datetime.date.today()
-          unaccepted, expired, stale = [], [], []
-
-          for name, entry in sorted(blocking.items()):
-              scope = "prod" if (not prod_known or name in prod_packages) else "dev"
-              exception = accepted.get(name)
-              if exception is None:
-                  unaccepted.append((name, entry["severity"], scope))
-                  continue
-              try:
-                  expiry = datetime.date.fromisoformat(exception["expires"])
-              except (KeyError, ValueError):
-                  fail_scanner(f"exception for '{name}' has a missing or invalid 'expires'")
-              if expiry < today:
-                  expired.append((name, exception["expires"]))
-
-          for name in sorted(accepted):
-              if name not in blocking:
-                  stale.append(name)
-
-          for name, severity, scope in unaccepted:
-              print(f"::error::Unaccepted {severity} advisory in '{name}' ({scope} scope). "
-                    f"Fix it, or add a dated exception with a reason to {EXCEPTIONS_PATH}.")
-          for name, when in expired:
-              print(f"::error::Accepted exception for '{name}' expired on {when}. "
-                    f"Re-verify the advisory is still unfixable and renew, or remove it.")
-          for name in stale:
-              print(f"::error::Exception for '{name}' no longer matches any advisory. "
-                    f"Remove it from {EXCEPTIONS_PATH} so the list cannot outlive its reasons.")
-
-          policy_pass = not (unaccepted or expired or stale)
+          # Security policy: High and Critical block production readiness.
+          policy_pass = (critical + high) == 0
 
           for level in order:
               if counts[level]:
-                  print(f"::notice::npm audit found {counts[level]} {level} vulnerabilities.")
-
-          prod_blocking = sum(
-              1 for name in blocking
-              if not prod_known or name in prod_packages)
+                  marker = "error" if level in ("critical", "high") else "warning"
+                  print(f"::{marker}::npm audit found {counts[level]} {level} vulnerabilities.")
 
           write_summary([
               "## npm Audit",
               "",
               "- Scanner status: **succeeded**",
               f"- npm audit exit code: {exit_code}",
-              f"- Critical: {critical} | High: {high}",
-              f"- High/critical reaching production: **{prod_blocking}** of {len(blocking)}",
-              f"- Accepted exceptions: {len(accepted)}",
-              f"- Unaccepted: {len(unaccepted)} | Expired: {len(expired)} | Stale: {len(stale)}",
-              f"- Policy: {'PASS' if policy_pass else 'FAIL'}",
+              f"- Critical: {critical}",
+              f"- High: {high}",
+              f"- Policy (block on High or Critical): {'PASS' if policy_pass else 'FAIL'}",
               "",
               "| Severity | Count |",
               "| --- | --- |",
@@ -313,12 +233,9 @@ jobs:
           ])
 
           if not policy_pass:
-              print("::error::npm audit policy failed: "
-                    f"{len(unaccepted)} unaccepted, {len(expired)} expired, "
-                    f"{len(stale)} stale.")
+              print(f"::error::npm audit policy failed: {critical} critical, {high} high.")
               sys.exit(1)
-          print(f"npm audit passed: {len(blocking)} high/critical advisories, all "
-                f"covered by unexpired accepted exceptions.")
+          print("npm audit passed: no high or critical vulnerabilities.")
           PYTHON
 
   dependency-review:
