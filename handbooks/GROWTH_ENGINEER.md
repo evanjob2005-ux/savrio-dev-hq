@@ -73,7 +73,7 @@ Works closely with:
 - Lead Software Engineer
 - AI/LLM Engineer
 - Visual UI Designer
-- Claude Design Engineer
+- Design Engineer
 
 ---
 

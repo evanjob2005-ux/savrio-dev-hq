@@ -165,7 +165,7 @@ passes today would prove nothing.
 | Artifact | Authority |
 |---|---|
 | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` | Track B technical plan (specialist draft) |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | Approved Mission Control UX |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | Approved Mission Control UX |
 | `docs/decisions/ADR-0001…`, `ADR-0002…` | Architecture |
 | `docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md` | **Committed** Track A obligations |
 | `docs/validation/sprint-1e-overnight-2026-07-26/RATIFICATION_1E_D922F379.md` | Binding Sprint 1E verdict |
@@ -564,7 +564,7 @@ and its AR2-6 ruling **must be disclosed in the artifact**.
 | Implementation engineer | Track A / Track B | **IDLE** — not authorized | Step 2, after F-A1 |
 | Independent Code Reviewer | G-2 | **IDLE** | Step 12, separate clean session |
 | Architecture Reviewer | G-3 | **IDLE** | Step 13, after G-2 closes |
-| Claude Design Engineer | G-1 | **IDLE** | Before step 6 |
+| Design Engineer | G-1 | **IDLE** | Before step 6 |
 | Security owner | G-4 | **IDLE** | Before step 8 hosted deployment |
 | UX / roadmap audit | Read-only | **PENDING** | Not yet received |
 | Repository / dependency audit | Read-only | **PENDING** | Not yet received |
@@ -664,7 +664,7 @@ unavailable:
 | Implementation engineer | Track A | **ACTIVE on 1E-F5** |
 | Independent Code Reviewer | G-2 | **IDLE** — no authorized candidate |
 | Architecture Reviewer | G-3 | **IDLE** — blocked behind G-2 |
-| Claude Design Engineer | G-1 | **IDLE** |
+| Design Engineer | G-1 | **IDLE** |
 | Security owner | G-4 | **IDLE** |
 | **Governance Baseline Agent** | Tag identity | **ACTIVE — escalation open** |
 | UX / roadmap audit | Read-only | **PENDING** |

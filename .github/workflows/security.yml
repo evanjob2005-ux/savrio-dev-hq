@@ -9,9 +9,11 @@ on:
   push:
     branches:
       - main
+      - feature/dev-hq-operating-system
   pull_request:
     branches:
       - main
+      - feature/dev-hq-operating-system
   schedule:
     # Weekly baseline scan, Mondays at 06:00 UTC, to catch newly disclosed
     # issues and secrets committed outside the pull request flow.
@@ -70,21 +72,102 @@ jobs:
           SELF = ".github/workflows/security.yml"
           PEM = "-----BEGIN " + "[A-Z0-9 ]*PRIVATE " + "KEY-----"
 
+          # The generic rule captures the assigned VALUE so it can be judged on
+          # its shape. Filtering by file kind was tried and was wrong: risk is a
+          # property of the value, not of the file it sits in, and *.spec.ts is
+          # exactly where a real staging credential gets pasted.
+          GENERIC_SECRET = re.compile(
+              r"(?i)(?:secret|password|passwd|api[_-]?key|token)"
+              r"\s*[:=]\s*['\"]([^'\"\s]{16,})['\"]")
+
+          # A value is treated as a fixture only if it announces itself as one.
+          # Anything that does not is reported, in every file, including tests.
+          PLACEHOLDER = re.compile(
+              r"(?i)^(test|fake|dummy|example|placeholder|changeme|sample|"
+              r"mock|stub|redacted|dummy|invalid|notreal|your)[-_.]")
+
+          # The prefix alone is NOT sufficient. Staging accounts are routinely
+          # named "test-…" and their passwords are real and working, so an
+          # anchored prefix check would exempt exactly the credential most
+          # likely to be pasted into a spec file. A fixture must also LOOK like
+          # a fixture: lowercase words, no symbols beyond . _ -, no long opaque
+          # segment, and no hex-ish blob. Anything with mixed case, punctuation,
+          # or an entropy-bearing run is treated as real regardless of prefix.
+          FIXTURE_SHAPE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+          HEXISH = re.compile(r"^(?=.*[0-9])(?=.*[a-f])[0-9a-f]{6,}$")
+
+          def looks_synthetic(value):
+              if not PLACEHOLDER.match(value):
+                  return False
+              if not FIXTURE_SHAPE.match(value):
+                  return False
+              for segment in re.split(r"[._-]", value):
+                  if len(segment) > 12 or HEXISH.match(segment):
+                      return False
+              return True
+
+          # .env-format files assign unquoted, so GENERIC_SECRET cannot see them.
+          # Template files are allowed to exist but must not carry a real value.
+          # PASS/DSN/CRED/AUTH/SK are included because SMTP_PASS, SENTRY_DSN and
+          # STRIPE_SK are common and were not matched by the shorter alternation.
+          ENV_ASSIGNMENT = re.compile(
+              r"(?im)^[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD|PASS|DSN"
+              r"|CRED|AUTH|SK)[A-Z0-9_]*\s*=\s*(\S{16,})\s*$")
+
+          # URL-shaped variables are not name-matched, because most are public
+          # endpoints. What matters is an embedded credential, so match the
+          # user:password@host form directly. Covers DATABASE_URL and REDIS_URL
+          # without flagging NEXT_PUBLIC_APP_URL.
+          ENV_URL_CREDENTIAL = re.compile(r"://[^:@/\s]*:([^@/\s]{4,})@")
+
+          # Suppression must be possible without editing this scanner. The
+          # absence of an escape hatch is what turned a two-line false positive
+          # into a rule weakening once already; an inline pragma keeps every
+          # exception an attributable line in a diff instead.
+          ALLOW_PRAGMA = "scanner:allow-secret"
+
+          def _unsuppressed(text, matches):
+              lines = text.split("\n")
+              out = []
+              for match in matches:
+                  line_no = text[:match.start()].count("\n")
+                  line = lines[line_no] if line_no < len(lines) else ""
+                  previous = lines[line_no - 1] if line_no > 0 else ""
+                  if ALLOW_PRAGMA in line or ALLOW_PRAGMA in previous:
+                      continue
+                  out.append(match.group(1))
+              return out
+
+          def generic_secret_hits(text):
+              return _unsuppressed(text, [
+                  m for m in GENERIC_SECRET.finditer(text)
+                  if not looks_synthetic(m.group(1))])
+
+          def env_secret_hits(text):
+              matches = [m for m in ENV_ASSIGNMENT.finditer(text)
+                         if not looks_synthetic(m.group(1))]
+              matches += [m for m in ENV_URL_CREDENTIAL.finditer(text)
+                          if not looks_synthetic(m.group(1))]
+              return _unsuppressed(text, matches)
+
           content_rules = [
               ("Private key block", re.compile(PEM)),
               ("AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
               ("Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
               ("Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}")),
               ("GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}")),
-              ("Generic secret assignment",
-               re.compile(r"(?i)(secret|password|passwd|api[_-]?key|token)"
-                          r"\s*[:=]\s*['\"][^'\"\s]{16,}['\"]")),
           ]
+
+          # A template suffix is recognised wherever it appears at the end of the
+          # name, so .env.local.example and .env.production.template are treated
+          # as templates like .env.example already was. Only the suffix is
+          # trusted: .env.local still fails, which is the case that matters.
+          TEMPLATE_SUFFIXES = (".example", ".sample", ".template")
 
           filename_rules = [
               ("Environment file", lambda b: b == ".env" or (
-                  b.startswith(".env.") and b not in
-                  {".env.example", ".env.sample", ".env.template"})),
+                  b.startswith(".env.")
+                  and not b.endswith(TEMPLATE_SUFFIXES))),
               ("Private key file", lambda b: b in {
                   "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}),
               ("Key or certificate file", lambda b: b.endswith(
@@ -124,6 +207,18 @@ jobs:
               for label, pattern in content_rules:
                   if pattern.search(text):
                       findings.append((name, label))
+
+              # Judged on value shape, in every file including tests. A fixture
+              # must announce itself ("test-", "fake_", "example."); anything
+              # that does not is reported wherever it appears.
+              if generic_secret_hits(text):
+                  findings.append((name, "Generic secret assignment"))
+
+              # Closes the .env gap: template files are exempt from the filename
+              # rule, so without this a real unquoted value in a committed
+              # .env.*.example would pass every control.
+              if base.startswith(".env") and env_secret_hits(text):
+                  findings.append((name, "Secret value in environment file"))
 
           for name, label in findings:
               print(f"::error file={name}::{label} detected.")
@@ -290,3 +385,114 @@ jobs:
               sys.exit(1)
           print("Workflow permissions and action pinning look sound.")
           PYTHON
+
+  static-analysis:
+    name: Static Analysis (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # Pinned for the same reason the actions-hardening job in this file
+      # requires SHA-pinned actions: the tool that executes a blocking gate must
+      # not change semantics underneath it. A Semgrep release altering path-glob
+      # or rule-parsing behaviour would silently change what this gate enforces.
+      - name: Install Semgrep
+        run: pip install --quiet "semgrep==1.145.0"
+
+      - name: Record Semgrep version
+        run: semgrep --version
+
+      # Validated as a separate step so that a malformed rule file is reported
+      # as a rules problem, not misread as the codebase violating a rule.
+      - name: Validate custom rules
+        run: semgrep --validate --config .semgrep/ --metrics=off
+
+      # Positive control. Without this, "0 findings" is ambiguous between "the
+      # rules work and the code is clean" and "the rules matched nothing at
+      # all". The fixtures are known-bad; if the rules stop detecting them, this
+      # step fails even though the real scan would still report success.
+      - name: Verify rules detect known-bad code
+        run: |
+          set -euo pipefail
+          control="$(mktemp -d)"
+          internal="$control/app/api/dev-hq/internal"
+          mkdir -p "$internal/discarded" "$internal/arrow" "$internal/sync" "$control/lib/dev-hq"
+
+          cp .semgrep/fixtures/route-guard-result-discarded.ts "$internal/discarded/route.ts"
+          cp .semgrep/fixtures/route-arrow-no-guard.ts         "$internal/arrow/route.ts"
+          cp .semgrep/fixtures/route-sync-no-guard.ts          "$internal/sync/route.ts"
+          cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
+          cp -r .semgrep "$control/.semgrep"
+
+          cd "$control"
+          semgrep scan --config .semgrep/dev-hq-boundaries.yml \
+            --metrics=off --json > findings.json 2>/dev/null
+
+          # Asserts the exact (path, rule) MAPPING, not a count. A count can be
+          # satisfied by the wrong rules firing twice while the subtlest check
+          # -- the bind-and-return requirement -- has silently regressed.
+          python <<'CONTROL'
+          import json
+          import sys
+
+          EXPECTED = {
+              ("app/api/dev-hq/internal/discarded/route.ts",
+               "dev-hq-internal-route-missing-guard"),
+              ("app/api/dev-hq/internal/arrow/route.ts",
+               "dev-hq-internal-route-missing-guard"),
+              ("app/api/dev-hq/internal/sync/route.ts",
+               "dev-hq-internal-route-missing-guard"),
+              ("lib/dev-hq/token-destructured.ts",
+               "dev-hq-internal-token-verified-outside-guard"),
+          }
+
+          results = json.load(open("findings.json"))["results"]
+          actual = {(r["path"].lstrip("./"), r["check_id"].split(".")[-1])
+                    for r in results}
+
+          missing = EXPECTED - actual
+          for path, rule in sorted(missing):
+              print(f"::error::Rule '{rule}' no longer detects {path}")
+          if missing:
+              print(f"Positive control FAILED: {len(missing)} of "
+                    f"{len(EXPECTED)} known-bad fixtures undetected.")
+              print("A defect class these rules are supposed to catch is now invisible.")
+              print(f"Actually detected: {sorted(actual)}")
+              sys.exit(1)
+
+          print(f"Positive control passed: all {len(EXPECTED)} fixture/rule "
+                f"pairs detected.")
+          for path, rule in sorted(EXPECTED):
+              print(f"  {rule} -> {path}")
+          CONTROL
+
+      - name: Scan with Dev HQ boundary rules
+        run: semgrep scan --config .semgrep/ --error --metrics=off
+
+      # Registry packs run advisory-only. They are broad and community-maintained,
+      # so a new upstream rule must not be able to block an unrelated change.
+      # Boundary rules above are the blocking gate.
+      - name: Scan with registry rulesets (advisory)
+        continue-on-error: true
+        run: semgrep scan --config p/typescript --config p/react --config p/owasp-top-ten --metrics=off
+
+      - name: Static analysis summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Static Analysis (Semgrep)"
+            echo ""
+            echo "- Custom Dev HQ boundary rules: blocking"
+            echo "- Registry rulesets (typescript, react, owasp-top-ten): advisory"
+          } >> "$GITHUB_STEP_SUMMARY"

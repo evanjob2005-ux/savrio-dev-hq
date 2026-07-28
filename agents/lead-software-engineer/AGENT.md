@@ -41,8 +41,8 @@ Receives work from:
 
 - AI Agent Orchestrator
 - Product Owner
-- Claude Design Engineer
-- V0 UI Prototyping Engineer
+- Design Engineer
+- UI Prototyping Engineer
 
 Receives:
 

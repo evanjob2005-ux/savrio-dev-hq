@@ -1,0 +1,61 @@
+# CodeRabbit configuration for Savrio Dev HQ.
+#
+# Purpose: absorb the mechanical review pass — correctness nits, missed edge
+# cases, unhandled errors — so that agent and human review capacity is spent on
+# architecture, authority boundaries, and evidence. This tool is an input to
+# review, not an approver: it holds no authority under the Binding Operating
+# Kernel and cannot advance a candidate.
+
+language: en-US
+
+reviews:
+  # "chill" over "assertive": on a young codebase an assertive profile produces
+  # volume that trains reviewers to skim, which is worse than no review.
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - "feature/.*"
+
+  path_filters:
+    # Documentation is the largest surface in this repository by line count and
+    # is reviewed by people, not by a code reviewer. Excluding it keeps review
+    # spend on executable code.
+    - "!docs/**"
+    - "!**/*.md"
+    - "!**/*.docx"
+    # Generated and vendored output carries no review value.
+    - "!package-lock.json"
+    - "!**/*.tsbuildinfo"
+    - "!playwright-report/**"
+    - "!test-results/**"
+
+  path_instructions:
+    - path: "app/api/dev-hq/internal/**"
+      instructions: >-
+        These are Trigger.dev worker callbacks. Every handler must call
+        rejectInternalDevRequest(request) before any other work and return its
+        result when non-null. Flag any handler that does not, any weakening of
+        the production block, and any path that reads the internal token
+        directly instead of using the guard.
+    - path: "lib/dev-hq/**"
+      instructions: >-
+        Service and adapter layer. Check idempotency, replay convergence, and
+        crash recovery: an operation replayed after interruption must converge
+        to the same final state. Flag stale reads, lost updates, and any state
+        transition that is not recorded as a durable event.
+    - path: "e2e/**"
+      instructions: >-
+        These tests are the executable proof behind Phase 1 exit gates. Flag
+        assertions that could pass while the feature is broken, and any use of
+        arbitrary sleeps in place of deterministic waits.
+
+chat:
+  auto_reply: true

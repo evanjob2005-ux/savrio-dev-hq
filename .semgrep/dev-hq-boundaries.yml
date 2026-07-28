@@ -1,0 +1,134 @@
+# Dev HQ architectural boundary rules.
+#
+# These encode invariants that are otherwise enforced only by prose in the
+# Master Roadmap and by a reviewer noticing. A rule here fails the build, which
+# means the invariant survives reviewer turnover, model changes, and fatigue.
+#
+# Scope discipline: keep this file small and precise. A noisy rule set gets
+# muted, and a muted rule set enforces nothing. Prefer a rule that catches a
+# real class of defect over a rule that catches a style preference.
+#
+# Note on what this file CANNOT do: Semgrep matches code patterns. It cannot
+# enforce "only certain people may change these files" — that is CODEOWNERS
+# plus branch protection with required code-owner review.
+
+rules:
+  - id: dev-hq-internal-route-missing-guard
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      This internal Dev HQ route handler does not call rejectInternalDevRequest().
+      Routes under app/api/dev-hq/internal/ are Trigger.dev worker callbacks: they
+      must be blocked in production and token-authenticated in development. A
+      handler without the guard is an unauthenticated write path into the
+      execution pipeline. Call rejectInternalDevRequest(request) as the first
+      statement and return its result when non-null.
+    paths:
+      include:
+        # Anchored per Semgrepignore v2 / gitignore semantics. Unanchored
+        # patterns are reinterpreted as anchored in a coming release, and the
+        # intent here is root-relative, not "any directory named app".
+        - "/app/api/dev-hq/internal/**/route.ts"
+    patterns:
+      # Function declarations and const-arrow exports, async or not. Next.js
+      # accepts all four shapes; matching only `export async function` left
+      # three ways to write an unguarded handler that this rule could not see.
+      - pattern-either:
+          - pattern: "export async function $METHOD($REQ: Request) { ... }"
+          - pattern: "export function $METHOD($REQ: Request) { ... }"
+          - pattern: "export const $METHOD = async ($REQ: Request) => { ... }"
+          - pattern: "export const $METHOD = ($REQ: Request) => { ... }"
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$
+      # The guard's RESULT must be returned, not merely called. Checking only
+      # that the identifier appears lets `rejectInternalDevRequest(request);`
+      # pass with the rejection discarded -- which is the exact defect this
+      # rule exists to catch, written in the most plausible way to write it.
+      - pattern-not: |
+          export async function $METHOD($REQ: Request) {
+            ...
+            $RES = rejectInternalDevRequest($REQ)
+            ...
+            return $RES
+            ...
+          }
+      - pattern-not: |
+          export function $METHOD($REQ: Request) {
+            ...
+            $RES = rejectInternalDevRequest($REQ)
+            ...
+            return $RES
+            ...
+          }
+      - pattern-not: |
+          export const $METHOD = async ($REQ: Request) => {
+            ...
+            $RES = rejectInternalDevRequest($REQ)
+            ...
+            return $RES
+            ...
+          }
+      - pattern-not: |
+          export const $METHOD = ($REQ: Request) => {
+            ...
+            $RES = rejectInternalDevRequest($REQ)
+            ...
+            return $RES
+            ...
+          }
+
+  # Scoped to the VERIFYING side only. Reading the token in order to SEND it is
+  # legitimate and has its own single site; the risk this rule guards against is
+  # a second place that decides whether a token is acceptable, because that is
+  # what silently duplicates and then weakens the fail-closed comparison.
+  - id: dev-hq-internal-token-verified-outside-guard
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      DEV_HQ_INTERNAL_TOKEN is read outside the two files allowed to touch it.
+      The token has exactly one comparison site (internal-guard.ts), which fails
+      closed when the variable is unset, and one transmission site
+      (internal-headers.ts). A third reader is how that fail-closed behaviour
+      gets quietly duplicated and then weakened. Import rejectInternalDevRequest
+      to verify, or getDevHqInternalHeaders to send.
+    paths:
+      include:
+        - "/app/**"
+        - "/lib/**"
+        - "/components/**"
+        - "/trigger/**"
+      exclude:
+        # The single comparison site. This is the guard itself.
+        - "/lib/dev-hq/internal-guard.ts"
+        # The single transmission site: the Trigger worker attaching the token
+        # to an outbound server-to-server callback. Not a verification path.
+        - "/lib/dev-hq/internal-headers.ts"
+        - "**/*.test.ts"
+    pattern-either:
+      - pattern: process.env.DEV_HQ_INTERNAL_TOKEN
+      - pattern: process.env["DEV_HQ_INTERNAL_TOKEN"]
+      # Destructuring reaches the same value and read the same way.
+      - pattern: const { ..., DEV_HQ_INTERNAL_TOKEN, ... } = process.env
+      - pattern: let { ..., DEV_HQ_INTERNAL_TOKEN, ... } = process.env
+
+  # Deliberately a regex rather than a JSX structural pattern: this must behave
+  # identically across .ts and .tsx without depending on language-ID handling.
+  # ERROR, not WARNING. The scan step runs with --error, which exits non-zero on
+  # a finding of ANY severity, so a rule labelled advisory would block the build
+  # regardless. The label now matches the behaviour. A reviewed, sanitised use
+  # is handled with a `nosemgrep: dev-hq-dangerously-set-inner-html` comment
+  # plus the reason, which leaves the exception attributable in the diff.
+  - id: dev-hq-dangerously-set-inner-html
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      dangerouslySetInnerHTML introduces an XSS sink. Mission Control renders
+      agent- and model-produced text, which must be treated as untrusted input.
+      Render as text, or sanitise explicitly and document why raw HTML is
+      required here.
+    paths:
+      include:
+        - "/app/**"
+        - "/components/**"
+    pattern-regex: dangerouslySetInnerHTML
