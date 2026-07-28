@@ -87,7 +87,7 @@ export interface WorkflowRunRecord {
   decision: WorkflowDecision | null;
   /** Whether the workflow advanced past the founder's decision. */
   continuation: ContinuationState;
-  /** Why the continuation is unconfirmed or failed. Null when there is nothing to explain. */
+  /** Continuation uncertainty, failure, or recovery detail. Null when there is nothing to explain. */
   continuationDetail: string | null;
   /** Set when decision is rejected; distinguishes validation vs founder rejection. */
   rejectionKind: WorkflowRejectionKind | null;

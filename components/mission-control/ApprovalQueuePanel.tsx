@@ -31,7 +31,7 @@ export function ApprovalQueuePanel({
       subtitle={
         approvals.length === 0
           ? "Nothing is waiting on you"
-          : `${approvals.length} run${approvals.length === 1 ? "" : "s"} blocked pending your decision`
+          : `${approvals.length} approval${approvals.length === 1 ? "" : "s"} requiring attention`
       }
       right={<DataSourceBadge source="live" />}
       bodyClassName="p-0"
@@ -46,6 +46,16 @@ export function ApprovalQueuePanel({
         <ul className="divide-y divide-[var(--border)]" role="list">
           {approvals.map(({ approval, task, project, run, actionable }) => {
             const busy = busyApprovalId === approval.id;
+            const terminalContinuationFailure =
+              run?.stage === "failed" &&
+              Boolean(approval.decision) &&
+              approval.continuation === "confirmed";
+            const continuationInFlight =
+              run?.stage === "founder_approval_required" &&
+              Boolean(approval.decision) &&
+              approval.continuation === "confirmed";
+            const decisionLabel =
+              approval.decision === "approved" ? "approval" : "rejection";
             return (
               <li
                 key={approval.id}
@@ -56,7 +66,23 @@ export function ApprovalQueuePanel({
                   <h3 className="min-w-0 text-[12.5px] font-semibold leading-snug text-[var(--text)]">
                     {approval.title}
                   </h3>
-                  <Badge color={COLORS.wait}>Awaiting founder</Badge>
+                  <Badge
+                    color={
+                      terminalContinuationFailure
+                        ? COLORS.err
+                        : continuationInFlight
+                          ? COLORS.run
+                          : COLORS.wait
+                    }
+                  >
+                    {terminalContinuationFailure
+                      ? "Retry required"
+                      : continuationInFlight
+                        ? "Continuation started"
+                        : approval.decision
+                          ? "Retry required"
+                          : "Awaiting founder"}
+                  </Badge>
                 </div>
 
                 <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--text-dim)]">
@@ -83,27 +109,51 @@ export function ApprovalQueuePanel({
                   <MetaRow label="Approval id" value={approval.id} />
                 </dl>
 
+                {terminalContinuationFailure ? (
+                  <p
+                    className="mt-3 rounded-md border px-3 py-2 text-[11px] leading-relaxed"
+                    style={{
+                      borderColor: `${COLORS.err}40`,
+                      background: `${COLORS.err}0f`,
+                      color: COLORS.err,
+                    }}
+                    role="status"
+                  >
+                    The {decisionLabel} decision remains recorded. Its continuation
+                    started but later failed after exhausting retries. Retry the same
+                    decision; changing it is not permitted.
+                  </p>
+                ) : null}
+
                 {actionable ? (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      aria-busy={busy}
-                      onClick={() => onApprove(approval.id)}
-                      className="rounded-md px-3 py-1.5 text-[12px] font-semibold text-[var(--bg)] outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)] disabled:opacity-60"
-                      style={{ background: COLORS.ok }}
-                    >
-                      {busy ? "Working…" : "Approve"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      aria-busy={busy}
-                      onClick={() => onReject(approval.id)}
-                      className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] outline-none transition-colors hover:bg-[var(--surface-3)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)] disabled:opacity-60"
-                    >
-                      Reject
-                    </button>
+                    {approval.decision !== "rejected" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        aria-busy={busy}
+                        onClick={() => onApprove(approval.id)}
+                        className="rounded-md px-3 py-1.5 text-[12px] font-semibold text-[var(--bg)] outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)] disabled:opacity-60"
+                        style={{ background: COLORS.ok }}
+                      >
+                        {busy
+                          ? "Working…"
+                          : approval.decision
+                            ? "Retry approval"
+                            : "Approve"}
+                      </button>
+                    ) : null}
+                    {approval.decision !== "approved" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        aria-busy={busy}
+                        onClick={() => onReject(approval.id)}
+                        className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] outline-none transition-colors hover:bg-[var(--surface-3)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)] disabled:opacity-60"
+                      >
+                        {approval.decision ? "Retry rejection" : "Reject"}
+                      </button>
+                    ) : null}
                   </div>
                 ) : (
                   <p
@@ -115,8 +165,9 @@ export function ApprovalQueuePanel({
                     }}
                     role="status"
                   >
-                    Not actionable yet: the workflow has not opened the approval gate for
-                    this request. Decisions are accepted once the run reaches the gate.
+                    {continuationInFlight
+                      ? `The ${decisionLabel} decision remains recorded. A continuation run is confirmed started; awaiting its final outcome.`
+                      : "Not actionable yet: the workflow has not opened the approval gate for this request. Decisions are accepted once the run reaches the gate."}
                   </p>
                 )}
               </li>

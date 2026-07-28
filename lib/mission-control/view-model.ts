@@ -491,7 +491,12 @@ export function buildCommandCenterModel(state: DevHqState): CommandCenterModel {
         task,
         project: task ? projectById.get(task.projectId) ?? null : null,
         run,
-        actionable: run?.stage === "founder_approval_required",
+        actionable:
+          run?.stage === "founder_approval_required"
+            ? !approval.decision || approval.continuation !== "confirmed"
+            : run?.stage === "failed" &&
+              Boolean(approval.decision) &&
+              approval.continuation === "confirmed",
       };
     });
 

@@ -45,6 +45,8 @@ export const founderRequestContinuation = task({
   onFailure: async ({ payload, error }) => {
     await postJson("/api/dev-hq/internal/fail", {
       executionId: payload.executionId,
+      approvalId: payload.approvalId,
+      decision: payload.decision,
       message:
         error instanceof Error
           ? error.message

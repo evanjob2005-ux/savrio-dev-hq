@@ -412,7 +412,9 @@ export async function finalizeWorkflowOutcome(input: {
       // Same inverse convergence on the run record: reaching this point is the
       // observation that the continuation ran.
       continuation: "confirmed",
-      continuationDetail: null,
+      continuationDetail: run.continuationDetail
+        ? `${run.continuationDetail} Recovery confirmed: the workflow advanced and finalised.`
+        : null,
       rejectionKind,
       reviewSummary: run.reviewSummary,
     },
@@ -478,8 +480,12 @@ export async function finalizeWorkflowOutcome(input: {
 export async function failWorkflowExecution(
   executionId: string,
   message: string,
+  continuationFailure?: {
+    approvalId: string;
+    decision: WorkflowDecision;
+  },
 ): Promise<WorkflowRunRecord> {
-  const { workflowEngine, workflowRunRepository, eventLogger } =
+  const { workflowEngine, workflowRunRepository, approvalManager, eventLogger } =
     getDevHqAdapters();
   const run = await workflowRunRepository.getRun(executionId);
   if (!run) {
@@ -489,6 +495,34 @@ export async function failWorkflowExecution(
     return run;
   }
 
+  let failureMessage = message;
+  if (continuationFailure) {
+    const approval = await approvalManager.getApproval(
+      continuationFailure.approvalId,
+    );
+    if (!approval) {
+      throw new Error(`Approval not found: ${continuationFailure.approvalId}`);
+    }
+    if (approval.executionId !== executionId) {
+      throw new Error(
+        `Approval ${approval.id} is not attached to execution ${executionId}`,
+      );
+    }
+    if (approval.decision !== continuationFailure.decision) {
+      throw new Error(
+        `Continuation failure decision ${continuationFailure.decision} does not match recorded decision ${approval.decision ?? "none"}`,
+      );
+    }
+
+    // Reaching this callback proves that the continuation started, even if its
+    // trigger response raced the worker and had not yet updated this field.
+    await approvalManager.recordContinuation({
+      approvalId: approval.id,
+      continuation: "confirmed",
+    });
+    failureMessage = `Continuation for the recorded ${continuationFailure.decision} decision started, exhausted its retries, and failed: ${message}. The same decision may be retried.`;
+  }
+
   const timestamp = nowIso();
   await workflowEngine.markExecutionFailed(executionId, { at: timestamp });
 
@@ -496,7 +530,7 @@ export async function failWorkflowExecution(
     type: "workflow.failed",
     entityType: "execution",
     entityId: executionId,
-    message,
+    message: failureMessage,
     actorId: null,
     actorLabel: "System",
   });
@@ -505,7 +539,11 @@ export async function failWorkflowExecution(
     executionId,
     {
       stage: "failed",
-      decision: null,
+      decision: continuationFailure?.decision ?? null,
+      continuation: continuationFailure ? "confirmed" : run.continuation,
+      continuationDetail: continuationFailure
+        ? failureMessage
+        : run.continuationDetail,
       rejectionKind: null,
     },
     { at: timestamp },
@@ -571,8 +609,13 @@ async function attemptContinuation(input: {
   executionId: string;
   approvalId: string;
   decision: WorkflowDecision;
+  retryOrdinal?: number;
 }): Promise<ContinuationAttempt> {
   try {
+    const idempotencyKey =
+      input.retryOrdinal === undefined
+        ? `founder-continuation-${input.executionId}`
+        : `founder-continuation-${input.executionId}-retry-${input.retryOrdinal}`;
     const handle = await tasks.trigger(
       FOUNDER_REQUEST_CONTINUATION_TASK_ID,
       {
@@ -580,7 +623,7 @@ async function attemptContinuation(input: {
         approvalId: input.approvalId,
         decision: input.decision,
       },
-      { idempotencyKey: `founder-continuation-${input.executionId}` },
+      { idempotencyKey },
     );
     return classifyContinuationResult(handle as unknown);
   } catch (error) {
@@ -637,8 +680,13 @@ async function decideFounderRequest(
   approvalId: string,
   decision: WorkflowDecision,
 ): Promise<DevHqState> {
-  const { approvalManager, workflowRunRepository, eventLogger, stateReader } =
-    getDevHqAdapters();
+  const {
+    approvalManager,
+    workflowEngine,
+    workflowRunRepository,
+    eventLogger,
+    stateReader,
+  } = getDevHqAdapters();
   const approval = await approvalManager.getApproval(approvalId);
   if (!approval) {
     throw new Error(`Approval not found: ${approvalId}`);
@@ -646,6 +694,10 @@ async function decideFounderRequest(
 
   if (!approval.executionId) {
     throw new Error(`Approval is not attached to an execution: ${approvalId}`);
+  }
+  const run = await workflowRunRepository.getRun(approval.executionId);
+  if (!run) {
+    throw new Error(`Workflow run not found: ${approval.executionId}`);
   }
 
   // A conflicting decision. The recorded one stands: it is the decision the
@@ -665,11 +717,18 @@ async function decideFounderRequest(
     return stateReader.getState();
   }
 
-  // Already confirmed started. Re-triggering would collapse onto the same run
-  // behind the idempotency key, but not calling at all is what makes "exactly one
-  // continuation per decision" a property of this path rather than a property we
-  // are trusting the provider to have.
-  if (approval.decision === decision && approval.continuation === "confirmed") {
+  // A confirmed run normally makes repeats no-ops. A terminally failed run is
+  // different: it did start, so `confirmed` remains truthful, but its failed
+  // stage explicitly opens one same-decision recovery generation.
+  const retryingTerminalFailure =
+    approval.decision === decision &&
+    approval.continuation === "confirmed" &&
+    run.stage === "failed";
+  if (
+    approval.decision === decision &&
+    approval.continuation === "confirmed" &&
+    !retryingTerminalFailure
+  ) {
     return stateReader.getState();
   }
 
@@ -685,21 +744,54 @@ async function decideFounderRequest(
     }
   }
 
+  const priorFailureDetail = retryingTerminalFailure
+    ? run.continuationDetail
+    : null;
+  const retryOrdinal = retryingTerminalFailure
+    ? Math.max(
+        1,
+        run.runLineage.filter(
+          (entry) =>
+            entry.role === "continuation" &&
+            entry.record === "workflow_run",
+        ).length,
+      )
+    : undefined;
   const attempt = await attemptContinuation({
     executionId: approval.executionId,
     approvalId,
     decision,
+    retryOrdinal,
   });
+  const continuationDetail = retryingTerminalFailure
+    ? `${priorFailureDetail ?? "The prior continuation failed after it started."} ${
+        attempt.continuation === "confirmed"
+          ? `Same-decision retry run ${attempt.runId} confirmed started.`
+          : `Same-decision retry is ${attempt.continuation}: ${attempt.detail}`
+      }`
+    : attempt.detail;
 
   await approvalManager.recordContinuation({
     approvalId,
     continuation: attempt.continuation,
   });
   await workflowRunRepository.updateRun(approval.executionId, {
+    ...(retryingTerminalFailure
+      ? {
+          stage: "founder_approval_required" as const,
+          decision,
+        }
+      : {}),
     continuation: attempt.continuation,
-    continuationDetail: attempt.detail,
+    continuationDetail,
     ...(attempt.runId ? { continuationRunId: attempt.runId } : {}),
   });
+
+  // A confirmed same-decision retry means work is running again. Leave the
+  // Execution failed only when the retry did not establish a started run.
+  if (retryingTerminalFailure && attempt.continuation === "confirmed") {
+    await workflowEngine.markExecutionRunning(approval.executionId);
+  }
 
   await eventLogger.log({
     type: "approval.decision_recorded",
