@@ -1496,3 +1496,408 @@ repaired.**
 
 **Independent Codex review was not required and was not sought**, because P-1 remained
 test-only throughout and its scope never expanded.
+
+# 13. PACKAGE P-2 — APPROVAL CONTINUATION REDESIGN. INTEGRATED
+
+Sections 0 through 12 stand unchanged. **P-2 is the first implementation package to pass
+through a full reject-remediate-re-review-integrate cycle under the E-11 package-scoped
+authority model.**
+
+This record carries the fourteen requirements defined by the Founder-accepted integration
+authorization packet. **Requirements 1 through 12 record evidence that already existed
+against immutable objects before integration. Requirements 13 and 14 record execution-time
+evidence, written only from exact observed output.** The three evidence categories —
+pre-integration candidate review, post-integration local validation, and remote CI — are
+kept separate throughout and are never blended.
+
+## 13.1 Requirement 1 — the rejected candidate and the confirmed MEDIUM finding
+
+`candidate-1f-p2-1` was independently reviewed by Codex and **REJECTED**.
+
+Rejected candidate identity, recorded in full:
+
+- Annotated tag: `candidate-1f-p2-1`
+- Tag object: `e2508d4ab5a8e24778ce97d81666c60ce83f66ee`
+- Commit: `b68211e49ba6c8b8c6cefc18b1870783e411cd5a`
+- Tree: `566c1016af5e2d645db601181d518385b838f5a3`
+- Parent: `f210fb7c5ccfbbc76b664360900cccdc4ab2a965`
+
+**This candidate and its annotated tag are permanent review evidence. They must never be
+moved, deleted, amended, recreated, or retagged.**
+
+The confirmed MEDIUM finding, stated in full: a continuation that started successfully and
+later exhausted its retries left a stale, misleading, and unrecoverable approval. The
+observed end state was approval status `pending`, approval decision `approved`, approval
+continuation `confirmed`, workflow stage `failed`, and a second same-decision approve call
+starting no new continuation. The Founder queue listed the approval, rendered it
+non-actionable, and displayed guidance falsely stating that the workflow had never opened
+the approval gate.
+
+The five affected paths:
+
+1. `trigger/founder-request-continuation.ts:45-52`
+2. `lib/dev-hq/founder-request-service.ts:488-512`
+3. `lib/dev-hq/founder-request-service.ts:668-673`
+4. `lib/mission-control/view-model.ts:483-494`
+5. `components/mission-control/ApprovalQueuePanel.tsx:118-119`
+
+## 13.2 Requirement 2 — Coordinator independent confirmation
+
+The Main Coordinator independently read all five paths in the immutable candidate and
+confirmed each one. **The Coordinator additionally established a fact the review had
+understated: `failWorkflowExecution` did not merely omit the Founder's recorded decision —
+it ACTIVELY OVERWROTE it with `null`.** The audit record was therefore contradicted, not
+merely incomplete: the run asserted that no decision had been made while the timeline
+asserted that the Founder had decided.
+
+## 13.3 Requirement 3 — remediation candidate identity
+
+- Annotated tag: `candidate-1f-p2-2`
+- Tag object: `697c0f9b9a0542851c9c09a49ba0d75b57010bd4`
+- Commit: `55c6db79778e5c4c1d2a627828de136e43bac4fd`
+- Tree: `030eab3157b08a3de0ea0bc64142c2ac829bca78`
+- Parent: `b68211e49ba6c8b8c6cefc18b1870783e411cd5a`
+- Branch: `impl/p2-approval-continuation`
+
+This was the candidate identity as frozen and reviewed. Its integration is recorded
+separately, under Requirement 13, from exact observed output.
+
+## 13.4 Requirement 4 — remediation diff and full anchor diff
+
+Remediation diff relative to `candidate-1f-p2-1`: **7 files changed, 579 insertions,
+38 deletions**, with the per-file counts —
+
+1. `app/api/dev-hq/internal/fail/route.ts` — 13 insertions, 0 deletions
+2. `components/mission-control/ApprovalQueuePanel.tsx` — 74 insertions, 23 deletions
+3. `lib/dev-hq/continuation-terminal-failure.test.ts` — 378 insertions, 0 deletions, added
+4. `lib/dev-hq/founder-request-service.ts` — 105 insertions, 13 deletions
+5. `lib/mission-control/view-model.ts` — 6 insertions, 1 deletion
+6. `trigger/founder-request-continuation.ts` — 2 insertions, 0 deletions
+7. `types/domain/founder-request-workflow.ts` — 1 insertion, 1 deletion, documentation
+   comment only
+
+Full diff from the anchor `f210fb7c5ccfbbc76b664360900cccdc4ab2a965`: **28 files changed,
+2366 insertions, 501 deletions.**
+
+## 13.5 Requirement 5 — how the finding was closed, and the authoritative retry rule
+
+The finding was closed at each of the five paths:
+
+1. `trigger/founder-request-continuation.ts` — the real Trigger.dev `onFailure` hook now
+   supplies the approval id and the decision. **This two-line change is what made the
+   entire service-side correction reachable.**
+2. `lib/dev-hq/founder-request-service.ts` — the terminal-failure path preserves the
+   Founder's recorded decision instead of overwriting it with `null`, and records a
+   truthful continuation detail stating that the continuation started, exhausted its
+   retries, failed, and may be retried with the same decision.
+3. `lib/dev-hq/founder-request-service.ts` — the retry-eligibility branch permits a
+   same-decision retry once the run stage is `failed`, and refuses a conflicting decision
+   before reaching it.
+4. `lib/mission-control/view-model.ts` — a decided, started, later-failed approval is
+   actionable, so the false branch is unreachable.
+5. `components/mission-control/ApprovalQueuePanel.tsx` — the approval renders as "Retry
+   required" with an explicit explanation, and the false "the workflow has not opened the
+   approval gate" message is unreachable for that state.
+
+**The correction stayed inside the ratified contract.** The four continuation values remain
+exactly `not_attempted`, `confirmed`, `unconfirmed`, and `failed`.
+
+**The authoritative retry behavior is UNBOUNDED SAME-DECISION RETRY:** one new idempotency
+generation opens after each observed terminal failure, no duplicate dispatch occurs while a
+retry is confirmed active, and conflicting decisions remain prohibited at every generation.
+
+**The implementation report described this as "one same-decision retry." That description
+is WRONG and must not be repeated.** The independent reviewer established the actual rule
+by reading the implementation and testing it.
+
+## 13.6 Requirement 6 — custody disclosure. CLOSED
+
+Roughly 199 insertions and 38 deletions in `candidate-1f-p2-2` were inherited from a prior
+P-2 session whose report was never received. The replacement engineer **disclosed this
+unprompted**, identified three defects in the inherited work — the real Trigger.dev
+failure hook did not pass the approval id or the decision, there was no
+finalization-after-retry coverage, and the test harness routed all callbacks to the failure
+route — and corrected them.
+
+The whole candidate was subsequently reviewed as unattributed work by an independent
+reviewer that was instructed not to assume any line was backed by engineer reasoning.
+**THIS ITEM IS CLOSED by that review.**
+
+## 13.7 Requirement 7 — independent re-review verdict and validation counts
+
+Verdict: **APPROVE WITH FINDINGS.**
+
+The reviewer explicitly stated that it did not author the candidate and was not the
+implementation session. It used a clean detached worktree for review and a **separate
+non-worktree extracted copy** for mutation probes, so no ref-sharing worktree was mutated.
+
+Its validation counts: 31 test files and 383 tests passing with 0 failures; lint 0 errors
+and 0 warnings; typecheck with the incremental-false form reporting 0 type errors;
+production build compiling successfully with 18 static pages generated; 1 Chromium
+end-to-end test passing.
+
+**This is pre-integration candidate-review evidence, produced against the unchanged exact
+candidate `55c6db79778e5c4c1d2a627828de136e43bac4fd`.** It is distinct from the
+post-integration local validation evidence recorded in Requirement 14, and from remote CI,
+which was not rerun because no push was authorized.
+
+## 13.8 Requirement 8 — empirical retry-generation evidence
+
+The reviewer executed two consecutive terminal failure-and-retry cycles against the
+unchanged exact candidate and observed these three idempotency keys:
+
+```
+founder-continuation-exec-1785200752594-3
+founder-continuation-exec-1785200752594-3-retry-1
+founder-continuation-exec-1785200752594-3-retry-2
+```
+
+Three distinct continuation run identities were produced and all three were retained in
+lineage in order.
+
+**This evidence disproves the risk that a second retry would collapse onto the dead first
+retry and reconstruct a false success.** The generation derived from workflow-run lineage
+advanced correctly across both cycles. This is candidate-review evidence.
+
+## 13.9 Requirement 9 — structural mutation probes
+
+Both structural mutation probes bit and recovered during the independent re-review. An
+injected prohibited store import and an injected wait-token call each caused explicit
+assertion failures, the latter naming `trigger/founder-request-continuation.ts:57`, and
+each guard returned to passing after the mutation was restored.
+
+**This establishes that the structural guards are not vacuous.** This is candidate-review
+evidence.
+
+## 13.10 Requirement 10 — the three deferred SMALL findings
+
+1. **Lifecycle-stage vocabulary imprecision** — `lib/dev-hq/founder-request-service.ts`
+   line 781. SMALL. Owner: Product and Architecture. Disposition: future
+   lifecycle-vocabulary or hardening package.
+2. **Retry-button focus restoration** —
+   `components/mission-control/ApprovalQueuePanel.tsx` lines 143 through 175. SMALL.
+   Owner: Design and Frontend accessibility. Disposition: future accessibility hardening
+   package.
+3. **Side-effect-only import detection** —
+   `lib/dev-hq/continuation-import-boundary.test.ts` lines 35 through 36. SMALL.
+   Owner: Code Quality and Engineering. Disposition: structural-test hardening.
+
+**The side-effect-only import blind spot must be hardened BEFORE any future package adds or
+modifies files under `trigger/`**, because that test is the sole enforcement of
+PKGE-HAZARD-1 and its failure mode is silent.
+
+## 13.11 Requirement 11 — architecture review considered and NOT required
+
+Architecture review was considered and not required. The reasons: no contract shape entered
+the candidate; the sole change beneath the `types` directory is one documentation comment
+line replacing one documentation comment line in
+`types/domain/founder-request-workflow.ts`; and the retryable failed-continuation
+representation was already permitted by the approved remediation brief.
+
+**The independent reviewer examined the two closest calls — the backwards stage transition
+and the derived retry-generation rule — and declined to escalate either.**
+
+## 13.12 Requirement 12 — authentication and authorization remain open
+
+**FD5-01, FD5-03, FD5-06, and E-6 remain OPEN.** Authentication and authorization remain
+separate analyses.
+
+**On authentication:** `lib/dev-hq/internal-guard.ts` is byte-identical to the anchor.
+Internal authentication remains possession of the shared internal worker token. That shared
+worker secret is not a Founder principal. The public approve and reject routes remain
+unauthenticated. Founder identity fields remain hardcoded.
+
+**On authorization:** the failure route now accepts a decision from a shared-token holder,
+extending FD5-03's surface. The mitigation is complete against decision injection and
+reversal, because the service verifies that the approval exists, that it belongs to the
+supplied execution, and that the supplied decision exactly equals the already-recorded
+decision. **But this establishes record coherence and NOT caller identity.**
+
+**P-2 receives no authentication credit, receives no caller-identity authorization credit,
+and IS NOT DEPLOYMENT-READY.**
+
+## 13.13 Requirement 13 — execution-time integration evidence
+
+All values below are exact observed output.
+
+**Pre-integration verification, all nine requirements, each PASS:**
+
+1. Coordinator integration worktree confirmed as the `savrio-advance-1f` worktree.
+2. Branch `feature/dev-hq-operating-system`.
+3. HEAD `f210fb7c5ccfbbc76b664360900cccdc4ab2a965`.
+4. Tree `97f4421ec893da117a80fe220c671fd830cfc54c`.
+5. The porcelain status command with all untracked files returned **zero lines**.
+6. `candidate-1f-p2-2` type `tag`, object `697c0f9b9a0542851c9c09a49ba0d75b57010bd4`,
+   peeling to commit `55c6db79778e5c4c1d2a627828de136e43bac4fd`, tree
+   `030eab3157b08a3de0ea0bc64142c2ac829bca78`, parent
+   `b68211e49ba6c8b8c6cefc18b1870783e411cd5a`.
+7. `candidate-1f-p2-1` type `tag`, object `e2508d4ab5a8e24778ce97d81666c60ce83f66ee`,
+   peeling to commit `b68211e49ba6c8b8c6cefc18b1870783e411cd5a`, tree
+   `566c1016af5e2d645db601181d518385b838f5a3`.
+8. Ancestry proven in both directions: `b68211e4` is an ancestor of `55c6db79`, proving the
+   rejected base was not amended, squashed, or rebased; and `f210fb7c` is an ancestor of
+   `55c6db79`, proving a true two-commit fast-forward.
+9. P-3 verified frozen by reference lookup only: `candidate-1f-p3-1` type `tag`, object
+   `79d5186e555cb781fdebc0ed280adb56e62659d4`, commit
+   `021cbf61fe9ac6cb948c3ad7ecf9ebb9a2b5450c`, tree
+   `a5310c454cd7a65a6636a57f24f6308722cf0385`; branch `impl/p3-process-start-marker` at the
+   same commit. **Its worktree was not entered and its files were not inspected.**
+
+**The exact command invoked**, run in the Coordinator integration worktree
+`savrio-advance-1f`:
+
+```
+git merge --ff-only 55c6db79778e5c4c1d2a627828de136e43bac4fd
+```
+
+Exit code: **0**. Standard error was empty. Complete standard output:
+
+```
+Updating f210fb7..55c6db7
+Fast-forward
+ app/api/dev-hq/internal/approval-gate/route.ts     |   6 +-
+ app/api/dev-hq/internal/fail/route.ts              |  13 +
+ components/mission-control/ApprovalQueuePanel.tsx  | 108 +++--
+ components/mission-control/AuditTrailPanel.tsx     |  21 +-
+ data/placeholders/mission-control.ts               |   4 +
+ lib/dev-hq/adapters/dev-approval-manager.ts        |  30 +-
+ lib/dev-hq/adapters/dev-workflow-engine.ts         |   5 +-
+ lib/dev-hq/adapters/dev-workflow-run-repository.ts |  62 ++-
+ lib/dev-hq/approval-continuation.test.ts           | 442 +++++++++++++++++++++
+ lib/dev-hq/approve-path-ordering.test.ts           | 166 +++++---
+ lib/dev-hq/continuation-import-boundary.test.ts    | 153 +++++++
+ lib/dev-hq/continuation-terminal-failure.test.ts   | 378 ++++++++++++++++++
+ .../duplicate-decision-lineage.types.test.ts       | 142 ++++---
+ lib/dev-hq/founder-request-service.test.ts         |  78 ++--
+ lib/dev-hq/founder-request-service.ts              | 439 ++++++++++++++++----
+ lib/dev-hq/founder-request-terminal-run.test.ts    | 165 ++++----
+ lib/dev-hq/trigger-run-lineage.test.ts             | 129 ++++--
+ lib/dev-hq/wait-token-inventory.test.ts            |  60 +--
+ lib/mission-control/view-model.ts                  |  29 +-
+ test/fixtures/trigger-platform.ts                  | 156 +++++---
+ trigger/founder-request-continuation.ts            |  76 ++++
+ trigger/founder-request-workflow.ts                |  49 +--
+ types/contracts/approval-manager.ts                |  34 +-
+ types/contracts/index.ts                           |   2 +
+ types/contracts/workflow-run-repository.ts         |  35 +-
+ types/domain/approval.ts                           |  20 +-
+ types/domain/founder-request-workflow.ts           |  61 ++-
+ types/domain/index.ts                              |   4 +
+ 28 files changed, 2366 insertions(+), 501 deletions(-)
+ create mode 100644 lib/dev-hq/approval-continuation.test.ts
+ create mode 100644 lib/dev-hq/continuation-import-boundary.test.ts
+ create mode 100644 lib/dev-hq/continuation-terminal-failure.test.ts
+ create mode 100644 trigger/founder-request-continuation.ts
+```
+
+**Observed post-integration branch identity**, matching the expected values exactly:
+
+- Branch `feature/dev-hq-operating-system`
+- Commit `55c6db79778e5c4c1d2a627828de136e43bac4fd`
+- Tree `030eab3157b08a3de0ea0bc64142c2ac829bca78`
+
+**No merge commit was created.** The parent listing for the new head returned exactly one
+parent, `b68211e49ba6c8b8c6cefc18b1870783e411cd5a`, so the fast-forward advanced the branch
+reference only and produced no new object.
+
+**Ancestry after integration:** `55c6db79778e5c4c1d2a627828de136e43bac4fd` retains its
+single parent `b68211e49ba6c8b8c6cefc18b1870783e411cd5a`, which retains its single parent
+`f210fb7c5ccfbbc76b664360900cccdc4ab2a965`. Both P-2 commits were confirmed individually
+reachable from the branch tip.
+
+**Tag integrity after integration:** `candidate-1f-p2-1` still resolves through tag object
+`e2508d4ab5a8e24778ce97d81666c60ce83f66ee` to commit
+`b68211e49ba6c8b8c6cefc18b1870783e411cd5a` with tree
+`566c1016af5e2d645db601181d518385b838f5a3`, and remains permanent review evidence.
+`candidate-1f-p2-2` still resolves through tag object
+`697c0f9b9a0542851c9c09a49ba0d75b57010bd4` to commit
+`55c6db79778e5c4c1d2a627828de136e43bac4fd`.
+
+**P-3 was untouched.** Branch `impl/p3-process-start-marker` at
+`021cbf61fe9ac6cb948c3ad7ecf9ebb9a2b5450c`; annotated tag `candidate-1f-p3-1` at tag object
+`79d5186e555cb781fdebc0ed280adb56e62659d4`; tree
+`a5310c454cd7a65a6636a57f24f6308722cf0385`. Its worktree was not entered and its files were
+not inspected.
+
+**Protected production barriers unchanged**, verified by blob hash at the integrated commit
+and identical to the anchor:
+
+```
+1a28e2ad367f802864c86ee31ef8959d38acc2fb  proxy.ts
+5e3c2a3b987e065b5bd3b2c74f2d145def0dfb15  lib/dev-hq/internal-guard.ts
+94840e0aa7d2ed8e49665547346025b597c47cba  lib/dev-hq/actions.ts
+414b567bbbe1a82596d5f4106eff9a8b07dd3889  trigger.config.ts
+2f4d485ca84ee7d01a5527d38b3f83ccc31a63fb  package.json
+3a74684e30d93c8046ef1379439289d9003d514a  package-lock.json
+```
+
+## 13.14 Requirement 14 — execution-time validation and disclosure evidence
+
+**Clean dependency install.** The clean-install command was run in the integration
+worktree, exit code **0**, installing from the integrated lockfile. **No shared or
+junctioned dependency directory was reused.** The install reported 42 inherited dependency
+vulnerabilities; `package.json` and `package-lock.json` are byte-identical to the anchor,
+so these are inherited, not introduced, and belong to a separate dependency-security
+package.
+
+**Validation commands, exit codes, and result counts:**
+
+1. Clean install — exit 0, from the integrated lockfile.
+2. Unit suite — exit 0. **31 test files passed of 31. 383 tests passed of 383. 0
+   failures.**
+3. Lint — exit 0. **0 errors, 0 warnings.**
+4. Typecheck, incremental-false form — exit 0. **0 type errors.** The plain no-emit
+   invocation was not needed; the authoritative incremental-false form was used directly
+   and succeeded, so no environmental failure occurred.
+5. Production build — exit 0. **Compiled successfully. Generating static pages 18 of 18.**
+6. Chromium end-to-end — exit 0. **1 test passed, 0 failures.**
+7. Porcelain status with all untracked files — **zero lines**, both immediately after the
+   fast-forward and after all validation completed.
+
+**Every observed count matched the review-baseline figures exactly. No mismatch occurred.
+No expected figure was adjusted, and no source file was modified to make a validation
+pass.**
+
+**All post-integration validation evidence applies to integrated commit
+`55c6db79778e5c4c1d2a627828de136e43bac4fd`.** Evidence gathered against any other commit is
+not evidence for this integration.
+
+**The three evidence categories, stated separately and never blended:**
+
+1. **Pre-integration candidate-review evidence** — produced by the independent reviewer
+   against `candidate-1f-p2-2`, recorded in 13.7 through 13.9.
+2. **Post-integration local validation evidence** — produced by the Coordinator in the
+   integration worktree, recorded immediately above.
+3. **Remote CI not rerun, because no push was authorized.** The required checks under the
+   active branch ruleset, `Unit and Static Validation` and `End-to-End Smoke`, **did not
+   run.** Remote CI must not be described as passing without exact current run evidence for
+   the integrated commit. **No such evidence exists.**
+
+**Founder authorization boundary.** This integration was authorized as a local fast-forward
+and the creation of this durable record only. **No push, no pull request, no CI trigger,
+and no deployment was authorized.** Any later push or CI execution requires separate
+explicit Founder authorization. **P-3 remains frozen, unrebased, and awaiting separate
+Founder authorization to rebase.**
+
+## 13.15 Disclosed hygiene decision — absolute paths
+
+The packet's Requirement 13 names the Coordinator worktree by absolute path, while its
+Hygiene Requirement 1 forbids machine-specific absolute paths in this record, and the
+governing authorization directs compliance with the stricter control where the two overlap.
+
+**This record therefore identifies the integration worktree by name, `savrio-advance-1f`,
+rather than by absolute path.** All substantive evidence Requirement 13 asks for — the exact
+command, its exit code, and its complete output — is recorded in full. **This deviation is
+disclosed rather than silent**, and it follows the precedent of two earlier occasions in
+this project when machine-specific paths were removed from durable records before commit.
+
+## 13.16 What P-2 integration does not do
+
+1. Does **not** authorize a push, a pull request, a CI run, or a deployment.
+2. Does **not** authorize P-3 rebase, P-3 revalidation, P-4, or P-5.
+3. Does **not** establish Founder authentication and does **not** resolve FD5-01.
+4. Does **not** establish caller-identity authorization and does **not** resolve FD5-03 or
+   FD5-06.
+5. Does **not** implement E-6, persistence, or any of the three deferred SMALL findings.
+6. Does **not** weaken, remove, bypass, or consolidate any production barrier.
+7. Does **not** make P-2 deployment-ready.
