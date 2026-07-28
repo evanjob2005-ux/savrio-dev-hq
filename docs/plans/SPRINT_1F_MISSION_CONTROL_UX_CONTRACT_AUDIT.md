@@ -8,11 +8,11 @@
 
 **Date:** 2026-07-26
 
-**Author role:** Claude Design Engineer (AGENT-004 / ROLE-014)
+**Author role:** Design Engineer (AGENT-004 / ROLE-014)
 
 **Authority:** CONST-001, GOV-001, AGENT-001, ADR-0001, ADR-0002, STANDARD-011 (Accessibility), STANDARD-012 (Documentation)
 
-**Governing design artifact under audit:** `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` (DESIGN-001 v1.2.0)
+**Governing design artifact under audit:** `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` (DESIGN-001 v1.2.0)
 
 **Repository state inspected:** branch `validation/sprint-1e-overnight-2026-07-26` @ HEAD `9069c12`; ratified Sprint 1E baseline `sprint-1e-remediated` → `d922f379`
 
@@ -37,8 +37,8 @@
 | Path | What was read |
 | --- | --- |
 | `AGENTS.md` | In full (AGENT-001, universal handbook) |
-| `agents/claude-design/AGENT.md` | In full |
-| `handbooks/CLAUDE_DESIGN_ENGINEER.md` | In full (ROLE-014) |
+| `agents/design-engineer/AGENT.md` | In full |
+| `handbooks/DESIGN_ENGINEER.md` | In full (ROLE-014) |
 | `standards/ACCESSIBILITY_STANDARD.md` | Header, compliance target, colour/contrast section (STANDARD-011) |
 | `docs/decisions/ADR-0001-execution-manager-and-agent-registry.md` | Structure in full; D4, D5, D6, D7, D8, D9, O1–O6 read directly |
 | `docs/decisions/ADR-0002-review-escalation-and-work-management.md` | E3, E4, E5, E6, E7, E8, E9, and the resolved-decision table read directly |
@@ -47,7 +47,7 @@
 
 | Path | What was read |
 | --- | --- |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | **DESIGN-001 v1.2.0, read in full (4,708 lines)** — §0 through §16.9 and the record notes |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | **DESIGN-001 v1.2.0, read in full (4,708 lines)** — §0 through §16.9 and the record notes |
 
 ### Engineering and programme plans
 
@@ -341,7 +341,7 @@ Each conflict names **the sources involved**, **which authority governs**, and *
 
 | | |
 | --- | --- |
-| **Sources** | `docs/plans/SPRINT_1F_ENTRY_PACKAGE.md` §7 — *"Approved Mission Control UX"* · `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` header — *"awaiting Founder review and Product Owner acceptance"* and §16.9 — **"NOT READY FOR INTEGRATION"** |
+| **Sources** | `docs/plans/SPRINT_1F_ENTRY_PACKAGE.md` §7 — *"Approved Mission Control UX"* · `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` header — *"awaiting Founder review and Product Owner acceptance"* and §16.9 — **"NOT READY FOR INTEGRATION"** |
 | **Governing authority** | `AGENTS.md` § Governing Authority tier 5 (approved product requirements) and § Department Boundaries. A design artifact is approved when Product/the Founder approves it, not when another document describes it as approved. |
 | **Decision owner** | **Founder / Product Owner** |
 | **Consequence while open** | Engineering cannot cite DESIGN-001 as approved requirements; reviewers cannot certify against it as an approved baseline. G-1 (Design review, before implementation) has no approved input. |
@@ -746,7 +746,7 @@ Consolidated from DESIGN-001 §16.6, SPRINT-1F-PLAN §20.3, `SPRINT_1F_ENTRY_PAC
 
 **Task:** Sprint 1F Mission Control UX and roadmap consistency audit (read-only).
 
-**Responsible role:** Claude Design Engineer (AGENT-004 / ROLE-014).
+**Responsible role:** Design Engineer (AGENT-004 / ROLE-014).
 
 **Status:** Complete. Verdict **UX BLOCKED**.
 

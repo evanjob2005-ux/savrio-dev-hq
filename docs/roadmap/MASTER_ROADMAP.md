@@ -38,7 +38,7 @@ Markdown tables, and bold/italic runs became `**`/`_`.
 - Word's rendering of typographic quotes and dashes is preserved as authored.
 - Current SHA-256 (roadmap body only, excluding this registration record), including the
   kernel preamble insertion and amendments A-1 through A-5:
-  `4aa5f8c08fafb2c4d5aa098de16f5a3ac802ccf94dc996d98a7a08a6908630d6`
+  `983337aa05675f838c01f5b14afe0688b707206e20887092f1466dfa18110a18`
 - SHA-256 after the kernel preamble insertion, before the amendments:
   `d7893199946724d07c58d3b66343d37808890cc595093afde0143bfd32b0bf41`
 - SHA-256 of the body **as mechanically converted**, before any change:
@@ -66,7 +66,7 @@ They were inserted verbatim. After insertion, Section 23 matches the Founder-sup
 
 The Founder directed that the roadmap be edited to flow more cleanly toward the intended end
 state, on the explicit basis that **the roadmap's timing was a guess** and that **models will
-converge in capability, so roles must go to whichever performs best.** Four amendments were
+converge in capability, so roles must go to whichever performs best.** Five amendments were
 made. Each is an edit to Founder-supplied text and is listed here in full so the delta from the
 `.docx` is never in doubt.
 
@@ -76,7 +76,7 @@ made. Each is an edit to Founder-supplied text and is listed here in full so the
 | A-2 | §23 kernel, rule 4 | Replaced the vendor-named reviewer roles — *"Codex independent code review, Claude architecture review"* — with *"independent code review, architecture review"*, plus a sentence establishing that these are roles rather than tools and that occupants are recorded under Section 19. |
 | A-3 | §9 Phase 1 Exit Gates | Added a lead-in defining how a gate is passed, and a **Proof** line to each of the six gates naming an executable check. A document asserting a gate was met is explicitly not a proof. |
 | A-4 | §19 Agent Organization | Added *Role Assignment and Model Promotion*: roles are capability contracts, any model may hold any role it can pass, promotion is by measured evidence on a versioned evaluation set, and independence is a property of instance and context rather than vendor. |
-| A-5 | §19 role table, §Agent status template | Renamed the `claude-design` role to `design engineer`. A role named after a vendor is a role assigned to that vendor by default, which is exactly the binding A-4 exists to remove. Renamed repository-wide alongside `v0-engineer` → `ui-prototyping-engineer`. Historical evidence records still carry the former names and were deliberately left unedited. |
+| A-5 | §19 role table, §Agent status template | Renamed the `claude-design` role to `design-engineer`. A role named after a vendor is a role assigned to that vendor by default, which is exactly the binding A-4 exists to remove. Renamed repository-wide alongside `v0-engineer` → `ui-prototyping-engineer`. Historical evidence records still carry the former names and were deliberately left unedited. |
 
 A-2 edits text the Founder supplied verbatim earlier the same day. It was made deliberately:
 the kernel is read before every response, so a vendor name inside it would harden into a fixed
@@ -85,9 +85,9 @@ implementation from independent review is preserved exactly; only the binding of
 named products is removed.
 
 **Consequence for provenance:** the repository file and the source `.docx` now differ by the
-kernel preamble insertion and amendments A-1 through A-4, and by nothing else. Until the
+kernel preamble insertion and amendments A-1 through A-5, and by nothing else. Until the
 Founder re-saves the `.docx`, the general rule below — that the `.docx` governs — is suspended
-for those five deltas, where this file governs. Everything else in this document remains a
+for those six deltas, where this file governs. Everything else in this document remains a
 verbatim conversion of the source.
 
 ### Conversion verification — performed for this registration
@@ -1484,7 +1484,7 @@ Portfolio, workforce, model, quality, architecture, cost, risk, and business int
 | **Role** | **Primary authority** | **Must not substitute for** |
 |---|---|---|
 | Executive / Project Orchestrator | Classify, plan, route, sequence, monitor, choose workflow/collaboration, forecast, accept within authority, communicate. | Implementation approval where independence is required or source-of-truth ownership. |
-| design engineer / Design Agent | UX strategy, flows, information architecture, accessibility, visual design. | Backend implementation or architecture approval. |
+| design-engineer / Design Agent | UX strategy, flows, information architecture, accessibility, visual design. | Backend implementation or architecture approval. |
 | lead-software-engineer | Implementation ownership, tests, documentation, and revision work. | Independent approval of its own work. |
 | independent-code-reviewer | Correctness, regressions, maintainability, tests, edge cases, scope. | Implementation ownership or final architecture authority. |
 | architecture-reviewer | ADR compliance, boundaries, concurrency, replay, recovery, persistence, coupling, architecture gate. | Implementation or Founder approval. |
@@ -2170,7 +2170,7 @@ Use Section 23 as the complete mandatory operating standard for every Founder-fa
 | **Agent / role** | **Status** | **Current assignment** | **Next condition** |
 |---|---|---|---|
 | Executive / Orchestrator | ACTIVE / WAITING | Coordination state | Next routing or gate |
-| design engineer | IDLE / ACTIVE / WAITING | Task or none | Next condition |
+| design-engineer | IDLE / ACTIVE / WAITING | Task or none | Next condition |
 | lead-software-engineer | IDLE / ACTIVE / REVISION | Task or none | Next condition |
 | independent-code-reviewer | IDLE / REVIEWING / COMPLETE | Candidate or none | Next condition |
 | architecture-reviewer | IDLE / REVIEWING / COMPLETE | Candidate or none | Next condition |

@@ -167,7 +167,7 @@ they remain important to preventing regression."*
 |---|---|---|
 | `docs/plans/GOVERNANCE_UPDATE_PLAN.md` | 46 | v7.1, Handbook, and Progress Update *"Confirmed absent by the research backlog's own repository-wide search (E-1a) and independently by 1F I-6"* |
 | `docs/research/RESEARCH_BACKLOG.md` | 2870 | Quotes the Phase 2 authority line as the finding E-1a |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | 4174, 4362, 4539, 4571, 4645, 4677 | Six records that the UX specification was written **without** the roadmap and could not be checked against it |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | 4174, 4362, 4539, 4571, 4645, 4677 | Six records that the UX specification was written **without** the roadmap and could not be checked against it |
 | `agents/lead-software-engineer/outputs/CLM_COLLABORATION_HANDOFF.md` | 412 | *"Master Roadmap v7.1 is not in this repository."* |
 | `docs/plans/SPRINT_1F_ENTRY_PACKAGE.md` | 447 (§A.1) | The finding that named all four absent authorities. **Superseded by an appended Addendum B, not edited** |
 

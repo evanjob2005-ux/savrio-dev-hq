@@ -26,7 +26,7 @@ including five untracked specialist drafts
 | Input | Path | State |
 |---|---|---|
 | Sprint 1F plan | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` | present, untracked, read in full structure + §2.6, §16, §18, §20 |
-| Mission Control UX specification | `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | present, untracked, read §12 + §14 in full |
+| Mission Control UX specification | `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | present, untracked, read §12 + §14 in full |
 | Phase 2 program plan | `docs/plans/PHASE_2_PROGRAM_PLAN.md` | present, untracked, read §0.3–§0.4, §1.3, §2.7, §14, §17 |
 | Research backlog | `docs/research/RESEARCH_BACKLOG.md` | present, untracked, read §6 escalations, R-16, §7 |
 | **Context Lifecycle Manager spec** | `agents/lead-software-engineer/outputs/CONTEXT_LIFECYCLE_MANAGER_SPEC.md` | **v1.1.0, present, untracked** — appeared during this pass. Read §0, §4.7–§4.8, §13.3, §14.0–§14.1, §14.8–§14.9 |

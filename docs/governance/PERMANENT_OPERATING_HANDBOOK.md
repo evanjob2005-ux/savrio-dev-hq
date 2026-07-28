@@ -465,7 +465,7 @@ Template**), per role:
 | Role | Status values |
 |---|---|
 | Executive / Orchestrator | `ACTIVE` / `WAITING` |
-| claude-design | `IDLE` / `ACTIVE` / `WAITING` |
+| design-engineer | `IDLE` / `ACTIVE` / `WAITING` |
 | lead-software-engineer | `IDLE` / `ACTIVE` / `REVISION` |
 | independent-code-reviewer | `IDLE` / `REVIEWING` / `COMPLETE` |
 | architecture-reviewer | `IDLE` / `REVIEWING` / `COMPLETE` |

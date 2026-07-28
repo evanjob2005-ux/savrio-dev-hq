@@ -53,7 +53,7 @@ line counts are working-tree measurements and move as their owners revise them:
 
 | Artifact | Owning workstream | Status at reconciliation |
 | --- | --- | --- |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` (**v1.1.0**, self-IDs as DESIGN-001) | Mission Control / Founder Interface design | **Complete.** Read in full for reconciliation — **at v1.0.0 (3,701 lines)**. **Re-keyed at the correction pass to v1.1.0** (~4,490 lines at the coordinator's source-inventory refresh; measured 4,609 lines in the working tree during this edit). **A correction to v1.2.0 is in flight**, so this reference is knowingly one revision behind and may go two behind. Recorded rather than silently updated: the reconciliation below was performed against v1.0.0 content and has **not** been re-derived against v1.1.0 or v1.2.0 |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` (**v1.1.0**, self-IDs as DESIGN-001) | Mission Control / Founder Interface design | **Complete.** Read in full for reconciliation — **at v1.0.0 (3,701 lines)**. **Re-keyed at the correction pass to v1.1.0** (~4,490 lines at the coordinator's source-inventory refresh; measured 4,609 lines in the working tree during this edit). **A correction to v1.2.0 is in flight**, so this reference is knowingly one revision behind and may go two behind. Recorded rather than silently updated: the reconciliation below was performed against v1.0.0 content and has **not** been re-derived against v1.1.0 or v1.2.0 |
 | `docs/plans/PHASE_2_PROGRAM_PLAN.md` (**3,749 lines**) | Phase 2 implementation planning | **Complete.** Read for reconciliation |
 | `docs/research/RESEARCH_BACKLOG.md` (**2,620 lines**) | Research backlog | **Complete.** Read for reconciliation. Anchors 8 research items directly to this plan's item IDs |
 
@@ -914,11 +914,11 @@ references elsewhere in this document (§19.1 D-8, §20.2 R-12, §20.2 R-13) are
 
 | Gate | Owner | Scope |
 | --- | --- | --- |
-| G-1 Design review | Claude Design Engineer (AGENT-004 / ROLE-014) | User flows, IA, interaction behavior, absence-state design, accessibility specification. **Before implementation of any surface.** |
+| G-1 Design review | Design Engineer (AGENT-004 / ROLE-014) | User flows, IA, interaction behavior, absence-state design, accessibility specification. **Before implementation of any surface.** |
 | G-2 Independent code review | Independent Code Reviewer (AGENT-008) | Line-level defects, TypeScript quality, maintainability, test quality (explicitly including wrong-direction assertions — see §15.3). **Runs first of the two commit gates.** |
 | G-3 Architecture review | Architecture Reviewer (AGENT-019 / ROLE-022) | ADR compliance, read-model purity, Execution Manager purity preserved, service/repository boundaries, no hidden coupling, timeline append-only property, scope enforcement. Commit-gate verdict. **Runs after G-2.** |
 | G-4 Security review | Security owner | §10 in full. **Blocking for any deployment beyond a developer machine.** |
-| G-5 Accessibility review | Claude Design Engineer | §12, including the manual passes. |
+| G-5 Accessibility review | Design Engineer | §12, including the manual passes. |
 | G-6 QA / release readiness | QA | Journeys, failure behavior, evidence completeness. |
 
 The Founder-fixed order governs the **two commit gates and what follows them**: G-2, then G-3,

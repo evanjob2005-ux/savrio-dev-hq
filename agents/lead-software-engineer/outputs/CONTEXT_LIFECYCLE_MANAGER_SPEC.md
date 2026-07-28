@@ -15,7 +15,7 @@ documents, all present in the working tree at `357f03b` and all read at authorin
 | Document | Path | Role in this reconciliation |
 | --- | --- | --- |
 | Sprint 1F plan | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` | Consumer; interface I-5; questions Q-4/D-5; requirements D-G/D-H |
-| Mission Control UX | `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | Consumer; View 12; data contract §12.6; handoff CX-1…CX-6; OQ-7; conflict C2 |
+| Mission Control UX | `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | Consumer; View 12; data contract §12.6; handoff CX-1…CX-6; OQ-7; conflict C2 |
 | Phase 2 program plan | `docs/plans/PHASE_2_PROGRAM_PLAN.md` | Downstream consumer; preconditions P-1/P-4/P-5; §0.4 model neutrality; stages 2A/2E/2I/2J |
 | Research backlog | `docs/research/RESEARCH_BACKLOG.md` | Open research R-13 (context caching), R-18/R-19 (1H anchors) |
 | Governance | `docs/company/GOVERNANCE.md`, `AGENTS.md` | Policy-ownership boundary; escalation content standard |

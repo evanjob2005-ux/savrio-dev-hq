@@ -32,12 +32,10 @@
       "groupName": "devDependencies (non-major)"
     },
     {
-      "description": "Auto-merge non-major devDependency updates once CI passes. Tests are now a required CI step, so a green run is real evidence.",
+      "description": "Auto-merge is DISABLED until branch protection exists. It was briefly enabled on the reasoning that 'tests are now a required CI step' — that reasoning was wrong. The checks run, but nothing REQUIRES them: the default branch of this public repository has no protection, no required status checks, and no required review. Unattended merge into an unprotected default branch is how a compromised build-tooling release reaches the repo with no human in the loop. Re-enable only after required status checks are configured; see the enablement order in the pull request that introduced this file.",
       "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch"],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
+      "automerge": false
     },
     {
       "description": "Group GitHub Actions digest updates; the repository pins every action by SHA.",

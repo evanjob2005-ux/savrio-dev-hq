@@ -32,21 +32,22 @@ import { expect, test } from "@playwright/test";
 test("produces no runtime errors beyond the deliberate production API block", async ({
   page,
 }) => {
-  const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
-  const forbidden: string[] = [];
+  const failedResponses: string[] = [];
 
-  page.on("console", (message) => {
-    if (message.type() === "error") {
-      consoleErrors.push(message.text());
-    }
-  });
   page.on("pageerror", (error) => {
     pageErrors.push(error.message);
   });
+
+  // Asserted over structured response events rather than console text. Chromium
+  // logs "Failed to load resource" for EVERY non-2xx subresource, so filtering
+  // on that string would also discard a 500 from an API route, a 404 on a
+  // missing JS chunk, or a failed font -- and this test would stay green while
+  // the page was genuinely broken.
   page.on("response", (response) => {
-    if (response.status() === 403) {
-      forbidden.push(new URL(response.url()).pathname);
+    const status = response.status();
+    if (status >= 400) {
+      failedResponses.push(`${status} ${new URL(response.url()).pathname}`);
     }
   });
 
@@ -58,24 +59,16 @@ test("produces no runtime errors beyond the deliberate production API block", as
     [],
   );
 
-  // Every 403 must come from the Dev HQ surface proxy.ts deliberately blocks.
-  // A 403 from anywhere else is a real failure.
-  const unexpected403s = forbidden.filter(
-    (pathname) => !pathname.startsWith("/api/dev-hq/"),
+  // The single tolerated failure class is the 403 that proxy.ts deliberately
+  // returns for the whole Dev HQ surface in production. Everything else fails,
+  // including a 5xx from a Dev HQ route -- the API being switched off must not
+  // become cover for the API being broken.
+  const unexpected = failedResponses.filter(
+    (entry) => !entry.startsWith("403 /api/dev-hq/"),
   );
   expect(
-    unexpected403s,
-    `403 responses outside the deliberately blocked Dev HQ surface:\n${unexpected403s.join("\n")}`,
-  ).toEqual([]);
-
-  // Resource-load failures are the browser reporting those same 403s. Anything
-  // that is not a resource-load failure is an unexplained console error.
-  const unexplained = consoleErrors.filter(
-    (text) => !/Failed to load resource/i.test(text),
-  );
-  expect(
-    unexplained,
-    `unexplained console errors:\n${unexplained.join("\n")}`,
+    unexpected,
+    `HTTP failures outside the deliberately blocked Dev HQ surface:\n${unexpected.join("\n")}`,
   ).toEqual([]);
 });
 

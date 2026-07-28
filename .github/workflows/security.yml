@@ -72,15 +72,40 @@ jobs:
           SELF = ".github/workflows/security.yml"
           PEM = "-----BEGIN " + "[A-Z0-9 ]*PRIVATE " + "KEY-----"
 
+          # The generic rule captures the assigned VALUE so it can be judged on
+          # its shape. Filtering by file kind was tried and was wrong: risk is a
+          # property of the value, not of the file it sits in, and *.spec.ts is
+          # exactly where a real staging credential gets pasted.
+          GENERIC_SECRET = re.compile(
+              r"(?i)(?:secret|password|passwd|api[_-]?key|token)"
+              r"\s*[:=]\s*['\"]([^'\"\s]{16,})['\"]")
+
+          # A value is treated as a fixture only if it announces itself as one.
+          # Anything that does not is reported, in every file, including tests.
+          PLACEHOLDER = re.compile(
+              r"(?i)^(test|fake|dummy|example|placeholder|changeme|sample|"
+              r"mock|stub|redacted|dummy|invalid|notreal|your)[-_.]")
+
+          # .env-format files assign unquoted, so GENERIC_SECRET cannot see them.
+          # Template files are allowed to exist but must not carry a real value.
+          ENV_ASSIGNMENT = re.compile(
+              r"(?im)^[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD)[A-Z0-9_]*"
+              r"\s*=\s*(\S{16,})\s*$")
+
+          def generic_secret_hits(text):
+              return [m.group(1) for m in GENERIC_SECRET.finditer(text)
+                      if not PLACEHOLDER.match(m.group(1))]
+
+          def env_secret_hits(text):
+              return [m.group(1) for m in ENV_ASSIGNMENT.finditer(text)
+                      if not PLACEHOLDER.match(m.group(1))]
+
           content_rules = [
               ("Private key block", re.compile(PEM)),
               ("AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
               ("Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
               ("Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}")),
               ("GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}")),
-              ("Generic secret assignment",
-               re.compile(r"(?i)(secret|password|passwd|api[_-]?key|token)"
-                          r"\s*[:=]\s*['\"][^'\"\s]{16,}['\"]")),
           ]
 
           # A template suffix is recognised wherever it appears at the end of the
@@ -129,24 +154,21 @@ jobs:
               except (OSError, UnicodeDecodeError):
                   continue
 
-              # The generic-secret rule is a heuristic: it fires on any
-              # assignment of a 16+ character quoted string to a name containing
-              # "token", "secret", "password", or "key". Test files are full of
-              # exactly that shape as fixtures, so in tests it reports noise
-              # rather than risk, and a scanner that always fails gets ignored.
-              #
-              # Narrowed deliberately, and only for that one heuristic: every
-              # high-confidence rule -- private key blocks, AWS, Google, Slack,
-              # and GitHub tokens -- still runs against test files, because a
-              # real credential pasted into a test is a real leak.
-              is_test = base.endswith((".test.ts", ".test.tsx",
-                                       ".spec.ts", ".spec.tsx"))
-
               for label, pattern in content_rules:
-                  if is_test and label == "Generic secret assignment":
-                      continue
                   if pattern.search(text):
                       findings.append((name, label))
+
+              # Judged on value shape, in every file including tests. A fixture
+              # must announce itself ("test-", "fake_", "example."); anything
+              # that does not is reported wherever it appears.
+              if generic_secret_hits(text):
+                  findings.append((name, "Generic secret assignment"))
+
+              # Closes the .env gap: template files are exempt from the filename
+              # rule, so without this a real unquoted value in a committed
+              # .env.*.example would pass every control.
+              if base.startswith(".env") and env_secret_hits(text):
+                  findings.append((name, "Secret value in environment file"))
 
           for name, label in findings:
               print(f"::error file={name}::{label} detected.")
@@ -330,13 +352,49 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Pinned for the same reason the actions-hardening job in this file
+      # requires SHA-pinned actions: the tool that executes a blocking gate must
+      # not change semantics underneath it. A Semgrep release altering path-glob
+      # or rule-parsing behaviour would silently change what this gate enforces.
       - name: Install Semgrep
-        run: pip install --quiet semgrep
+        run: pip install --quiet "semgrep==1.145.0"
+
+      - name: Record Semgrep version
+        run: semgrep --version
 
       # Validated as a separate step so that a malformed rule file is reported
       # as a rules problem, not misread as the codebase violating a rule.
       - name: Validate custom rules
         run: semgrep --validate --config .semgrep/ --metrics=off
+
+      # Positive control. Without this, "0 findings" is ambiguous between "the
+      # rules work and the code is clean" and "the rules matched nothing at
+      # all". The fixtures are known-bad; if the rules stop detecting them, this
+      # step fails even though the real scan would still report success.
+      - name: Verify rules detect known-bad code
+        run: |
+          set -euo pipefail
+          control="$(mktemp -d)"
+          internal="$control/app/api/dev-hq/internal"
+          mkdir -p "$internal/discarded" "$internal/arrow" "$internal/sync" "$control/lib/dev-hq"
+
+          cp .semgrep/fixtures/route-guard-result-discarded.ts "$internal/discarded/route.ts"
+          cp .semgrep/fixtures/route-arrow-no-guard.ts         "$internal/arrow/route.ts"
+          cp .semgrep/fixtures/route-sync-no-guard.ts          "$internal/sync/route.ts"
+          cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
+          cp -r .semgrep "$control/.semgrep"
+
+          findings="$(cd "$control" && semgrep scan --config .semgrep/dev-hq-boundaries.yml \
+            --metrics=off --json 2>/dev/null | python -c 'import json,sys; print(len(json.load(sys.stdin)["results"]))')"
+
+          echo "Positive-control findings: ${findings}"
+          if [[ "${findings}" -lt 4 ]]; then
+            echo "::error::Semgrep rules detected ${findings} of 4 known-bad fixtures."
+            echo "The rules have regressed: a defect class they are supposed to catch is now invisible."
+            (cd "$control" && semgrep scan --config .semgrep/dev-hq-boundaries.yml --metrics=off || true)
+            exit 1
+          fi
+          echo "All 4 known-bad fixtures detected. Rules are live."
 
       - name: Scan with Dev HQ boundary rules
         run: semgrep scan --config .semgrep/ --error --metrics=off

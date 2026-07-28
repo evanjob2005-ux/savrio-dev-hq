@@ -40,7 +40,7 @@ validation this session performed.
 planning and specialist-output material:
 
 ```
-?? agents/claude-design/outputs/
+?? agents/design-engineer/outputs/
 ?? agents/lead-software-engineer/outputs/
 ?? docs/plans/GOVERNANCE_UPDATE_PLAN.md
 ?? docs/plans/PHASE_2_PROGRAM_PLAN.md
@@ -1114,7 +1114,7 @@ the planning corpus contradict them" - which is the register in
 
 ```
  M lib/dev-hq/agent-execution-service.test.ts     <- NOT this audit
-?? agents/claude-design/outputs/
+?? agents/design-engineer/outputs/
 ?? agents/lead-software-engineer/outputs/
 ?? docs/governance/
 ?? docs/plans/GOVERNANCE_UPDATE_PLAN.md

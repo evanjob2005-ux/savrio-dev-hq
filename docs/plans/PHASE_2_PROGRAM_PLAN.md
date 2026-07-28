@@ -160,7 +160,7 @@ sections previously left implicit are now explicit:
   so because architecture is that stage's dominant risk, **not** because architecture
   review precedes code review. It does not.
 - Specialist blocking lenses (`security-engineer`, `reliability-engineer`,
-  `database-architect`, `devops-engineer`, `qa-engineer`, `claude-design`,
+  `database-architect`, `devops-engineer`, `qa-engineer`, `design-engineer`,
   `Knowledge Curator`) report **into** the two review steps; they are not additional gates
   in the sequence, and none of them substitutes for either.
 
@@ -218,7 +218,7 @@ marked **(corrected)** changed as a result of this re-check; see §17.11.
 | **Persistence is in-memory only** | `lib/dev-hq/store.ts` header: *"Development-only centralized in-memory store… non-durable, not for production"*; no Supabase code on this branch |
 | Sprint 1E baseline passes deterministic gates | **Re-run at `88b0d65`: `npx vitest run` → 22 files, 317 tests passed.** Matches validation report §2 exactly. `tsc`/`eslint`/`next build` not re-run this pass — unchanged source implies unchanged result, but that is inference, not fresh evidence |
 | Sprint 1E behavioral categories are **unverified**, not passed | Validation report §2: replay, retry, crash recovery, reconciliation, concurrency, idempotency, invariants, review/evidence/escalation lifecycle |
-| **(corrected)** Sprint 1F **planning has started**; 1F–1I **implementation** has not | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` exists (untracked, "SPECIALIST DRAFT — awaiting integration review"); `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` exists (untracked); no 1F–1I source exists in `lib/dev-hq/` |
+| **(corrected)** Sprint 1F **planning has started**; 1F–1I **implementation** has not | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` exists (untracked, "SPECIALIST DRAFT — awaiting integration review"); `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` exists (untracked); no 1F–1I source exists in `lib/dev-hq/` |
 | **(corrected)** Phase 1 agents are **deterministic simulations only; real AI agents are Phase 2 scope** | ADR-0001 D4: *"Phase 1 ships a deterministic **simulated** agent that performs no real AI inference and no code execution… Real AI agents begin in Phase 2."* ADR-0002 Future Considerations: *"Real AI agents and reviewers (Phase 2), replacing the deterministic simulations."* |
 | **(corrected)** Six items are already **recorded as deferred to Phase 2** in approved ADRs and completion notes | ADR-0001 D4 (real agents), D6 (per-agent `maxConcurrency > 1`), D8 (scorecards), O3 (department-mapped capability taxonomy); ADR-0002 E8 (`WorkItem` promotion, rewiring Project → WorkItem → Task); `SPRINT_1E_COMPLETION_NOTES.md` §7 item 12 (CR-11 / P-2 `recordFindings` ordering, `review-service.ts:485-492`, explicitly labeled *"Phase 2 gate"*) |
 | **(corrected)** A named 1E remediation set awaits Founder approval and will change the event vocabulary | `docs/validation/sprint-1e-overnight-2026-07-26/ISSUE_MATRIX.md` (committed at `feace4d`): *"AWAITING FOUNDER APPROVAL. No source change applied."* Proposed patches touch `agent-execution-service.ts`, `execution-manager.ts`, `constants.ts`, `review-service.ts`, `escalation-service.ts` and **add two event types** (`execution.assignment_deferred`, `execution.claim_lost`) |
@@ -549,7 +549,7 @@ dependency order — because a plan is not a state transition.
 | **Observability specification** | Canonical event vocabulary, metric definitions, health-score formulas (spec only — implementation is 2E-1) | Roadmap §21; `OBSERVABILITY_STANDARD.md` | observability-engineer |
 | **Acceptance test design** | Test plans for all 11 stage gates, incl. Appendix J tests | Roadmap Appendix J/B | qa-engineer, reliability-engineer |
 | **Research (2I content, not 2I system)** | Prior-art research for vault sync, metric stores, decay models, eval harnesses | Nothing | research-analyst |
-| **UX specification** | Founder Dashboard (Stage 2), Executive Dashboard (Stage 3), organization views, knowledge browsing, pair surface | 1F Mission Control Lite | claude-design |
+| **UX specification** | Founder Dashboard (Stage 2), Executive Dashboard (Stage 3), organization views, knowledge browsing, pair surface | 1F Mission Control Lite | design-engineer |
 | **Founder decision packets** | The ~40 decisions in §3–§13, packaged with options, recommendations, and impact | This plan | Director of Operations |
 | **Knowledge vault structure** | Vault directory scaffold per roadmap §11 canonical structure, empty | Roadmap §11 | Knowledge Curator role |
 
@@ -943,7 +943,7 @@ deterministic convergence, or review independence."* Appendix J gives the test f
 | `qa-engineer` | Acceptance test coverage, A/B methodology validity | Yes |
 | `database-architect` | Packet/organization schema, transaction semantics, constraint enforcement | Yes |
 | `observability-engineer` | Event vocabulary forward-compatibility with 2E-1 | Advisory |
-| `claude-design` | Organization and packet-graph views | Advisory |
+| `design-engineer` | Organization and packet-graph views | Advisory |
 | **Founder** | Authority model, concurrency ceilings, independence rules, acceptance of A11/A12 results | **Yes — reserved** |
 
 ## 3.13 Founder decisions
@@ -1181,7 +1181,7 @@ database review of the scope-key schema and constraints.
 `architecture-reviewer` (**blocking**), `independent-code-reviewer` (**blocking**),
 `database-architect` (**blocking** — scope keys, constraints, migration),
 `devops-engineer` (coordinated release, rollback), `reliability-engineer` (partial
-failure, deadlock), `qa-engineer`, `claude-design` (portfolio UX, advisory),
+failure, deadlock), `qa-engineer`, `design-engineer` (portfolio UX, advisory),
 **Founder** (reserved: scope tuple, grant policy, project set, budgets).
 
 ## 4.13 Founder decisions
@@ -1418,7 +1418,7 @@ central architectural risk), `independent-code-reviewer` (**blocking**),
 `security-engineer` (**blocking** — ACLs, secrets, cross-project retrieval),
 `Knowledge Curator` role (**blocking** on corpus quality and curation semantics),
 `data-engineer` (index, retrieval, effectiveness attribution),
-`database-architect` (schema, versioning, lineage), `claude-design` (knowledge browsing
+`database-architect` (schema, versioning, lineage), `design-engineer` (knowledge browsing
 and proposal UX), `qa-engineer`, **Founder** (reserved: vault hosting/write access,
 organization-wide publication authority, retention).
 
@@ -1643,7 +1643,7 @@ security review (authority proposal path, scope filtering).
 ## 6.12 Reviewers
 
 `architecture-reviewer` (**blocking** — the read-only boundary and the R-2 metric seam),
-`independent-code-reviewer` (**blocking**), `claude-design` (**blocking** — this is the
+`independent-code-reviewer` (**blocking**), `design-engineer` (**blocking** — this is the
 Founder's primary instrument; prediction labeling and information hierarchy are a
 correctness concern, not polish), `security-engineer` (**blocking** — authority proposals,
 scope filtering), `observability-engineer` (metric semantics forward-compatible with 2E-1),
@@ -2429,7 +2429,7 @@ intersection, transcript sensitivity, human authority).
 amended; compliance with the amendment is the gate), `security-engineer` (**blocking** —
 authority intersection, transcripts, human actors), `independent-code-reviewer`
 (**blocking**), `reliability-engineer` (participant loss, expiry, rollover),
-`claude-design` (session, thread, decision-inbox UX; notification behavior),
+`design-engineer` (session, thread, decision-inbox UX; notification behavior),
 `qa-engineer` (G2 adversarial suite), `product-owner` (does collaboration measurably help),
 **Founder** (reserved: D-2G-1, D-2G-2, D-2G-3).
 
@@ -3165,7 +3165,7 @@ transcripts).
 
 `architecture-reviewer` (**blocking** — scratch boundary, reuse of 2G, no bypass path),
 `security-engineer` (**blocking** — repository scope, workspace isolation, secrets),
-`independent-code-reviewer` (**blocking**), `claude-design` (**blocking** — the surface must
+`independent-code-reviewer` (**blocking**), `design-engineer` (**blocking** — the surface must
 make "this is scratch, not committed" unmistakable; ambiguity here is a correctness risk,
 not a polish issue), `lead-software-engineer` (is the surface actually useful for real
 engineering work), `reliability-engineer` (rollover, divergence, cleanup), `qa-engineer`,
@@ -3439,7 +3439,7 @@ framework boundaries, policy floor enforcement, reuse of 2A),
 `independent-code-reviewer` (**blocking**), `reliability-engineer` (**blocking** — rollback,
 health checks, failure semantics, incident loop),
 `qa-engineer` (**blocking** — gate coverage and false-positive methodology),
-`claude-design` + accessibility lens (accessibility gate correctness),
+`design-engineer` + accessibility lens (accessibility gate correctness),
 `observability-engineer` (observability packs, SLOs, Release Confidence inputs),
 `growth-engineer` (SEO gate, advisory), **Founder** (**blocking, reserved** — D-2K-1
 policy floor, D-2K-2 break-glass, D-2K-3 deployment/migration authority).
@@ -3716,7 +3716,7 @@ Each is a planning assumption, not a fact. If it is wrong, the named scope chang
 | Workstream | Owner | Interface | This workstream's position |
 |---|---|---|---|
 | **Sprint 1F implementation planning** (`docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md`) | Lead Software Engineer | 1F Mission Control Lite is the surface 2D extends (Stage 2 Founder Dashboard, Stage 3 Executive Dashboard). 1F is precondition P-5. Its §20 Q-1 persistence question **is** our P-1. | **We defer to 1F on all Stage 1 Mission Control scope.** 2D adds Stages 2–3 and must not restate or rebuild Stage 1. Their ADR-0003 claim supersedes our numbering (§2.7). **→ SUPERSEDED at v1.1.0: neither workstream numbers its own ADRs. Numbers are assigned centrally (§19.1); 1F is being corrected for its ADR-0003 claim as this plan is for its ADR-0004 claim.** |
-| **Mission Control Lite UX design** (`agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md`) | claude-design | Information architecture, navigation, phone-first behavior, accessibility that 2D's dashboards inherit | **Design is authoritative on UX** per AGENT-001 §Department Boundaries. 2D §6.6/§6.12 name `claude-design` as a blocking reviewer; our dashboard descriptions are engineering sizing inputs, not UX decisions. |
+| **Mission Control Lite UX design** (`agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md`) | design-engineer | Information architecture, navigation, phone-first behavior, accessibility that 2D's dashboards inherit | **Design is authoritative on UX** per AGENT-001 §Department Boundaries. 2D §6.6/§6.12 name `design-engineer` as a blocking reviewer; our dashboard descriptions are engineering sizing inputs, not UX decisions. |
 | **Persistence / deployment** | referenced by 1F §20 Q-1; owner not yet visible to us | P-1 and assumption A-3 (transactional CAS semantics). Every Phase 2 data model in §3–§13 lands in their schema. | We state the **requirement** (durability, scope keys, CAS, retention, time series); they own the **backend decision**. Our §4.5 `ScopeKey` and §7.5 metric schemas are the largest downstream consumers and should be reviewed by them before 2B-1/2E-1. |
 | **Sprint 1E remediation specification** (`ISSUE_MATRIX.md`) | AR-1E / ENG-SPEC | Precondition P-3. Adds two event types and changes five service files. Carries an approved-pattern policy: *"Throw only when the caller could not have been right. Absorb when the caller was right and the world moved."* | **2A §3.9's failure policy and 2E-1's event vocabulary must conform to that rule, not invent a parallel one.** We adopt it as a constraint. Their matrix is *awaiting Founder approval*; we assume approval and will re-check. |
 | **Validation-workflow diagnosis** (`WORKFLOW_DIAGNOSIS.md`) | validation coordinator | Its §6 standing corrections constrain how every Phase 2 sprint is staffed and reviewed | **We adopt all five**, notably "designer and reviewer must be different agents" (which our 2A §3.7 independence rules already require) and "an unresponsive specialist is a workflow failure, never agreement." See §17.5 C-6. |
@@ -3776,7 +3776,7 @@ Each is a planning assumption, not a fact. If it is wrong, the named scope chang
 | **Q-1** | Research-backlog owner | Can we reconcile your Rank-D ("needed before Phase 2") items with our §14 register into **one** decision list with one ID space? Which of your R-nn items are the same question as our D-nn items? | Two overlapping registers means the Founder answers some questions twice and others never | Before P2-00 |
 | **Q-2** | Persistence workstream | What are the transactional guarantees of the chosen backend — compare-and-set, row-level scoping, and time-series/rollup support? Does row-level security exist for 2B isolation, or must isolation be enforced in the repository layer? | Assumption A-3; 2A packet claim, 2B `ScopeKey` enforcement point, and 2E metric store all depend on the answer | Before 2A-1 and 2B-1 |
 | **Q-3** | Sprint 1F planning owner | Do you agree that scorecards/analytics belong to 2D/2E rather than 1F (conflict C-3), and can you re-derive your §20.4 divergence list against this final document rather than the 641-line draft you read (C-5)? | The 1F/2D boundary is unresolvable without your position; and your deconfliction is currently against a partial draft | Before either plan is approved |
-| **Q-4** | claude-design | Does your Mission Control IA extend cleanly to Stage 2 and Stage 3 dashboards, or does adding forecasts, scenarios, and recommendations require an IA change you would rather make in 1F? | Cheaper to make the IA decision once in 1F than to restructure in 2D | Before 1F-11 (their numbering) |
+| **Q-4** | design-engineer | Does your Mission Control IA extend cleanly to Stage 2 and Stage 3 dashboards, or does adding forecasts, scenarios, and recommendations require an IA change you would rather make in 1F? | Cheaper to make the IA decision once in 1F than to restructure in 2D | Before 1F-11 (their numbering) |
 | **Q-5** | 1E remediation owner (AR-1E / ENG-SPEC) | Is the "throw only when the caller could not have been right" rule intended to bind **all future** Work Management operations, including 2A's packet claim, budget reservation, and concurrency acquisition? | We want to conform to it rather than invent a parallel failure taxonomy | Before 2A-1 |
 | **Q-6** | architecture-reviewer | Do you read brokered, durable, non-authoritative agent messaging as *compatible with* ADR-0001/0002's "no direct agent-to-agent communication," or as a **material deviation** requiring a superseding ADR? Our plan assumes the latter and blocks accordingly. | If it is compatible, 2A-6 and 2G unblock without a Founder decision | Before P2-06 |
 | **Q-7** | Whoever owns ADR-0002 E8 | Will `WorkItem` be promoted before 2A-1, or should 2A attach organization/packet records to `Task` with a re-parenting plan? | C-4; determines 2A-1's identity model | Before 2A-1 |
@@ -3892,7 +3892,7 @@ HEAD moved `057e12c` → `88b0d65` during authoring (three documentation-only co
 
 | # | Original claim | Corrected finding | Impact |
 |---|---|---|---|
-| **1** | *"Sprints 1F–1I are not started; `docs/plans/` contains 1D and 1E only."* | **False.** 1F *planning* has started: `SPRINT_1F_MISSION_CONTROL_LITE.md` and `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` both exist (untracked specialist drafts). 1F *implementation* has not started. | §1.1 corrected; P-5 now references the existing 1F plan; three new interfaces in §17.3 |
+| **1** | *"Sprints 1F–1I are not started; `docs/plans/` contains 1D and 1E only."* | **False.** 1F *planning* has started: `SPRINT_1F_MISSION_CONTROL_LITE.md` and `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` both exist (untracked specialist drafts). 1F *implementation* has not started. | §1.1 corrected; P-5 now references the existing 1F plan; three new interfaces in §17.3 |
 | **2** | Not stated at all | **ADR-0001 D4: Phase 1 agents are deterministic simulations; "Real AI agents begin in Phase 2."** The plan never accounted for this transition. Gate 2A's A11/A12 is **not evaluable** against ADR-0001 O4's simulated agent, whose outcome derives deterministically from its input. | **New precondition P-8**, added to sprint P2-00, sequenced before Gate 2A; new ADR candidate; new Founder decision NEW-3. This is the most material gap the re-check found. |
 | **3** | ADR numbering "continues from ADR-0002" | The 1F workstream already claims **ADR-0003** for persistence/deployment. | Phase 2 ADRs renumber from **ADR-0004**; §2.7 caution added; Founder decision NEW-4. **→ WITHDRAWN at v1.1.0: no workstream claims numbers. See §19.1.** |
 | **4** | Not stated | **Six items are already recorded as deferred to Phase 2** in approved documents: ADR-0001 D4, D6 (per-agent concurrency), D8 (scorecards), O3 (capability taxonomy); ADR-0002 E8 (`WorkItem` promotion); and CR-11/P-2 (`review-service.ts:485-492`), which `SPRINT_1E_COMPLETION_NOTES.md` §7 item 12 explicitly labels a *"Phase 2 gate."* The plan inventoried none of them. | **New precondition P-9**; conflicts C-4, C-9, C-10; Founder decision NEW-2 |
@@ -3936,7 +3936,7 @@ no authoritative source required a change.
 | Artifact | Lines **as read at this pass** | Lines **as re-keyed at v1.1.0** | Read |
 |---|---|---|---|
 | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` | 1,466 | **1,793** (still growing) | Framing, cross-workstream boundaries, §20 in full (Q-1…Q-9, risks, Founder decisions, §20.4 interfaces/conflicts/convergences) |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | 3,701 | **4,707** — DESIGN-001 **v1.2.0**, source-inventory correction applied. *(Re-verified twice: 4,609 at v1.1.0, then 4,707 at v1.2.0 while this correction pass was being written. The drift is the point, not a defect — see below.)* | §0–§2 (framing, thirteen questions, truth model, claim classes, freshness), view/component/vocabulary inventories, §14 COLLABORATION HANDOFF in full |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | 3,701 | **4,707** — DESIGN-001 **v1.2.0**, source-inventory correction applied. *(Re-verified twice: 4,609 at v1.1.0, then 4,707 at v1.2.0 while this correction pass was being written. The drift is the point, not a defect — see below.)* | §0–§2 (framing, thirteen questions, truth model, claim classes, freshness), view/component/vocabulary inventories, §14 COLLABORATION HANDOFF in full |
 | `docs/research/RESEARCH_BACKLOG.md` | 2,620 | **3,149** | §1 boundaries, §3 ranking scheme, §4 full backlog index (R-01…R-24 with plan anchors) |
 | `agents/independent-code-reviewer/outputs/SPRINT_1E_REMEDIATION_PATCH_SPEC.md` | — | **1,168** — complete specification, **committed** | Header, independence statement, commit plan |
 | `docs/validation/.../ISSUE_MATRIX.md`, `WORKFLOW_DIAGNOSIS.md` | 235 / 302 | 235 / 302 | In full (previous pass + §4c) |

@@ -116,7 +116,7 @@ every rank below has been re-checked against them:**
 | --- | --- |
 | `docs/plans/SPRINT_1F_MISSION_CONTROL_LITE.md` (Sprint 1F technical plan, 1,466 lines) | 1F scope, work items 1F-0…1F-21, nine open questions **Q-1…Q-9**, nine external dependencies **D-1…D-9**, thirteen risks, and interfaces **I-1…I-10** |
 | `docs/plans/PHASE_2_PROGRAM_PLAN.md` (PLAN-P2-001, 3,749 lines) | Phase 2 as eleven stages 2A–2K, preconditions **P-1…P-9**, sprint breakdown P2-00…P2-38, **23 candidate ADRs**, a **44-decision Founder register (§14)**, thirteen ordering risks, and a collaboration handoff (§17) that names this backlog directly |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` (3,701 lines) | Sixteen founder-facing views, the truth/provenance model, and handoff obligations **RB-1…RB-5**, **CX-1…CX-5**, **BC-1…BC-4** — several addressed to this backlog by name |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` (3,701 lines) | Sixteen founder-facing views, the truth/provenance model, and handoff obligations **RB-1…RB-5**, **CX-1…CX-5**, **BC-1…BC-4** — several addressed to this backlog by name |
 | `docs/validation/sprint-1e-overnight-2026-07-26/WORKFLOW_DIAGNOSIS.md` | §4c's undercut finding and §6's five **standing workflow corrections**, which bear directly on R-16 and on whether this backlog is executable by agents |
 | `docs/validation/sprint-1e-overnight-2026-07-26/ISSUE_MATRIX.md` | The 1E remediation set and the two new event types (`execution.assignment_deferred`, `execution.claim_lost`) — still **awaiting Founder approval** |
 
@@ -283,7 +283,7 @@ research-shaped, and R-21 now carries it as a caveat rather than as scope.
 **Three UX handoff obligations name this backlog but are not research questions**, and are recorded
 here so they are not lost: **RB-3** (light theme, required by STANDARD-011 — a design/standards item
 for Director of Operations), **RB-4** (usability validation with the Founder — design research owned
-by claude-design, and the only way to test the UX specification's core premise), and **RB-2** (durable
+by design-engineer, and the only way to test the UX specification's core premise), and **RB-2** (durable
 event history, which R-02 and R-08 jointly cover). **RB-3 and RB-4 have no owner in this document and
 none is claimed.**
 
