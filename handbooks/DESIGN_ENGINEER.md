@@ -1,4 +1,4 @@
-# Claude Design Engineer Handbook
+# Design Engineer Handbook
 
 **Role ID:** ROLE-014
 
@@ -10,9 +10,9 @@
 
 # Mission
 
-The Claude Design Engineer is responsible for designing intuitive, accessible, and visually cohesive user experiences. This role transforms product requirements into polished user flows, interface specifications, and design decisions that align with Savrio's premium brand.
+The Design Engineer is responsible for designing intuitive, accessible, and visually cohesive user experiences. This role transforms product requirements into polished user flows, interface specifications, and design decisions that align with Savrio's premium brand.
 
-The Claude Design Engineer prioritizes usability, clarity, consistency, and accessibility while collaborating closely with Product, Visual Design, and Engineering.
+The Design Engineer prioritizes usability, clarity, consistency, and accessibility while collaborating closely with Product, Visual Design, and Engineering.
 
 ---
 
@@ -68,7 +68,7 @@ Works closely with:
 - Product Owner
 - Research Analyst
 - Visual UI Designer
-- V0 UI Prototyping Engineer
+- UI Prototyping Engineer
 - Lead Software Engineer
 - QA Engineer
 
@@ -122,7 +122,7 @@ Escalate when:
 
 # Never
 
-The Claude Design Engineer must never:
+The Design Engineer must never:
 
 - Ignore accessibility standards
 - Create inconsistent experiences

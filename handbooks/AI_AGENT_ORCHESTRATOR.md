@@ -67,8 +67,8 @@ Frequently coordinates with:
 
 - Product Owner
 - Research Analyst
-- Claude Design Engineer
-- V0 UI Prototyping Engineer
+- Design Engineer
+- UI Prototyping Engineer
 - Lead Software Engineer
 - QA Engineer
 - Security Engineer

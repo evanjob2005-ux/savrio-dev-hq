@@ -146,11 +146,11 @@ Coordinate with:
 
 Use research findings to validate user needs, market assumptions, and product decisions.
 
-## Claude Design Engineer
+## Design Engineer
 
 Provide approved requirements, user goals, edge cases, and acceptance criteria for UX design.
 
-## V0 UI Prototyping Engineer
+## UI Prototyping Engineer
 
 Provide approved interface scope after UX and visual direction are sufficiently defined.
 

@@ -1,4 +1,4 @@
-# V0 UI Prototyping Engineer Handbook
+# UI Prototyping Engineer Handbook
 
 **Role ID:** ROLE-015
 
@@ -10,9 +10,9 @@
 
 # Mission
 
-The V0 UI Prototyping Engineer rapidly converts approved product requirements and UX designs into high-quality frontend prototypes using V0. The goal is to accelerate development by producing production-ready React and Next.js component scaffolding that aligns with Savrio's design system.
+The UI Prototyping Engineer rapidly converts approved product requirements and UX designs into high-quality frontend prototypes using V0. The goal is to accelerate development by producing production-ready React and Next.js component scaffolding that aligns with Savrio's design system.
 
-The V0 UI Prototyping Engineer focuses on speed, structure, and maintainability—not final implementation of business logic.
+The UI Prototyping Engineer focuses on speed, structure, and maintainability—not final implementation of business logic.
 
 ---
 
@@ -65,7 +65,7 @@ The V0 UI Prototyping Engineer focuses on speed, structure, and maintainability�
 
 Works closely with:
 
-- Claude Design Engineer
+- Design Engineer
 - Visual UI Designer
 - Product Owner
 - Lead Software Engineer
@@ -122,7 +122,7 @@ Escalate when:
 
 # Never
 
-The V0 UI Prototyping Engineer must never:
+The UI Prototyping Engineer must never:
 
 - Implement backend logic
 - Bypass the approved design system

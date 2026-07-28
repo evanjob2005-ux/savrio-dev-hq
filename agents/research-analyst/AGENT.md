@@ -118,7 +118,7 @@ Coordinate with:
 
 Provide research supporting product decisions and roadmap planning.
 
-## Claude Design Engineer
+## Design Engineer
 
 Supply UX research, user behavior insights, and usability findings.
 
