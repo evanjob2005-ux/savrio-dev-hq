@@ -67,7 +67,11 @@ import {
   registerApprovalGate,
   runExecutiveReview,
 } from "@/lib/dev-hq/founder-request-service";
-import { getDevHqStore, resetDevHqStore } from "@/lib/dev-hq/store";
+import {
+  buildDevHqState,
+  getDevHqStore,
+  resetDevHqStore,
+} from "@/lib/dev-hq/store";
 import type { ProcessStartMarker } from "@/lib/dev-hq/types";
 import "@/trigger/founder-request-continuation";
 
@@ -285,5 +289,27 @@ describe("P-2/P-3 seam: continuation activity and the store lifetime", () => {
     expect(state.processStart).toEqual(original);
     expect(getDevHqStore().processStart).toEqual(original);
     expect(state.processStart.id).not.toBe(forged.id);
+  });
+
+  it("returns a detached process-start marker from the in-memory state builder", () => {
+    // Copied up front, so that if the store were mutated later there is still an
+    // independent record of what it held to compare against.
+    const original: ProcessStartMarker = { ...getDevHqStore().processStart };
+
+    // Read in memory rather than over the route. A JSON round trip produces an
+    // independent object no matter what the builder does, so asserting on a
+    // parsed response proves only that serialization copies. Holding the object
+    // the builder actually returned is the only way to observe whether the
+    // builder itself copies, which is what protects the store here.
+    const snapshot = buildDevHqState();
+    expect(snapshot.processStart).toEqual(original);
+
+    snapshot.processStart.id = "consumer-supplied";
+
+    expect(getDevHqStore().processStart).toEqual(original);
+    expect(getDevHqStore().processStart.id).not.toBe("consumer-supplied");
+
+    // The edit also left nothing behind for a later reader to pick up.
+    expect(buildDevHqState().processStart).toEqual(original);
   });
 });
