@@ -391,7 +391,11 @@ jobs:
           if [[ "${findings}" -lt 4 ]]; then
             echo "::error::Semgrep rules detected ${findings} of 4 known-bad fixtures."
             echo "The rules have regressed: a defect class they are supposed to catch is now invisible."
-            (cd "$control" && semgrep scan --config .semgrep/dev-hq-boundaries.yml --metrics=off || true)
+            # Re-run for a readable diagnostic. Separate statements rather than
+            # `cd && scan || true`, which shellcheck correctly flags (SC2015) as
+            # a construct that reads like if-then-else but is not one.
+            cd "$control"
+            semgrep scan --config .semgrep/dev-hq-boundaries.yml --metrics=off || true
             exit 1
           fi
           echo "All 4 known-bad fixtures detected. Rules are live."
