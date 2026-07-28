@@ -35,15 +35,20 @@ rules:
           - pattern: export async function DELETE(...) { ... }
       - pattern-not-regex: rejectInternalDevRequest
 
-  - id: dev-hq-internal-token-read-outside-guard
+  # Scoped to the VERIFYING side only. Reading the token in order to SEND it is
+  # legitimate and has its own single site; the risk this rule guards against is
+  # a second place that decides whether a token is acceptable, because that is
+  # what silently duplicates and then weakens the fail-closed comparison.
+  - id: dev-hq-internal-token-verified-outside-guard
     languages: [typescript]
     severity: ERROR
     message: >-
-      DEV_HQ_INTERNAL_TOKEN is read outside lib/dev-hq/internal-guard.ts. The
-      internal token has exactly one comparison site, which fails closed when the
-      variable is unset. A second reader is how that fail-closed behaviour gets
-      quietly duplicated and then weakened. Import rejectInternalDevRequest
-      instead of re-implementing the check.
+      DEV_HQ_INTERNAL_TOKEN is read outside the two files allowed to touch it.
+      The token has exactly one comparison site (internal-guard.ts), which fails
+      closed when the variable is unset, and one transmission site
+      (internal-headers.ts). A third reader is how that fail-closed behaviour
+      gets quietly duplicated and then weakened. Import rejectInternalDevRequest
+      to verify, or getDevHqInternalHeaders to send.
     paths:
       include:
         - "app/**"
@@ -51,7 +56,11 @@ rules:
         - "components/**"
         - "trigger/**"
       exclude:
+        # The single comparison site. This is the guard itself.
         - "lib/dev-hq/internal-guard.ts"
+        # The single transmission site: the Trigger worker attaching the token
+        # to an outbound server-to-server callback. Not a verification path.
+        - "lib/dev-hq/internal-headers.ts"
         - "**/*.test.ts"
     pattern-either:
       - pattern: process.env.DEV_HQ_INTERNAL_TOKEN

@@ -83,10 +83,16 @@ jobs:
                           r"\s*[:=]\s*['\"][^'\"\s]{16,}['\"]")),
           ]
 
+          # A template suffix is recognised wherever it appears at the end of the
+          # name, so .env.local.example and .env.production.template are treated
+          # as templates like .env.example already was. Only the suffix is
+          # trusted: .env.local still fails, which is the case that matters.
+          TEMPLATE_SUFFIXES = (".example", ".sample", ".template")
+
           filename_rules = [
               ("Environment file", lambda b: b == ".env" or (
-                  b.startswith(".env.") and b not in
-                  {".env.example", ".env.sample", ".env.template"})),
+                  b.startswith(".env.")
+                  and not b.endswith(TEMPLATE_SUFFIXES))),
               ("Private key file", lambda b: b in {
                   "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}),
               ("Key or certificate file", lambda b: b.endswith(
@@ -123,7 +129,22 @@ jobs:
               except (OSError, UnicodeDecodeError):
                   continue
 
+              # The generic-secret rule is a heuristic: it fires on any
+              # assignment of a 16+ character quoted string to a name containing
+              # "token", "secret", "password", or "key". Test files are full of
+              # exactly that shape as fixtures, so in tests it reports noise
+              # rather than risk, and a scanner that always fails gets ignored.
+              #
+              # Narrowed deliberately, and only for that one heuristic: every
+              # high-confidence rule -- private key blocks, AWS, Google, Slack,
+              # and GitHub tokens -- still runs against test files, because a
+              # real credential pasted into a test is a real leak.
+              is_test = base.endswith((".test.ts", ".test.tsx",
+                                       ".spec.ts", ".spec.tsx"))
+
               for label, pattern in content_rules:
+                  if is_test and label == "Generic secret assignment":
+                      continue
                   if pattern.search(text):
                       findings.append((name, label))
 
