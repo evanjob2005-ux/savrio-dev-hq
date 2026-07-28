@@ -7,53 +7,85 @@
     ":semanticCommits"
   ],
   "timezone": "America/New_York",
-  "schedule": ["before 6am on monday"],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
   "semanticCommitScope": "deps",
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "rangeStrategy": "bump",
   "rebaseWhen": "conflicted",
   "configMigration": true,
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 6am on the first day of the month"]
+    "schedule": [
+      "before 6am on the first day of the month"
+    ]
   },
   "vulnerabilityAlerts": {
-    "labels": ["dependencies", "security"],
-    "schedule": ["at any time"],
+    "labels": [
+      "dependencies",
+      "security"
+    ],
+    "schedule": [
+      "at any time"
+    ],
     "prPriority": 10
   },
   "packageRules": [
     {
       "description": "Group all non-major devDependency updates into a single PR to reduce review churn.",
-      "matchDepTypes": ["devDependencies"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "devDependencies (non-major)"
     },
     {
-      "description": "Auto-merge is DISABLED deliberately. Correction of record: an earlier version of this comment said the default branch had no protection. That was wrong — it is protected by the 'Sprint 1F active line protection' ruleset, which the classic branch-protection API does not report, which is how both the author and the reviewer missed it. The ruleset requires two status checks but the approving-review count is 0 while the repository has a single collaborator, so an auto-merged dependency PR would reach this public repository's default branch with no human in the loop. That is the reason this stays off, and it is a stronger reason than the one it replaces. Re-enable once a second reviewer exists and the review requirement is raised back to 1.",
-      "matchDepTypes": ["devDependencies"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "description": "Auto-merge is DISABLED deliberately. Correction of record: an earlier version of this comment said the default branch had no protection. That was wrong \u2014 it is protected by the 'Sprint 1F active line protection' ruleset, which the classic branch-protection API does not report, which is how both the author and the reviewer missed it. The ruleset requires two status checks but the approving-review count is 0 while the repository has a single collaborator, so an auto-merged dependency PR would reach this public repository's default branch with no human in the loop. That is the reason this stays off, and it is a stronger reason than the one it replaces. Re-enable once a second reviewer exists and the review requirement is raised back to 1.",
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "automerge": false
     },
     {
       "description": "Group GitHub Actions digest updates; the repository pins every action by SHA.",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "github actions"
     },
     {
-      "description": "Keep the Trigger.dev SDK, build package, and CLI on the same version. Mismatched versions across these three break the worker build.",
+      "description": "Keep the Trigger.dev SDK, build package, and CLI on the same version, together with the realtime-transport and extraction packages the overrides block forces on their behalf. Mismatched versions across the three break the worker build, and a transport bump landing separately from its parent is how a forced resolution outlives its reason.",
       "matchPackageNames": [
         "@trigger.dev/sdk",
         "@trigger.dev/build",
-        "trigger.dev"
+        "trigger.dev",
+        "socket.io",
+        "engine.io",
+        "ws",
+        "tar"
       ],
       "groupName": "trigger.dev"
     },
     {
-      "description": "Keep Next.js and its ESLint config aligned.",
-      "matchPackageNames": ["next", "eslint-config-next"],
+      "description": "Keep Next.js, its ESLint config, and the two transitives the overrides block forces on Next's behalf (postcss, sharp) in one pull request. A Next major arriving without them would silently persist forced resolutions the new Next never declared.",
+      "matchPackageNames": [
+        "next",
+        "eslint-config-next",
+        "postcss",
+        "sharp"
+      ],
       "groupName": "next.js"
     },
     {
@@ -68,15 +100,34 @@
     },
     {
       "description": "Major upgrades are never auto-merged; they require review and an explicit decision.",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false,
-      "labels": ["dependencies", "major-upgrade"],
+      "labels": [
+        "dependencies",
+        "major-upgrade"
+      ],
       "minimumReleaseAge": "7 days"
     },
     {
       "description": "Let new releases settle before proposing them, to avoid churn on immediately-patched versions.",
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Surface any override update distinctly. Renovate raises override floors automatically but never proposes removing an entry, so overrides accumulate by default. A labelled pull request is the prompt to check whether the entry is still needed at all -- see the removal rule in package.json's //overrides note.",
+      "matchDepTypes": [
+        "overrides"
+      ],
+      "labels": [
+        "dependencies",
+        "override"
+      ],
+      "groupName": "dependency overrides"
     }
   ]
 }
