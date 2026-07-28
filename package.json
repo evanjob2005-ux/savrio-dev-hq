@@ -35,6 +35,12 @@
     "typescript": "^5",
     "vitest": "^4.1.10"
   },
+  "//overrides": {
+    "why": "Security overrides. Every entry resolves a high or critical advisory whose parent pins a vulnerable range. None is a downgrade and none changes a direct dependency. Verified: npm audit reports 0 high and 0 critical at both full and --omit=dev scope. Remove an entry only when its parent's own range has moved past the advisory, and re-run npm audit at both scopes to confirm.",
+    "load-bearing": "postcss, sharp, ws, brace-expansion, minimatch, tar - each is the only thing holding its dependents off a vulnerable version.",
+    "redundant-but-kept": "engine.io - socket.io@4.8.3 already requires ~6.6.0, so this pin adds nothing today. Kept as belt-and-braces; safe to drop. Do NOT drop ws on the same reasoning: it is load-bearing on the engine.io-client path that the Trigger.dev realtime SDK actually uses.",
+    "riskiest": "minimatch 3.x -> 10.x crosses seven majors across the ESLint toolchain (export shape changed at v5). Verified by linting 175 files with 0 errors. Re-run npm run lint after any change here."
+  },
   "overrides": {
     "postcss": "^8.5.18",
     "sharp": "^0.35.0",
@@ -43,6 +49,6 @@
     "ws": "^8.21.1",
     "brace-expansion": "^5.0.8",
     "minimatch": "^10.2.6",
-    "tar": "^7.5.11"
+    "tar": "^7.5.13"
   }
 }
