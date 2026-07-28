@@ -1,0 +1,171 @@
+{
+  "$comment": [
+    "Accepted npm audit advisories. Every entry is a deliberate, dated decision,",
+    "not a mute. The audit gate fails on any critical or high advisory that is NOT",
+    "listed here, fails on any entry past its expiry, and fails on any entry that no",
+    "longer matches a real advisory — so this file cannot quietly outlive its reasons.",
+    "",
+    "Why these exist: npm reports a 'fix available' for every entry below, and in",
+    "each case that fix is a MAJOR DOWNGRADE, not an upgrade. npm audit fix --force",
+    "would take Next 16.2.11 to 9.3.3 and Trigger.dev 4.5.7 to 1.0.8 — rolling the",
+    "application back roughly five years to satisfy a scanner. That is a worse",
+    "outcome than the advisories themselves. The real fix is upstream: these are",
+    "transitive dependencies pinned by Next.js and Trigger.dev, and they resolve when",
+    "those packages update, not when we act.",
+    "",
+    "Before adding an entry, confirm three things: the advisory is genuinely",
+    "unfixable without a destructive change, the exposure is understood and written",
+    "in 'reason', and an expiry is set. An entry with a vague reason is a mute",
+    "wearing a costume.",
+    "",
+    "Reviewed 2026-07-28. Tracked as OBL-03 in docs/plans/OPEN_OBLIGATIONS.md."
+  ],
+  "policy": {
+    "blocks_on": ["critical", "high"],
+    "default_expiry_days": 90,
+    "fail_on_expired": true,
+    "fail_on_stale": true
+  },
+  "exceptions": [
+    {
+      "package": "tar",
+      "severity": "critical",
+      "scope": "dev",
+      "reason": "Arbitrary file creation/overwrite. Reached only through the trigger.dev CLI's dev-time package extraction. Not present in the production dependency tree, so it does not ship and is not reachable by the deployed application. npm's only fix is trigger.dev@1.0.8, a downgrade from 4.5.7.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "next",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "Production framework. npm's proposed fix is next@9.3.3, a downgrade of seven major versions from 16.2.11 that would break the entire application. Current version is recent; resolve by tracking upstream Next releases rather than rolling back.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "postcss",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "XSS via unescaped </style>. Transitive through Next.js, which pins the version; the offered fix is the next@9.3.3 downgrade. Exposure is limited to build-time CSS processing of first-party stylesheets, not user-supplied content.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "sharp",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "Inherited libvips vulnerabilities. Transitive through Next.js image optimisation and pinned by it. This application serves no user-uploaded images; the image surface is first-party static assets.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "@trigger.dev/core",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "Transitive through @trigger.dev/sdk and pinned by it. npm's fix is @trigger.dev/sdk@3.3.17, a major downgrade from 4.5.7. Resolves when Trigger.dev publishes an updated core.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "ws",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "Uninitialised memory disclosure. Reached through the Trigger.dev realtime transport and pinned by it. The application does not expose a WebSocket server to untrusted clients; the connection is outbound to Trigger.dev.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "engine.io",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "Polling transport crash. Same transport chain as ws, pinned by Trigger.dev. Outbound client connection only; no inbound Socket.IO server is exposed by this application.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "socket.io",
+      "severity": "high",
+      "scope": "prod",
+      "reason": "Same Trigger.dev realtime transport chain as ws and engine.io. Client-side use only.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "eslint",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Linting toolchain. Does not ship. The offered fix chain runs through eslint-config-next@12.0.4, a downgrade from 16.2.11 that would break Next.js linting.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "eslint-config-next",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Linting toolchain, does not ship. Proposed fix is a downgrade to 12.0.4 from 16.2.11, which would decouple linting from the installed Next.js major.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "@eslint/config-array",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Transitive under eslint. Development-only; does not ship.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "@eslint/eslintrc",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Transitive under eslint. Development-only; does not ship.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "eslint-plugin-import",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Transitive under eslint-config-next. Development-only; does not ship.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "eslint-plugin-jsx-a11y",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Transitive under eslint-config-next. Development-only; does not ship.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "eslint-plugin-react",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Transitive under eslint-config-next. Development-only; does not ship.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "brace-expansion",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "ReDoS via unbounded expansion. Transitive under the eslint toolchain. Development-only; inputs are first-party glob patterns from configuration, not untrusted data.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "minimatch",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Transitive under the eslint toolchain. Development-only; glob patterns are first-party.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "trigger.dev",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "The Trigger.dev CLI, used for local development and deployment. Does not ship in the application bundle. npm's fix is version 1.0.8, a downgrade from 4.5.7.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "c12",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Configuration loader transitive under the trigger.dev CLI. Development-only.",
+      "expires": "2026-10-26"
+    },
+    {
+      "package": "giget",
+      "severity": "high",
+      "scope": "dev",
+      "reason": "Template fetcher transitive under the trigger.dev CLI. Development-only.",
+      "expires": "2026-10-26"
+    }
+  ]
+}
