@@ -36,10 +36,15 @@
     "vitest": "^4.1.10"
   },
   "//overrides": {
-    "why": "Security overrides. Every entry resolves a high or critical advisory whose parent pins a vulnerable range. None is a downgrade and none changes a direct dependency. Verified: npm audit reports 0 high and 0 critical at both full and --omit=dev scope. Remove an entry only when its parent's own range has moved past the advisory, and re-run npm audit at both scopes to confirm.",
-    "load-bearing": "postcss, sharp, ws, brace-expansion, minimatch, tar - each is the only thing holding its dependents off a vulnerable version.",
-    "redundant-but-kept": "engine.io - socket.io@4.8.3 already requires ~6.6.0, so this pin adds nothing today. Kept as belt-and-braces; safe to drop. Do NOT drop ws on the same reasoning: it is load-bearing on the engine.io-client path that the Trigger.dev realtime SDK actually uses.",
-    "riskiest": "minimatch 3.x -> 10.x crosses seven majors across the ESLint toolchain (export shape changed at v5). Verified by linting 175 files with 0 errors. Re-run npm run lint after any change here."
+    "why": "Security overrides. Each entry forces a transitive dependency past a version carrying a high or critical advisory. None is a downgrade and none changes a direct dependency. Verified: npm audit reports 0 high and 0 critical at both full and --omit=dev scope.",
+    "load-bearing": "postcss, sharp, ws, tar, minimatch - drop any one and advisories return.",
+    "redundant": "engine.io (socket.io@4.8.3 already requires ~6.6.0) and brace-expansion (minimatch@10.2.6 already requires ^5.0.8). Safe to drop either.",
+    "DANGER": "Do NOT drop the minimatch override while keeping brace-expansion. npm audit calls that combination security-equivalent because audit does not execute code - but minimatch@3.1.5 does `expand = require('brace-expansion')` then `expand(pattern)`, and brace-expansion@5 exports an OBJECT, not a function. It throws `TypeError: expand is not a function` on the first braced pattern ESLint evaluates (eslint-config-next uses **/*.{js,jsx,mjs,ts,tsx,mts,cts}). Verified by execution. An independent review recommended exactly this change; architecture review disproved it with a negative control.",
+    "minimatch-call-convention": "minimatch@10's CJS export is a namespace, not callable. ESLint core uses the named .Minimatch export and is safe. Plugin rules that call the default export (react/forbid-component-props, jsx-a11y, several import rules) would throw - none is currently enabled, so the clean lint run does NOT cover them. Enabling one requires re-testing.",
+    "sharp": "Runtime, not build-time: it is Next's image optimizer, invoked under next start. next@16.2.11 declares ^0.34.5 and this override EXCEEDS that range on a native module. Unexercised today because the app uses no next/image. Adding next/image makes this load-bearing at request time and requires re-verification.",
+    "postcss": "Overrides next's EXACT pin 8.4.31. `npm run build` is this entry's only proof and must stay in the required check set.",
+    "tar": "trigger.dev already satisfies ^7.5.13 unaided. This entry exists solely to lift giget (declares ^6.2.1) across the tar 6->7 major. giget is not referenced anywhere in trigger.dev/dist, so this entry is currently unexercised.",
+    "removal-rule": "Remove an entry only when every declared consumer range has moved past the advisory, then re-run npm audit at BOTH scopes and npm run lint."
   },
   "overrides": {
     "postcss": "^8.5.18",
