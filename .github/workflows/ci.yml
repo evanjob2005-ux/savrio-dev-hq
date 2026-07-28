@@ -10,9 +10,11 @@ on:
   push:
     branches:
       - main
+      - feature/dev-hq-operating-system
   pull_request:
     branches:
       - main
+      - feature/dev-hq-operating-system
   workflow_dispatch:
 
 # Least privilege: continuous integration only reads the repository.

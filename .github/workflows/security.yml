@@ -9,9 +9,11 @@ on:
   push:
     branches:
       - main
+      - feature/dev-hq-operating-system
   pull_request:
     branches:
       - main
+      - feature/dev-hq-operating-system
   schedule:
     # Weekly baseline scan, Mondays at 06:00 UTC, to catch newly disclosed
     # issues and secrets committed outside the pull request flow.
