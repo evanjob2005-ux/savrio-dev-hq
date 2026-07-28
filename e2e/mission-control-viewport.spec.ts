@@ -33,10 +33,22 @@ test("produces no runtime errors beyond the deliberate production API block", as
   page,
 }) => {
   const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
   const failedResponses: string[] = [];
 
   page.on("pageerror", (error) => {
     pageErrors.push(error.message);
+  });
+
+  // Retained unfiltered. An app-emitted console.error -- a state parse failure,
+  // a React warning escalated to error -- is neither an uncaught exception nor
+  // an HTTP failure, so removing this listener in favour of response events
+  // would trade one blind spot for another. Resource-load noise is no longer a
+  // reason to filter it, because failures are now asserted structurally below.
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
   });
 
   // Asserted over structured response events rather than console text. Chromium
@@ -69,6 +81,16 @@ test("produces no runtime errors beyond the deliberate production API block", as
   expect(
     unexpected,
     `HTTP failures outside the deliberately blocked Dev HQ surface:\n${unexpected.join("\n")}`,
+  ).toEqual([]);
+
+  // Console errors that merely restate a tolerated 403 are expected; anything
+  // else is the application reporting a genuine problem.
+  const appConsoleErrors = consoleErrors.filter(
+    (text) => !/Failed to load resource/i.test(text),
+  );
+  expect(
+    appConsoleErrors,
+    `application console errors:\n${appConsoleErrors.join("\n")}`,
   ).toEqual([]);
 });
 

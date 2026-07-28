@@ -86,19 +86,69 @@ jobs:
               r"(?i)^(test|fake|dummy|example|placeholder|changeme|sample|"
               r"mock|stub|redacted|dummy|invalid|notreal|your)[-_.]")
 
+          # The prefix alone is NOT sufficient. Staging accounts are routinely
+          # named "test-…" and their passwords are real and working, so an
+          # anchored prefix check would exempt exactly the credential most
+          # likely to be pasted into a spec file. A fixture must also LOOK like
+          # a fixture: lowercase words, no symbols beyond . _ -, no long opaque
+          # segment, and no hex-ish blob. Anything with mixed case, punctuation,
+          # or an entropy-bearing run is treated as real regardless of prefix.
+          FIXTURE_SHAPE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+          HEXISH = re.compile(r"^(?=.*[0-9])(?=.*[a-f])[0-9a-f]{6,}$")
+
+          def looks_synthetic(value):
+              if not PLACEHOLDER.match(value):
+                  return False
+              if not FIXTURE_SHAPE.match(value):
+                  return False
+              for segment in re.split(r"[._-]", value):
+                  if len(segment) > 12 or HEXISH.match(segment):
+                      return False
+              return True
+
           # .env-format files assign unquoted, so GENERIC_SECRET cannot see them.
           # Template files are allowed to exist but must not carry a real value.
+          # PASS/DSN/CRED/AUTH/SK are included because SMTP_PASS, SENTRY_DSN and
+          # STRIPE_SK are common and were not matched by the shorter alternation.
           ENV_ASSIGNMENT = re.compile(
-              r"(?im)^[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD)[A-Z0-9_]*"
-              r"\s*=\s*(\S{16,})\s*$")
+              r"(?im)^[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD|PASS|DSN"
+              r"|CRED|AUTH|SK)[A-Z0-9_]*\s*=\s*(\S{16,})\s*$")
+
+          # URL-shaped variables are not name-matched, because most are public
+          # endpoints. What matters is an embedded credential, so match the
+          # user:password@host form directly. Covers DATABASE_URL and REDIS_URL
+          # without flagging NEXT_PUBLIC_APP_URL.
+          ENV_URL_CREDENTIAL = re.compile(r"://[^:@/\s]*:([^@/\s]{4,})@")
+
+          # Suppression must be possible without editing this scanner. The
+          # absence of an escape hatch is what turned a two-line false positive
+          # into a rule weakening once already; an inline pragma keeps every
+          # exception an attributable line in a diff instead.
+          ALLOW_PRAGMA = "scanner:allow-secret"
+
+          def _unsuppressed(text, matches):
+              lines = text.split("\n")
+              out = []
+              for match in matches:
+                  line_no = text[:match.start()].count("\n")
+                  line = lines[line_no] if line_no < len(lines) else ""
+                  previous = lines[line_no - 1] if line_no > 0 else ""
+                  if ALLOW_PRAGMA in line or ALLOW_PRAGMA in previous:
+                      continue
+                  out.append(match.group(1))
+              return out
 
           def generic_secret_hits(text):
-              return [m.group(1) for m in GENERIC_SECRET.finditer(text)
-                      if not PLACEHOLDER.match(m.group(1))]
+              return _unsuppressed(text, [
+                  m for m in GENERIC_SECRET.finditer(text)
+                  if not looks_synthetic(m.group(1))])
 
           def env_secret_hits(text):
-              return [m.group(1) for m in ENV_ASSIGNMENT.finditer(text)
-                      if not PLACEHOLDER.match(m.group(1))]
+              matches = [m for m in ENV_ASSIGNMENT.finditer(text)
+                         if not looks_synthetic(m.group(1))]
+              matches += [m for m in ENV_URL_CREDENTIAL.finditer(text)
+                          if not looks_synthetic(m.group(1))]
+              return _unsuppressed(text, matches)
 
           content_rules = [
               ("Private key block", re.compile(PEM)),
@@ -384,21 +434,47 @@ jobs:
           cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
           cp -r .semgrep "$control/.semgrep"
 
-          findings="$(cd "$control" && semgrep scan --config .semgrep/dev-hq-boundaries.yml \
-            --metrics=off --json 2>/dev/null | python -c 'import json,sys; print(len(json.load(sys.stdin)["results"]))')"
+          cd "$control"
+          semgrep scan --config .semgrep/dev-hq-boundaries.yml \
+            --metrics=off --json > findings.json 2>/dev/null
 
-          echo "Positive-control findings: ${findings}"
-          if [[ "${findings}" -lt 4 ]]; then
-            echo "::error::Semgrep rules detected ${findings} of 4 known-bad fixtures."
-            echo "The rules have regressed: a defect class they are supposed to catch is now invisible."
-            # Re-run for a readable diagnostic. Separate statements rather than
-            # `cd && scan || true`, which shellcheck correctly flags (SC2015) as
-            # a construct that reads like if-then-else but is not one.
-            cd "$control"
-            semgrep scan --config .semgrep/dev-hq-boundaries.yml --metrics=off || true
-            exit 1
-          fi
-          echo "All 4 known-bad fixtures detected. Rules are live."
+          # Asserts the exact (path, rule) MAPPING, not a count. A count can be
+          # satisfied by the wrong rules firing twice while the subtlest check
+          # -- the bind-and-return requirement -- has silently regressed.
+          python <<'CONTROL'
+          import json
+          import sys
+
+          EXPECTED = {
+              ("app/api/dev-hq/internal/discarded/route.ts",
+               "dev-hq-internal-route-missing-guard"),
+              ("app/api/dev-hq/internal/arrow/route.ts",
+               "dev-hq-internal-route-missing-guard"),
+              ("app/api/dev-hq/internal/sync/route.ts",
+               "dev-hq-internal-route-missing-guard"),
+              ("lib/dev-hq/token-destructured.ts",
+               "dev-hq-internal-token-verified-outside-guard"),
+          }
+
+          results = json.load(open("findings.json"))["results"]
+          actual = {(r["path"].lstrip("./"), r["check_id"].split(".")[-1])
+                    for r in results}
+
+          missing = EXPECTED - actual
+          for path, rule in sorted(missing):
+              print(f"::error::Rule '{rule}' no longer detects {path}")
+          if missing:
+              print(f"Positive control FAILED: {len(missing)} of "
+                    f"{len(EXPECTED)} known-bad fixtures undetected.")
+              print("A defect class these rules are supposed to catch is now invisible.")
+              print(f"Actually detected: {sorted(actual)}")
+              sys.exit(1)
+
+          print(f"Positive control passed: all {len(EXPECTED)} fixture/rule "
+                f"pairs detected.")
+          for path, rule in sorted(EXPECTED):
+              print(f"  {rule} -> {path}")
+          CONTROL
 
       - name: Scan with Dev HQ boundary rules
         run: semgrep scan --config .semgrep/ --error --metrics=off

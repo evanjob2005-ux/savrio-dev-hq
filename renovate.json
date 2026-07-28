@@ -32,7 +32,7 @@
       "groupName": "devDependencies (non-major)"
     },
     {
-      "description": "Auto-merge is DISABLED until branch protection exists. It was briefly enabled on the reasoning that 'tests are now a required CI step' — that reasoning was wrong. The checks run, but nothing REQUIRES them: the default branch of this public repository has no protection, no required status checks, and no required review. Unattended merge into an unprotected default branch is how a compromised build-tooling release reaches the repo with no human in the loop. Re-enable only after required status checks are configured; see the enablement order in the pull request that introduced this file.",
+      "description": "Auto-merge is DISABLED deliberately. Correction of record: an earlier version of this comment said the default branch had no protection. That was wrong — it is protected by the 'Sprint 1F active line protection' ruleset, which the classic branch-protection API does not report, which is how both the author and the reviewer missed it. The ruleset requires two status checks but the approving-review count is 0 while the repository has a single collaborator, so an auto-merged dependency PR would reach this public repository's default branch with no human in the loop. That is the reason this stays off, and it is a stronger reason than the one it replaces. Re-enable once a second reviewer exists and the review requirement is raised back to 1.",
       "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": false
