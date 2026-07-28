@@ -21,7 +21,14 @@ export default defineConfig({
     // first retry, so an on-first-retry trace could never be captured.
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // The Phase 1 Mission Control exit gate requires live progress to be viewable
+  // on desktop AND phone, so a desktop-only pass does not evidence it. Both
+  // projects run the same specs; viewport-sensitive assertions live in
+  // mission-control-viewport.spec.ts.
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
+  ],
   // Production build + start, so the run is deterministic rather than
   // depending on dev-server compilation timing.
   webServer: {
