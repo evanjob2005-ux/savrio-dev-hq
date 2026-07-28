@@ -3,139 +3,145 @@
 # CODEOWNERS
 # ==========================================================
 #
-# ACTION REQUIRED BEFORE ENABLING CODE-OWNER REVIEWS:
-# Every "@REPLACE-WITH-GITHUB-OWNER" below is an unresolved placeholder and is
-# NOT a valid owner. Replace each one with the real repository owner -- a
-# GitHub @username or an @org/team -- that has write access. Until this is
-# done, GitHub cannot assign code owners and the Continuous Integration
-# "Validate CODEOWNERS ownership" check will fail on purpose.
+# Ownership is resolved to the repository owner. Every path below is owned by
+# @evanjob2005-ux, taken from the origin remote
+# (github.com/evanjob2005-ux/savrio-dev-hq).
+#
+# This file assigns review responsibility. It does not ENFORCE it: that
+# requires branch protection on the default branch with "Require review from
+# Code Owners" enabled, which is a repository setting and cannot be committed.
+# Until that setting is on, these assignments are advisory and the protected
+# files named in the Binding Operating Kernel are not actually gated.
+#
+# Replace the single owner with @org/team entries as the organization grows,
+# so that review load is not bound to one account.
 # ==========================================================
 
 ############################################################
 # Default Owner
 ############################################################
 
-* @REPLACE-WITH-GITHUB-OWNER
+* @evanjob2005-ux
 
 ############################################################
 # Documentation
 ############################################################
 
-README.md @REPLACE-WITH-GITHUB-OWNER
-CONTRIBUTING.md @REPLACE-WITH-GITHUB-OWNER
-SECURITY.md @REPLACE-WITH-GITHUB-OWNER
+README.md @evanjob2005-ux
+CONTRIBUTING.md @evanjob2005-ux
+SECURITY.md @evanjob2005-ux
 
 ############################################################
 # Engineering Standards
 ############################################################
 
-/standards/ @REPLACE-WITH-GITHUB-OWNER
+/standards/ @evanjob2005-ux
 
 ############################################################
 # AI Agents
 ############################################################
 
-/agents/ @REPLACE-WITH-GITHUB-OWNER
+/agents/ @evanjob2005-ux
 
 ############################################################
 # Agent Handbooks
 ############################################################
 
-/handbooks/ @REPLACE-WITH-GITHUB-OWNER
+/handbooks/ @evanjob2005-ux
 
 ############################################################
 # Workflows
 ############################################################
 
-/workflows/ @REPLACE-WITH-GITHUB-OWNER
+/workflows/ @evanjob2005-ux
 
 ############################################################
 # Templates
 ############################################################
 
-/templates/ @REPLACE-WITH-GITHUB-OWNER
+/templates/ @evanjob2005-ux
 
 ############################################################
 # Playbooks
 ############################################################
 
-/playbooks/ @REPLACE-WITH-GITHUB-OWNER
+/playbooks/ @evanjob2005-ux
 
 ############################################################
 # Checklists
 ############################################################
 
-/checklists/ @REPLACE-WITH-GITHUB-OWNER
+/checklists/ @evanjob2005-ux
 
 ############################################################
 # Incident Runbooks
 ############################################################
 
-/runbooks/ @REPLACE-WITH-GITHUB-OWNER
+/runbooks/ @evanjob2005-ux
 
 ############################################################
 # Architecture Decision Records
 ############################################################
 
-/adr/ @REPLACE-WITH-GITHUB-OWNER
+/adr/ @evanjob2005-ux
 
 ############################################################
 # Metrics
 ############################################################
 
-/metrics/ @REPLACE-WITH-GITHUB-OWNER
+/metrics/ @evanjob2005-ux
 
 ############################################################
 # Automation
 ############################################################
 
-/automation/ @REPLACE-WITH-GITHUB-OWNER
+/automation/ @evanjob2005-ux
 
 ############################################################
 # Scripts
 ############################################################
 
-/scripts/ @REPLACE-WITH-GITHUB-OWNER
+/scripts/ @evanjob2005-ux
 
 ############################################################
 # GitHub Configuration
 ############################################################
 
-/.github/ @REPLACE-WITH-GITHUB-OWNER
+/.github/ @evanjob2005-ux
 
 ############################################################
 # VS Code Configuration
 ############################################################
 
-/.vscode/ @REPLACE-WITH-GITHUB-OWNER
+/.vscode/ @evanjob2005-ux
 
 ############################################################
 # Application Source
 ############################################################
 
-/app/ @REPLACE-WITH-GITHUB-OWNER
-/components/ @REPLACE-WITH-GITHUB-OWNER
-/lib/ @REPLACE-WITH-GITHUB-OWNER
-/hooks/ @REPLACE-WITH-GITHUB-OWNER
-/types/ @REPLACE-WITH-GITHUB-OWNER
-/public/ @REPLACE-WITH-GITHUB-OWNER
+/app/ @evanjob2005-ux
+/components/ @evanjob2005-ux
+/lib/ @evanjob2005-ux
+/hooks/ @evanjob2005-ux
+/types/ @evanjob2005-ux
+/public/ @evanjob2005-ux
 
 ############################################################
 # Database
 ############################################################
 
-/supabase/ @REPLACE-WITH-GITHUB-OWNER
+/supabase/ @evanjob2005-ux
 
 ############################################################
 # Configuration Files
 ############################################################
 
-package.json @REPLACE-WITH-GITHUB-OWNER
-package-lock.json @REPLACE-WITH-GITHUB-OWNER
-tsconfig.json @REPLACE-WITH-GITHUB-OWNER
-next.config.ts @REPLACE-WITH-GITHUB-OWNER
-tailwind.config.ts @REPLACE-WITH-GITHUB-OWNER
-eslint.config.* @REPLACE-WITH-GITHUB-OWNER
+package.json @evanjob2005-ux
+package-lock.json @evanjob2005-ux
+tsconfig.json @evanjob2005-ux
+next.config.ts @evanjob2005-ux
+tailwind.config.ts @evanjob2005-ux
+eslint.config.* @evanjob2005-ux
 
 ############################################################
 # End of File
