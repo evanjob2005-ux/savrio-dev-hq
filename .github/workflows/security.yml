@@ -290,3 +290,48 @@ jobs:
               sys.exit(1)
           print("Workflow permissions and action pinning look sound.")
           PYTHON
+
+  static-analysis:
+    name: Static Analysis (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install --quiet semgrep
+
+      # Validated as a separate step so that a malformed rule file is reported
+      # as a rules problem, not misread as the codebase violating a rule.
+      - name: Validate custom rules
+        run: semgrep --validate --config .semgrep/ --metrics=off
+
+      - name: Scan with Dev HQ boundary rules
+        run: semgrep scan --config .semgrep/ --error --metrics=off
+
+      # Registry packs run advisory-only. They are broad and community-maintained,
+      # so a new upstream rule must not be able to block an unrelated change.
+      # Boundary rules above are the blocking gate.
+      - name: Scan with registry rulesets (advisory)
+        continue-on-error: true
+        run: semgrep scan --config p/typescript --config p/react --config p/owasp-top-ten --metrics=off
+
+      - name: Static analysis summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Static Analysis (Semgrep)"
+            echo ""
+            echo "- Custom Dev HQ boundary rules: blocking"
+            echo "- Registry rulesets (typescript, react, owasp-top-ten): advisory"
+          } >> "$GITHUB_STEP_SUMMARY"

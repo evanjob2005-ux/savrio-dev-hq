@@ -1,0 +1,74 @@
+# Dev HQ architectural boundary rules.
+#
+# These encode invariants that are otherwise enforced only by prose in the
+# Master Roadmap and by a reviewer noticing. A rule here fails the build, which
+# means the invariant survives reviewer turnover, model changes, and fatigue.
+#
+# Scope discipline: keep this file small and precise. A noisy rule set gets
+# muted, and a muted rule set enforces nothing. Prefer a rule that catches a
+# real class of defect over a rule that catches a style preference.
+#
+# Note on what this file CANNOT do: Semgrep matches code patterns. It cannot
+# enforce "only certain people may change these files" — that is CODEOWNERS
+# plus branch protection with required code-owner review.
+
+rules:
+  - id: dev-hq-internal-route-missing-guard
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      This internal Dev HQ route handler does not call rejectInternalDevRequest().
+      Routes under app/api/dev-hq/internal/ are Trigger.dev worker callbacks: they
+      must be blocked in production and token-authenticated in development. A
+      handler without the guard is an unauthenticated write path into the
+      execution pipeline. Call rejectInternalDevRequest(request) as the first
+      statement and return its result when non-null.
+    paths:
+      include:
+        - "app/api/dev-hq/internal/**/route.ts"
+    patterns:
+      - pattern-either:
+          - pattern: export async function GET(...) { ... }
+          - pattern: export async function POST(...) { ... }
+          - pattern: export async function PUT(...) { ... }
+          - pattern: export async function PATCH(...) { ... }
+          - pattern: export async function DELETE(...) { ... }
+      - pattern-not-regex: rejectInternalDevRequest
+
+  - id: dev-hq-internal-token-read-outside-guard
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      DEV_HQ_INTERNAL_TOKEN is read outside lib/dev-hq/internal-guard.ts. The
+      internal token has exactly one comparison site, which fails closed when the
+      variable is unset. A second reader is how that fail-closed behaviour gets
+      quietly duplicated and then weakened. Import rejectInternalDevRequest
+      instead of re-implementing the check.
+    paths:
+      include:
+        - "app/**"
+        - "lib/**"
+        - "components/**"
+        - "trigger/**"
+      exclude:
+        - "lib/dev-hq/internal-guard.ts"
+        - "**/*.test.ts"
+    pattern-either:
+      - pattern: process.env.DEV_HQ_INTERNAL_TOKEN
+      - pattern: process.env["DEV_HQ_INTERNAL_TOKEN"]
+
+  # Deliberately a regex rather than a JSX structural pattern: this must behave
+  # identically across .ts and .tsx without depending on language-ID handling.
+  - id: dev-hq-dangerously-set-inner-html
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      dangerouslySetInnerHTML introduces an XSS sink. Mission Control renders
+      agent- and model-produced text, which must be treated as untrusted input.
+      Render as text, or sanitise explicitly and document why raw HTML is
+      required here.
+    paths:
+      include:
+        - "app/**"
+        - "components/**"
+    pattern-regex: dangerouslySetInnerHTML
