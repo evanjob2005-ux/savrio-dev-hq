@@ -1901,3 +1901,474 @@ this project when machine-specific paths were removed from durable records befor
 5. Does **not** implement E-6, persistence, or any of the three deferred SMALL findings.
 6. Does **not** weaken, remove, bypass, or consolidate any production barrier.
 7. Does **not** make P-2 deployment-ready.
+
+# 14. PACKAGE P-3 — PROCESS-START MARKER AND PROCESS-LIFETIME DISCLOSURE. INTEGRATED
+
+Sections 0 through 13 stand unchanged. **P-3 is the second Sprint 1F implementation package
+integrated into the protected branch, and the first to reach integration on a first-pass
+independent-review APPROVE with no remediation cycle.**
+
+**Terminology.** The project is **Viybd HQ**. Repository paths, branch names, annotated
+tags, commit subjects, worktree names, and historical workstream identifiers still read
+**Savrio Dev HQ** and are preserved unchanged. Nothing was renamed for this record.
+
+**Evidence separation.** Three categories are kept separate throughout and are never
+blended: pre-integration candidate-review evidence produced by the independent reviewer
+against the frozen candidate; post-integration local validation evidence produced by the
+Coordinator in the integration worktree from exact observed output; and remote CI evidence,
+which **does not exist for this commit** because no push was authorized.
+
+**Path hygiene.** Following the disclosed precedent in 13.15, this record identifies
+worktrees by name — `savrio-advance-1f` for integration, `savrio-impl-p3` for the frozen
+candidate — rather than by machine-specific absolute path. All substantive evidence is
+recorded in full.
+
+## 14.1 Authorization and integration scope
+
+The Founder authorized the Main Coordinator to act as **P-3 Local Integration Executor** and
+**P-3 Durable-Record Author** for a narrowly bounded set of actions: inspect local Git
+objects, verify the protected branch and the frozen candidate against exact expected
+identities, perform one local linear fast-forward, run complete local post-integration
+validation, append this durable record, and commit it as documentation only.
+
+**No other agent was contacted.** No Codex session, Claude session, subagent, or
+implementation engineer was launched or delegated to. **No additional code review was
+conducted.** **The reviewed candidate was not altered in any way.**
+
+Integration authority under this packet **does not imply** push, remote-CI, pull-request,
+deployment, P-4, P-5, dependency-remediation, or production authority. Each of those
+remains a separate Founder decision.
+
+## 14.2 Pre-integration protected-branch identity
+
+Verified in the integration worktree `savrio-advance-1f` before any mutation, and matching
+the expected values exactly:
+
+```
+branch  feature/dev-hq-operating-system
+commit  c11a295bde1a5c7ce67361b5fee8f8702740e1f2
+tree    84ced77bdcc92ebb2eb90d0cd187c2210b40645e
+parent  55c6db79778e5c4c1d2a627828de136e43bac4fd
+```
+
+The pre-integration parent is the integrated P-2 candidate commit recorded in 13.13, so the
+P-3 base sits directly on top of completed P-2 work.
+
+**Worktree cleanliness before integration:** porcelain status with all untracked files
+returned **zero lines**. The worktree administrative directory was inspected directly and
+contained **no** `MERGE_HEAD`, `REBASE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`,
+`BISECT_LOG`, `MERGE_MSG`, `rebase-merge`, `rebase-apply`, or `sequencer`. **No merge,
+rebase, cherry-pick, revert, or bisect was in progress.**
+
+The worktree inventory was enumerated. The protected branch was checked out in exactly one
+worktree, `savrio-advance-1f`, and the P-3 candidate branch in exactly one other,
+`savrio-impl-p3`. Unrelated older review worktrees remain present and were **not** removed —
+housekeeping was outside this package.
+
+## 14.3 Immutable P-3 candidate identity
+
+Verified by direct object inspection before integration:
+
+```
+candidate tag    candidate-1f-p3-2
+object type      tag (annotated)
+tag-object SHA   8eaf7a2f46f252610b0b0d9115de2bd7f8609bca
+commit           6567c828db67c2a9f7cda84ecc785a259814dd1f
+tree             8055b82278d99d36f3150001e7d948fc108c96ab
+parent           44cb7bb67a203dd4365a51f5f54384419fa1156d
+candidate branch impl/p3-process-start-marker
+base             c11a295bde1a5c7ce67361b5fee8f8702740e1f2
+```
+
+The tag annotation was read from the tag object and matched exactly:
+
+```
+Sprint 1F P-3 candidate 2 — rebased after P-2 integration
+```
+
+**Integration was performed against the exact reviewed commit SHA, not against the mutable
+branch name.** The branch name was used only to confirm that it still pointed at the same
+object.
+
+## 14.4 Candidate ancestry and reviewed scope
+
+The candidate is exactly **three linear commits** ahead of the base, with no merge in the
+range. Observed ancestry, commit, tree, parent, and subject:
+
+```
+6567c828db67c2a9f7cda84ecc785a259814dd1f 8055b82278d99d36f3150001e7d948fc108c96ab 44cb7bb67a203dd4365a51f5f54384419fa1156d | test(dev-hq): prove process-start snapshot isolation (P-3)
+44cb7bb67a203dd4365a51f5f54384419fa1156d ad55e3996c06b07493b4419e26823a96199d2116 1c13a085b48e979cd8eafb80d988121dbca118a9 | test(dev-hq): pin the P-2/P-3 seam against lifetime rotation (P-3)
+1c13a085b48e979cd8eafb80d988121dbca118a9 a5236894c6cffe995257fc44531fd65fd901b2fa c11a295bde1a5c7ce67361b5fee8f8702740e1f2 | feat(dev-hq): disclose the store lifetime on the state snapshot (P-3)
+```
+
+Fast-forward eligibility proof, observed:
+
+```
+merge base                                c11a295bde1a5c7ce67361b5fee8f8702740e1f2
+candidate commits ahead of HEAD           3
+HEAD is ancestor of candidate             yes
+candidate is ancestor of HEAD (pre-int)   no
+```
+
+**Reviewed scope — four paths, and no others:**
+
+```
+A  lib/dev-hq/process-start-marker-continuation-seam.test.ts
+A  lib/dev-hq/process-start-marker.test.ts
+M  lib/dev-hq/store.ts
+M  lib/dev-hq/types.ts
+```
+
+Aggregate diff against the base: **4 files changed, 542 insertions, 2 deletions.**
+
+Final continuation commit `6567c828db67c2a9f7cda84ecc785a259814dd1f` touched exactly one
+path, `lib/dev-hq/process-start-marker-continuation-seam.test.ts`, with **27 insertions and
+1 deletion** — confirmed identically by shortstat and by numstat. **No unexpected path
+appeared at any point in the range.**
+
+**Two of the four paths are new test files. The entire production surface of P-3 is two
+modified files, `lib/dev-hq/store.ts` and `lib/dev-hq/types.ts`.**
+
+## 14.5 P-3 production behavior
+
+P-3 introduces a **`ProcessStartMarker`** — a server-supplied identity for one Dev HQ store
+lifetime, consisting of an opaque `id` and an ISO-8601 `startedAt` instant read from the
+server clock.
+
+1. The marker is created in `lib/dev-hq/store.ts` by `createProcessStartMarker()`, invoked
+   from `createEmptyStore()` — **the only place that can observe a lifetime beginning.**
+2. The identity is produced on the server from `nextId("process")` and `nowIso()`.
+   **Nothing a caller or a request supplies reaches this value.**
+3. `nextId` carries a process-local sequence, so two instances created within the same
+   millisecond — a reset, in practice — remain distinct. Across a real process restart the
+   sequence restarts but the clock has advanced, and a restart does not complete inside one
+   millisecond.
+4. `buildDevHqState()` publishes the marker on the state snapshot **copied, not shared**
+   — `{ ...store.processStart }` — matching the copy discipline of every other field, so a
+   reader cannot edit the store's own record of which lifetime it is.
+5. The type contract in `lib/dev-hq/types.ts` states the purpose explicitly: a reader that
+   compares this value against the one it last saw can distinguish **"nothing has happened
+   yet"** from **"what you were looking at was destroyed by a restart."** Without it, an
+   empty approval queue is ambiguous.
+
+**The marker DISCLOSES non-durability. It does not reduce it.** When `id` changes,
+everything the previous lifetime held is gone and cannot be retrieved. The marker only makes
+that loss observable.
+
+## 14.6 P-2/P-3 seam behavior
+
+The seam between the P-2 approval-continuation redesign and the P-3 marker is pinned by
+`lib/dev-hq/process-start-marker-continuation-seam.test.ts`, whose four behaviors are:
+
+1. The marker **holds fixed across a full dispatch, failure, retry, and finalize cycle** —
+   continuation activity, including the unbounded same-decision retry rule established in
+   13.5, does **not** rotate the lifetime identity.
+2. The marker **rotates only when the store lifetime is actually replaced.**
+3. A marker **supplied on a continuation callback payload is ignored** — request-derived
+   input cannot influence the published identity.
+4. The in-memory state builder returns a **detached** marker, so snapshot readers hold a
+   copy.
+
+`lib/dev-hq/process-start-marker.test.ts` covers the marker itself in five behaviors:
+server-supplied presence on the snapshot; stability across reads within one lifetime; change
+when the lifetime ends so a restart is distinguishable; the ability to tell an empty queue
+from a cleared one; and an explicit assertion that the marker **asserts nothing about
+durability.**
+
+## 14.7 Codex independent-review result
+
+Carried forward from the Founder-accepted authorization packet and the completed Main
+Coordinator reconciliation. **This is pre-integration candidate-review evidence. It was not
+re-derived during integration, and no additional review was conducted.**
+
+```
+reviewed candidate          candidate-1f-p3-2
+Codex verdict               APPROVE
+Codex findings              none
+architecture gate           NOT REQUIRED
+implementation remediation  not required
+Codex re-review             not required
+reconciliation verdict      READY FOR FOUNDER INTEGRATION DECISION
+```
+
+P-3 reached integration **without a reject-remediate cycle**, unlike P-2.
+
+## 14.8 Seven-control result
+
+Carried forward from the independent review and the Coordinator reconciliation:
+
+```
+Control 1 — truthful marker creation             PASS
+Control 2 — no request-derived marker            PASS
+Control 3 — P-2/P-3 seam isolation               PASS
+Control 4 — P2_TARGET mutation control           PASS
+Control 5A — marker-creation mutation control    PASS
+Control 5B — copy-on-read mutation control       PASS
+Control 6 — prohibited-behavior inventories      PASS
+Control 7 — no protected-barrier dependency      PASS
+```
+
+**Independently corroborated at integration time by the Coordinator**, from observed output
+rather than from the review report:
+
+- Controls 1, 2, 3, 5A, and 5B correspond to named behaviors in the two P-3 test files, and
+  **all nine of those tests passed** on the integrated commit — five in
+  `process-start-marker.test.ts`, four in
+  `process-start-marker-continuation-seam.test.ts`.
+- Control 4 corresponds to the P-2 regression assertion carried at
+  `lib/dev-hq/founder-request-terminal-run.test.ts:106`, `"P2_TARGET: renders no completed
+  approval while the workflow has not advanced"`. That file passed, **2 of 2 tests**.
+- Control 6 corresponds to the prohibited-behavior inventories in
+  `continuation-import-boundary.test.ts` and `wait-token-inventory.test.ts`, which passed
+  **5 of 5** and **6 of 6** respectively.
+- Control 7 is corroborated by blob-identity evidence in 14.14: **the P-3 diff touches no
+  protected barrier**, and the four-path scope in 14.4 contains no barrier file.
+
+## 14.9 Negative-control evidence
+
+The mutation controls — Control 4, Control 5A, and Control 5B — are **negative controls
+executed during the independent review**, in which a deliberate source mutation was
+introduced and the corresponding test was confirmed to fail. Their PASS status is
+**pre-integration review evidence carried forward.**
+
+**These mutation controls were NOT re-executed during integration, and could not have been:
+re-running them would require mutating the reviewed candidate, which this authorization
+explicitly prohibits.** No mutation was performed. No source or test file was modified.
+
+What the Coordinator can and does state from direct observation is that the tests those
+controls exercise **exist at the integrated commit and pass there** — see 14.8. The claim
+that they *fail under mutation* rests on the independent review, and is recorded here as
+carried-forward evidence rather than as an integration-time observation.
+
+## 14.10 Authentication and authorization boundaries
+
+Stated separately and explicitly:
+
+1. **P-3 made no authentication change.** No authentication mechanism was added, modified,
+   removed, or relied upon.
+2. **P-3 made no authorization change.** No caller-identity check, permission model, or
+   access boundary was added, modified, or removed.
+3. **The marker is disclosure-only.**
+4. **The marker is NOT** a persistence mechanism, a durability guarantee, an authority
+   token, an approval mechanism, a continuation-authorization mechanism, a permission, or a
+   workflow-transition mechanism.
+5. **FD5-01, FD5-03, FD5-06, and E-6 remain OPEN and receive no P-3 implementation credit.**
+   Founder authentication, caller-identity authorization, and durable persistence are
+   untouched by this package.
+6. The **Work Management Layer remains the authoritative owner of durable workflow state.**
+   P-3 changes nothing about that ownership; it only publishes the identity of the in-memory
+   lifetime so that its non-durability can be read honestly.
+
+## 14.11 Architecture-review gate
+
+**NOT REQUIRED for P-3.** The gate result is carried forward from the reconciliation. **No
+Claude architecture review was requested, conducted, or relied upon for this integration**,
+and none was contacted.
+
+## 14.12 Local fast-forward integration result
+
+Executed once, in the integration worktree `savrio-advance-1f`, against the exact reviewed
+commit SHA:
+
+```
+git merge --ff-only 6567c828db67c2a9f7cda84ecc785a259814dd1f
+```
+
+Exit code **0**. Standard error was empty. Complete standard output:
+
+```
+Updating c11a295..6567c82
+Fast-forward
+ .../process-start-marker-continuation-seam.test.ts | 315 +++++++++++++++++++++
+ lib/dev-hq/process-start-marker.test.ts            | 168 +++++++++++
+ lib/dev-hq/store.ts                                |  28 +-
+ lib/dev-hq/types.ts                                |  33 +++
+ 4 files changed, 542 insertions(+), 2 deletions(-)
+ create mode 100644 lib/dev-hq/process-start-marker-continuation-seam.test.ts
+ create mode 100644 lib/dev-hq/process-start-marker.test.ts
+```
+
+**Observed post-integration branch identity, matching the expected values exactly:**
+
+```
+branch  feature/dev-hq-operating-system
+commit  6567c828db67c2a9f7cda84ecc785a259814dd1f
+tree    8055b82278d99d36f3150001e7d948fc108c96ab
+parent  44cb7bb67a203dd4365a51f5f54384419fa1156d
+status  zero porcelain lines
+```
+
+**NO MERGE COMMIT WAS CREATED.** The parent listing for the new head returned exactly one
+parent, and the count of merge commits in the integrated range was **0**. The fast-forward
+advanced the branch reference only and produced no new object.
+
+**The integrated commit and tree are byte-identical to the reviewed candidate.** The
+integrated tree `8055b82278d99d36f3150001e7d948fc108c96ab` equals the candidate tree
+recorded in 14.3. **The reviewed candidate was integrated without mutation.**
+
+## 14.13 Post-integration validation
+
+All commands were run in the integration worktree against integrated commit
+`6567c828db67c2a9f7cda84ecc785a259814dd1f`. **Evidence gathered against any other commit is
+not evidence for this integration.**
+
+**Clean dependency install** — exit **0**. 733 packages added, 734 audited, installed from
+the integrated lockfile. Inherited audit state reported; see 14.15.
+
+**Unit suite** — exit **0**.
+
+```
+expected  33 test files, 392 tests, 0 failures
+observed  33 test files passed (33), 392 tests passed (392), 0 failures
+```
+
+**Lint** — exit **0**, no reported errors and no warnings.
+
+**Typecheck, incremental-false form** — exit **0**, no diagnostics emitted.
+
+**Production build** — exit **0**. Compiled successfully. **Generating static pages 18 of
+18**, matching the expected figure.
+
+**Chromium end-to-end** — exit **0**. **1 test passed**, 0 failures:
+`e2e/smoke.spec.ts` — "mission control shell renders its heading for a visitor".
+
+**Focused test files, run individually on the node project. Every expected count matched
+exactly:**
+
+```
+lib/dev-hq/process-start-marker.test.ts                   expected 5  observed 5 passed
+lib/dev-hq/process-start-marker-continuation-seam.test.ts expected 4  observed 4 passed
+lib/dev-hq/founder-request-terminal-run.test.ts           expected 2  observed 2 passed
+lib/dev-hq/wait-token-inventory.test.ts                   expected 6  observed 6 passed
+lib/dev-hq/continuation-import-boundary.test.ts           expected 5  observed 5 passed
+lib/dev-hq/review-scope.test.ts                           expected 4  observed 4 passed
+```
+
+**Whitespace check** — exit **0**, no violations.
+
+**Worktree cleanliness** — porcelain status with all untracked files returned **zero
+lines**, both immediately after the fast-forward and again after all validation completed.
+
+**Every observed count matched the expected figure exactly. No mismatch occurred. No
+expected figure was adjusted, and no source or test file was modified to make any validation
+pass.**
+
+**Remote CI did not run**, because no push was authorized. The required checks under the
+active branch ruleset **did not execute for this commit**, and **no remote-CI evidence
+exists for `6567c828db67c2a9f7cda84ecc785a259814dd1f`.** Remote CI must not be described as
+passing.
+
+## 14.14 Protected barriers and immutable tags
+
+**Protected and frozen blobs, verified by hash against the candidate object before
+integration and again against the integrated branch after all validation. Every value was
+identical in both readings:**
+
+```
+1a28e2ad367f802864c86ee31ef8959d38acc2fb  proxy.ts
+5e3c2a3b987e065b5bd3b2c74f2d145def0dfb15  lib/dev-hq/internal-guard.ts
+94840e0aa7d2ed8e49665547346025b597c47cba  lib/dev-hq/actions.ts
+414b567bbbe1a82596d5f4106eff9a8b07dd3889  trigger.config.ts
+2f4d485ca84ee7d01a5527d38b3f83ccc31a63fb  package.json
+3a74684e30d93c8046ef1379439289d9003d514a  package-lock.json
+7c754ae53ac069d50c7fd0705242182bb044ba65  lib/dev-hq/process-start-marker.test.ts
+3d754f049450f4b677a0d51f4ac9e1881287b02b  lib/dev-hq/store.ts
+ad7ac8b4af1e0dd953e113ace2f5bfd9b850c668  lib/dev-hq/types.ts
+01e6ab3a3c7630787c09c7f2084f2604bdcc05f5  lib/dev-hq/process-start-marker-continuation-seam.test.ts
+```
+
+**No protected production barrier was weakened, removed, bypassed, consolidated, or
+replaced.** `proxy.ts`, `lib/dev-hq/internal-guard.ts`, `lib/dev-hq/actions.ts`, and
+`trigger.config.ts` are byte-identical across the integration. `package.json` and
+`package-lock.json` are unchanged, so **P-3 introduced no dependency change.**
+
+**All five annotated candidate tags were verified before integration and again after
+validation. Every tag object, commit, and tree was identical in both readings. No tag was
+created, moved, deleted, overwritten, or recreated:**
+
+```
+candidate-1f-p1-1  tag 36cd35e414d3fd04171c5a0e67aa0c1b363632e8  commit f210fb7c5ccfbbc76b664360900cccdc4ab2a965  tree 97f4421ec893da117a80fe220c671fd830cfc54c
+candidate-1f-p2-1  tag e2508d4ab5a8e24778ce97d81666c60ce83f66ee  commit b68211e49ba6c8b8c6cefc18b1870783e411cd5a  tree 566c1016af5e2d645db601181d518385b838f5a3
+candidate-1f-p2-2  tag 697c0f9b9a0542851c9c09a49ba0d75b57010bd4  commit 55c6db79778e5c4c1d2a627828de136e43bac4fd  tree 030eab3157b08a3de0ea0bc64142c2ac829bca78
+candidate-1f-p3-1  tag 79d5186e555cb781fdebc0ed280adb56e62659d4  commit 021cbf61fe9ac6cb948c3ad7ecf9ebb9a2b5450c  tree a5310c454cd7a65a6636a57f24f6308722cf0385
+candidate-1f-p3-2  tag 8eaf7a2f46f252610b0b0d9115de2bd7f8609bca  commit 6567c828db67c2a9f7cda84ecc785a259814dd1f  tree 8055b82278d99d36f3150001e7d948fc108c96ab
+```
+
+`candidate-1f-p2-1` remains permanent review evidence of the rejected P-2 candidate, exactly
+as required by 13.1.
+
+**The frozen candidate worktree `savrio-impl-p3` was verified unchanged and clean:** branch
+`impl/p3-process-start-marker`, commit `6567c828db67c2a9f7cda84ecc785a259814dd1f`, tree
+`8055b82278d99d36f3150001e7d948fc108c96ab`, porcelain status **zero lines**. Its files were
+not modified.
+
+## 14.15 Deferred and inherited issues
+
+**Inherited dependency-audit state.** The clean install reported, exactly as previously
+observed:
+
+```
+42 findings
+1 low
+21 moderate
+19 high
+1 critical
+```
+
+**These findings are INHERITED, not introduced by P-3.** `package.json` and
+`package-lock.json` are unchanged protected blobs across this integration, confirmed by hash
+in 14.14, so P-3 changed no dependency. **No direct evidence indicates that any of these
+findings affects the new P-3 in-memory marker path**, which introduces no dependency, no
+network surface, and no deserialization of external input.
+
+**No remediation was performed.** `npm audit fix` was not run. No dependency was modified.
+**The issue is preserved intact and remains assigned to a separately authorized
+dependency-security hardening package.**
+
+**Accepted small residual gaps, recorded and not remediated:**
+
+1. **Operating-system restart is represented through the singular store-replacement boundary
+   rather than a separately spawned process.** The marker's rotation behavior is proven at
+   the store-lifetime boundary, not by launching a second OS process.
+2. **Reject-decision continuation is not separately duplicated**, because it shares the same
+   continuation and store paths already covered by the seam tests.
+3. **Unrelated old temporary review worktrees remain present** and were deliberately not
+   removed. Housekeeping was outside this package's authorized scope.
+
+**No critical, high, or medium blocker remains open against P-3 itself.**
+
+## 14.16 Actions not performed and exact next gate
+
+**Explicitly not performed, and not authorized by this packet:**
+
+1. **Nothing was pushed.** No branch and no tag left the local repository.
+2. **No remote was contacted.** No fetch, no pull, no remote query.
+3. **Remote CI did not run**, and no CI evidence exists for the integrated commit.
+4. **No pull request was opened or updated.**
+5. **Nothing was deployed.**
+6. **P-4 and P-5 were not begun**, and remain unauthorized.
+7. **No dependency remediation was performed.**
+8. **No authentication, authorization, persistence, E-6, or public-ingress work was begun.**
+9. **No tag was created, moved, or deleted.**
+10. **No workflow or ruleset was modified.**
+11. **No protected barrier was modified or weakened.**
+12. **No other agent was contacted**, and no additional code review or architecture review
+    was conducted.
+13. **No source or test file was modified.** The only file changed by this record is this
+    document.
+14. **No further Founder-reserved decision was made.**
+
+**State at the close of this record:**
+
+```
+local P-3 integration     COMPLETE
+durable record            COMPLETE
+Codex re-review           NOT REQUIRED
+architecture review       NOT REQUIRED
+remediation               NOT REQUIRED
+```
+
+**The next gate is a Founder decision.** The Coordinator makes no decision here and
+recommends only that the Founder determine, as a separate authorization, whether the
+integrated protected branch should now be pushed so that remote CI can execute against it,
+or whether P-4 should be authorized first. **Neither action is authorized by this packet.**
