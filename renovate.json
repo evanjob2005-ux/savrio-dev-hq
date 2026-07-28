@@ -1,0 +1,84 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "America/New_York",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "semanticCommitScope": "deps",
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "rebaseWhen": "conflicted",
+  "configMigration": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "security"],
+    "schedule": ["at any time"],
+    "prPriority": 10
+  },
+  "packageRules": [
+    {
+      "description": "Group all non-major devDependency updates into a single PR to reduce review churn.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "devDependencies (non-major)"
+    },
+    {
+      "description": "Auto-merge non-major devDependency updates once CI passes. Tests are now a required CI step, so a green run is real evidence.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Group GitHub Actions digest updates; the repository pins every action by SHA.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "Keep the Trigger.dev SDK, build package, and CLI on the same version. Mismatched versions across these three break the worker build.",
+      "matchPackageNames": [
+        "@trigger.dev/sdk",
+        "@trigger.dev/build",
+        "trigger.dev"
+      ],
+      "groupName": "trigger.dev"
+    },
+    {
+      "description": "Keep Next.js and its ESLint config aligned.",
+      "matchPackageNames": ["next", "eslint-config-next"],
+      "groupName": "next.js"
+    },
+    {
+      "description": "Keep React and its types aligned.",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "groupName": "react"
+    },
+    {
+      "description": "Major upgrades are never auto-merged; they require review and an explicit decision.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-upgrade"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Let new releases settle before proposing them, to avoid churn on immediately-patched versions.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "minimumReleaseAge": "3 days"
+    }
+  ]
+}
