@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
+import {
+  InvalidRequestError,
+  badRequest,
+  internalError,
+  jsonError,
+  readJsonBody,
+} from "@/app/api/dev-hq/_lib/route-errors";
 import { rejectInternalDevRequest } from "@/lib/dev-hq/internal-guard";
 import { toPublicReview } from "@/lib/dev-hq/review-projection";
 import {
+  ConflictingReviewFindingsError,
   ReviewNotFoundError,
   UnauthorizedReviewCallbackError,
   handleReviewComplete,
@@ -12,29 +20,67 @@ import type { ReviewOutcome } from "@/types/domain";
 const VALID_OUTCOMES: readonly ReviewOutcome[] = ["passed", "changes_requested"];
 const VALID_SEVERITIES = ["blocking", "advisory"] as const;
 
+/**
+ * Parse the submitted findings, refusing the whole callback if any of them is
+ * malformed (P1-12).
+ *
+ * This previously dropped malformed entries and carried on. Silently discarding
+ * them is the defect, not the malformation: findings are the *evidence* an
+ * outcome is derived from, and a caller whose blocking finding was discarded got
+ * a 200 and a passed review with no signal that its evidence had been thrown
+ * away. A reviewer that submits `{ ref, severity: "blocking", category }` with no
+ * summary is reporting that changes are required; answering "passed" is the
+ * worst available response to it.
+ *
+ * So the callback is refused whole, before any of it is written, and the review
+ * stays pending for a corrected submission. Absence of evidence fails closed and
+ * says so (STD-CTRL-001 rule 5) rather than resolving on the evidence that
+ * happened to survive.
+ */
 function parseFindings(value: unknown): SimulatedReviewFinding[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new InvalidRequestError(
+      "findings must be an array of review findings.",
+    );
+  }
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new InvalidRequestError(
+        `findings[${index}] must be a review finding object.`,
+      );
+    }
     const candidate = entry as Partial<SimulatedReviewFinding>;
+    const invalid: string[] = [];
+    // Blank is rejected alongside absent: the ref keys the durable finding row
+    // and its evidence uri, and an empty one is not an identity.
+    if (typeof candidate.ref !== "string" || !candidate.ref.trim()) {
+      invalid.push("ref must be a non-empty string");
+    }
+    if (typeof candidate.category !== "string" || !candidate.category.trim()) {
+      invalid.push("category must be a non-empty string");
+    }
+    if (typeof candidate.summary !== "string" || !candidate.summary.trim()) {
+      invalid.push("summary must be a non-empty string");
+    }
     if (
-      typeof candidate.ref !== "string" ||
-      typeof candidate.category !== "string" ||
-      typeof candidate.summary !== "string" ||
       !VALID_SEVERITIES.includes(
         candidate.severity as (typeof VALID_SEVERITIES)[number],
       )
     ) {
-      return [];
+      invalid.push(`severity must be one of ${VALID_SEVERITIES.join(", ")}`);
     }
-    return [
-      {
-        ref: candidate.ref,
-        severity: candidate.severity as SimulatedReviewFinding["severity"],
-        category: candidate.category,
-        summary: candidate.summary,
-      },
-    ];
+    if (invalid.length > 0) {
+      throw new InvalidRequestError(
+        `findings[${index}] is not a valid review finding: ${invalid.join("; ")}.`,
+      );
+    }
+    return {
+      ref: (candidate.ref as string).trim(),
+      severity: candidate.severity as SimulatedReviewFinding["severity"],
+      category: (candidate.category as string).trim(),
+      summary: (candidate.summary as string).trim(),
+    };
   });
 }
 
@@ -53,22 +99,18 @@ export async function POST(request: Request) {
   if (rejected) return rejected;
 
   try {
-    const body = (await request.json()) as {
+    const body = await readJsonBody<{
       reviewId?: string;
       callbackToken?: string;
       outcome?: ReviewOutcome;
       findings?: unknown;
-    };
+    }>(request);
     if (!body.reviewId || !body.callbackToken) {
-      return NextResponse.json(
-        { error: "reviewId and callbackToken are required." },
-        { status: 400 },
-      );
+      return badRequest("reviewId and callbackToken are required.");
     }
     if (!body.outcome || !VALID_OUTCOMES.includes(body.outcome)) {
-      return NextResponse.json(
-        { error: `Invalid review outcome: ${body.outcome}` },
-        { status: 400 },
+      return badRequest(
+        `Invalid review outcome. Expected one of ${VALID_OUTCOMES.join(", ")}.`,
       );
     }
 
@@ -86,13 +128,21 @@ export async function POST(request: Request) {
       review: toPublicReview(result.review),
     });
   } catch (error) {
+    if (error instanceof InvalidRequestError) {
+      return badRequest(error.message);
+    }
+    // A payload the service evaluated and refused: two disagreeing findings under
+    // one reference (P1-13). The caller's error, not the server's, so 400 rather
+    // than the 500 that would invite a retry of a request that cannot succeed.
+    if (error instanceof ConflictingReviewFindingsError) {
+      return badRequest(error.message);
+    }
     if (error instanceof UnauthorizedReviewCallbackError) {
-      return NextResponse.json({ error: error.message }, { status: 403 });
+      return jsonError(error.message, 403);
     }
     if (error instanceof ReviewNotFoundError) {
-      return NextResponse.json({ error: error.message }, { status: 404 });
+      return jsonError(error.message, 404);
     }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return internalError("POST /api/dev-hq/internal/review/complete", error);
   }
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, internalError } from "@/app/api/dev-hq/_lib/route-errors";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import {
   EVENT_BUFFER_SIZE,
@@ -34,12 +35,16 @@ function parseLimit(raw: string | null): { limit: number } | { error: string } {
 }
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const parsed = parseLimit(searchParams.get("limit"));
-  if ("error" in parsed) {
-    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  try {
+    const { searchParams } = new URL(request.url);
+    const parsed = parseLimit(searchParams.get("limit"));
+    if ("error" in parsed) {
+      return badRequest(parsed.error);
+    }
+    const { eventLogger } = getDevHqAdapters();
+    const events = await eventLogger.listRecent({ limit: parsed.limit });
+    return NextResponse.json({ events });
+  } catch (error) {
+    return internalError("GET /api/dev-hq/events", error);
   }
-  const { eventLogger } = getDevHqAdapters();
-  const events = await eventLogger.listRecent({ limit: parsed.limit });
-  return NextResponse.json({ events });
 }

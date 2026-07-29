@@ -399,6 +399,65 @@ export class ReviewNotFoundError extends Error {
   }
 }
 
+/**
+ * Thrown when one callback submits two findings under the same `ref` that do not
+ * agree.
+ *
+ * A finding's `ref` is its identity: `recordFinding` derives the durable row id
+ * from `(reviewId, ref)` and returns the first row written under it, and the
+ * finding evidence uri is keyed the same way. So a payload carrying two
+ * different findings under one reference asks for something that cannot exist —
+ * one of them will not be written, and nothing records which.
+ *
+ * That is not a cosmetic input problem, because the *outcome* is derived from the
+ * submitted array while the *evidence* is derived from what survives the keying.
+ * An advisory and a blocking finding sharing a reference produced a
+ * `changes_requested` review whose durable findings were advisory only: the
+ * review said changes were required and the evidence no longer said why. This
+ * refusal is what keeps the two derivations over one set of findings.
+ *
+ * Distinct from an ordinary Error for the same reason as `ApprovalAuthorityError`
+ * (commit 9c1420f): the server evaluated this request and refused it, so it must
+ * not be answered as an outage and retried as one. The routes map it to 400.
+ */
+export class ConflictingReviewFindingsError extends Error {
+  constructor(reviewId: string, ref: string) {
+    super(
+      `Review ${reviewId} received two disagreeing findings under reference "${ref}". A reference identifies one finding, so only one of them could be made durable.`,
+    );
+    this.name = "ConflictingReviewFindingsError";
+  }
+}
+
+/**
+ * Refuse a findings payload whose durable form would differ from its submitted
+ * form. Exact repeats of one reference are allowed: keying collapses them
+ * losslessly, so the outcome and the evidence still agree.
+ *
+ * Called before any write, so a refused callback leaves no partial evidence and
+ * the review stays pending for a corrected one.
+ */
+function assertFindingsSurviveKeying(
+  reviewId: string,
+  findings: SimulatedReviewFinding[],
+): void {
+  const byRef = new Map<string, SimulatedReviewFinding>();
+  for (const finding of findings) {
+    const seen = byRef.get(finding.ref);
+    if (!seen) {
+      byRef.set(finding.ref, finding);
+      continue;
+    }
+    if (
+      seen.severity !== finding.severity ||
+      seen.category !== finding.category ||
+      seen.summary !== finding.summary
+    ) {
+      throw new ConflictingReviewFindingsError(reviewId, finding.ref);
+    }
+  }
+}
+
 export interface CompleteReviewInput {
   reviewId: string;
   /** Must match the token reserved for this review. */
@@ -469,9 +528,14 @@ export async function handleReviewComplete(
     };
   }
 
-  const blocking = (input.findings ?? []).some(
-    (finding) => finding.severity === "blocking",
-  );
+  // Before anything is written, and after the terminal guard so a late callback
+  // is still answered as a replay rather than as a bad request. The outcome below
+  // is derived from the submitted array while `recordFindings` writes the keyed
+  // form of it; this is what makes those two the same set.
+  const submitted = input.findings ?? [];
+  assertFindingsSurviveKeying(review.id, submitted);
+
+  const blocking = submitted.some((finding) => finding.severity === "blocking");
   const outcome: ReviewOutcome = blocking ? "changes_requested" : input.outcome;
   const exhausted =
     outcome === "changes_requested" && review.iteration >= MAX_REVIEW_ITERATIONS;
@@ -482,7 +546,7 @@ export async function handleReviewComplete(
   // again as a no-op and then resolves. This ordering is also what makes the
   // terminal guard above free: a resolved review can never be missing the findings
   // its own outcome was derived from, so refusing a late callback loses nothing.
-  await recordFindings(review, input.findings ?? []);
+  await recordFindings(review, submitted);
 
   // The guarded transition. Only one caller moves the review out of pending.
   const resolved = await reviewStore.resolveReview({

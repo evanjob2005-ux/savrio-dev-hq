@@ -185,7 +185,7 @@ describe("POST /api/dev-hq/internal/review/complete", () => {
     expect(body).not.toContain("callbackToken");
   });
 
-  it("records well-formed findings and ignores malformed ones", async () => {
+  it("records well-formed findings", async () => {
     process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
     const { reviewId, callbackToken } = await pendingReview();
 
@@ -202,9 +202,6 @@ describe("POST /api/dev-hq/internal/review/complete", () => {
               category: "correctness",
               summary: "real finding",
             },
-            { ref: "bad", severity: "catastrophic", category: "x", summary: "y" },
-            { severity: "advisory", category: "x", summary: "no ref" },
-            "not an object",
           ],
         },
         TOKEN,
@@ -216,5 +213,199 @@ describe("POST /api/dev-hq/internal/review/complete", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].id).toContain("blocking-1");
     expect(findings[0].severity).toBe("blocking");
+  });
+
+  // --- P1-12: malformed findings must not be silently dropped ----------------
+  //
+  // The route used to `flatMap` malformed entries away and continue. The
+  // malformation is not the defect; discarding evidence and answering 200 is.
+  // Both arms below start from the same `pendingReview()` state and differ only
+  // in whether the blocking finding is well formed (STD-CTRL-001 rule 2).
+  describe("P1-12 malformed findings", () => {
+    /** A blocking finding with no `summary`. Unambiguously blocking, unusable. */
+    const MALFORMED_BLOCKING = {
+      ref: "blocking-1",
+      severity: "blocking",
+      category: "correctness",
+    };
+    const WELL_FORMED_BLOCKING = {
+      ...MALFORMED_BLOCKING,
+      summary: "The change drops the authorization check.",
+    };
+
+    async function submit(findings: unknown[]) {
+      const { reviewId, callbackToken } = await pendingReview();
+      const response = await POST(
+        request({ reviewId, callbackToken, outcome: "passed", findings }, TOKEN),
+      );
+      const { reviewStore } = getDevHqAdapters();
+      return {
+        status: response.status,
+        body: await response.json(),
+        reviewStatus: (await reviewStore.getReview(reviewId))!.status,
+        durable: (await reviewStore.listFindings(reviewId)).map((f) => ({
+          severity: f.severity,
+        })),
+      };
+    }
+
+    it("refuses the callback and keeps the review pending", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      const observed = await submit([MALFORMED_BLOCKING]);
+
+      expect(
+        {
+          status: observed.status,
+          reviewStatus: observed.reviewStatus,
+          durable: observed.durable,
+        },
+        "P1-12: a malformed BLOCKING finding was silently dropped. The reviewer " +
+          "reported that changes are required; the route discarded that evidence, " +
+          "answered 200, and the review resolved as `passed` holding zero durable " +
+          "findings. Observe `reviewStatus: passed` with `durable: []` below: the " +
+          "blocking finding disappeared and the review turned green.",
+      ).toEqual({ status: 400, reviewStatus: "pending", durable: [] });
+
+      // The refusal names the field, so a reviewer can correct and resubmit.
+      expect(observed.body.error).toContain("findings[0]");
+      expect(observed.body.error).toContain("summary");
+    });
+
+    it("null arm: the same callback with the finding well formed still works", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      const observed = await submit([WELL_FORMED_BLOCKING]);
+
+      // Same starting state, same `outcome: "passed"`, one field different: the
+      // blocking finding is durable and it upgrades the outcome, as before.
+      expect({
+        status: observed.status,
+        reviewStatus: observed.reviewStatus,
+        durable: observed.durable,
+      }).toEqual({
+        status: 200,
+        reviewStatus: "changes_requested",
+        durable: [{ severity: "blocking" }],
+      });
+    });
+
+    it("refuses every malformed shape rather than dropping it", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      for (const findings of [
+        [{ severity: "advisory", category: "x", summary: "no ref" }],
+        [{ ref: "  ", severity: "advisory", category: "x", summary: "blank ref" }],
+        [{ ref: "r", severity: "catastrophic", category: "x", summary: "y" }],
+        ["not an object"],
+        [null],
+        "not an array",
+      ]) {
+        const observed = await submit(findings as unknown[]);
+        expect(observed.status, `expected 400 for ${JSON.stringify(findings)}`)
+          .toBe(400);
+        expect(observed.reviewStatus).toBe("pending");
+      }
+    });
+  });
+
+  // --- P1-13: duplicate references must not erase blocking evidence ----------
+  //
+  // `blocking` is derived from the submitted array; persistence keys findings on
+  // (reviewId, ref) and keeps the first row written under each. Two disagreeing
+  // findings under one reference therefore made those two derivations disagree.
+  describe("P1-13 duplicate finding references", () => {
+    const ADVISORY = {
+      ref: "shared-ref",
+      severity: "advisory",
+      category: "maintainability",
+      summary: "Naming nit; no revision required.",
+    };
+    const BLOCKING = {
+      ref: "shared-ref",
+      severity: "blocking",
+      category: "correctness",
+      summary: "The change drops the authorization check.",
+    };
+
+    async function submit(findings: unknown[]) {
+      const { reviewId, callbackToken } = await pendingReview();
+      const response = await POST(
+        request({ reviewId, callbackToken, outcome: "passed", findings }, TOKEN),
+      );
+      const { reviewStore } = getDevHqAdapters();
+      return {
+        status: response.status,
+        reviewStatus: (await reviewStore.getReview(reviewId))!.status,
+        durableSeverities: (await reviewStore.listFindings(reviewId)).map(
+          (f) => f.severity,
+        ),
+      };
+    }
+
+    it("refuses the callback and writes no partial evidence", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      const observed = await submit([ADVISORY, BLOCKING]);
+
+      expect(
+        observed,
+        "P1-13: the durable evidence disagrees with the review outcome. The " +
+          "blocking finding set the outcome to `changes_requested`, then lost the " +
+          "keyed write to the advisory record sharing its reference. Observe " +
+          "`reviewStatus: changes_requested` with `durableSeverities: [advisory]` " +
+          "below: the review says changes are required and the stored evidence no " +
+          "longer says why.",
+      ).toEqual({
+        status: 400,
+        reviewStatus: "pending",
+        durableSeverities: [],
+      });
+    });
+
+    it("null arm: the same two findings under distinct references still work", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      const observed = await submit([ADVISORY, { ...BLOCKING, ref: "blocking-1" }]);
+
+      // Identical starting state and identical finding content; only the shared
+      // reference is gone. Both records survive and the outcome matches them.
+      expect(observed).toEqual({
+        status: 200,
+        reviewStatus: "changes_requested",
+        durableSeverities: ["blocking", "advisory"],
+      });
+    });
+
+    it("null arm: an exact repeat of one reference is still accepted", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      const observed = await submit([BLOCKING, { ...BLOCKING }]);
+
+      // Keying collapses identical repeats losslessly, so the outcome and the
+      // evidence still agree and there is nothing to refuse.
+      expect(observed).toEqual({
+        status: 200,
+        reviewStatus: "changes_requested",
+        durableSeverities: ["blocking"],
+      });
+    });
+  });
+
+  // --- P2-33: consistent, non-leaking error mapping --------------------------
+  describe("P2-33 error mapping", () => {
+    it("answers 400 for a body that is not JSON, not 500", async () => {
+      process.env.DEV_HQ_INTERNAL_TOKEN = TOKEN;
+      const response = await POST(
+        new Request("http://localhost/api/dev-hq/internal/review/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", [HEADER]: TOKEN },
+          body: "{ not json",
+        }),
+      );
+
+      expect(
+        response.status,
+        "A malformed body is the caller's error. A 500 blames the server, is " +
+          "retryable, and pages an operator for a request that can never succeed.",
+      ).toBe(400);
+      // And the parser's own text, which quotes the offending bytes, never
+      // reaches the caller.
+      expect(await response.text()).not.toContain("JSON.parse");
+    });
   });
 });
