@@ -28,6 +28,31 @@ Twenty commits landed this session, `0d83525..86df84d`. Test count 417 → 771.
 
 ---
 
+## 0. UNCOMMITTED WORK IN THE TREE — read this first
+
+`.github/workflows/security.yml` has **479 uncommitted insertions** from an agent
+working MAJOR-3 (the `looks_like_version_range` regression) and MAJOR-2 (the
+fourth `has_sensitive_name` bypass). The session ended before it reported.
+
+**It is deliberately NOT committed.** No mutation marker is visible in the diff,
+but the agent never confirmed its own probes were reverted and never ran the
+control against the real tree. An unverified security control is exactly what
+this branch has spent twenty-three commits proving is worse than no change.
+
+Before doing anything with it:
+1. `git diff .github/workflows/security.yml` and read it in full.
+2. Extract the auditors with PyYAML and run them verbatim (the pattern used
+   throughout this branch — `unset SEMGREP_IN_DOCKER` first, or the scan
+   retargets to `/src` and the control measures nothing).
+3. Confirm the four MAJOR-3 rows below are all CAUGHT and the `js-tokens`
+   lockfile line is still clean.
+4. Re-run the reviewer's mutations from §2 MAJOR-4 and confirm each now FAILS.
+
+If it does not verify, `git checkout -- .github/workflows/security.yml` and start
+from the finding text below. HEAD is clean and correct without it.
+
+---
+
 ## 1. BLOCKING before merge — found by third-round review, NOT fixed
 
 Three agents were mid-work on these when the session ended. No partial work
