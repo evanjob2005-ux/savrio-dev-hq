@@ -6,7 +6,8 @@
 decides nothing.
 **As of:** 2026-07-26 · verified at HEAD `9069c12`, branch `validation/sprint-1e-overnight-2026-07-26`
 **Owner:** Director of Operations (maintenance); Founder (every decision below)
-**Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap v8.0
+**Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap
+(registered **v10.4** at `docs/roadmap/MASTER_ROADMAP.md`)
 
 ---
 
@@ -62,7 +63,8 @@ Source: **CONST-001 Article IX** and **AGENT-001 (`AGENTS.md`) §Governing Autho
 
 ## 1.2 Axis B — source-of-truth precedence (which artifact is right about a fact)
 
-Source: **Master Roadmap v8.0, §Authority Rule**.
+Source: **Master Roadmap §Authority Rule** — registered **v10.4**,
+`docs/roadmap/MASTER_ROADMAP.md:230`.
 
 | Source | Authoritative for |
 |---|---|
@@ -70,7 +72,24 @@ Source: **Master Roadmap v8.0, §Authority Rule**.
 | Current Progress Update (CPU-001) | Current sprint, candidate, owners, reviews, blockers, next gate |
 | Approved ADRs and recorded decisions | Architecture, security, policy, governance constraints |
 | Permanent Operating Handbook (POH-001) | Stable operating rules, authority boundaries, review behaviour, prompt standards |
-| Master Roadmap v8.0 | Long-term capability direction, dependencies, phase promises, completion gates |
+| Master Roadmap (registered v10.4) | Long-term capability direction, dependencies, phase promises, completion gates |
+
+**Citation corrected 2026-07-29.** Both rows above previously read *"Master Roadmap v8.0."*
+**No document named v8.0 exists at any path in this repository** — `docs/roadmap/MASTER_ROADMAP.md`
+is v10.4, and v8.1 through v10.3 were never present. The version was re-pointed to the
+registered file; the table's content is unchanged.
+
+**Two known gaps, neither closed here:**
+
+1. **v10.4's own table carries a fifth row this one does not** — *Section 23 Binding Operating
+   Kernel: mandatory coordination, prompt, review, remediation, evidence, authority, handoff,
+   and Founder-facing output rules.* It is **deliberately not adopted into Axis B**, because
+   whether the kernel supplements or overrides `AGENT-001` is an open Founder decision
+   (**X-8**, and `OBL-15`).
+2. **This section is reproduced in four documents and they now diverge.** POH-001 and the
+   governance-baseline packet carry the correction; **CPU-001 does not** — it is classified as
+   a dated evidence record and `OBL-14` requires it be left unedited until CPU-001 is next
+   revised. The divergence is recorded here rather than resolved by editing a snapshot.
 
 ## 1.3 The unresolved seam between the two axes
 
@@ -92,10 +111,18 @@ passes, a review happened, or a gate closed.
 | State | Count |
 |---|---|
 | **Open — blocking** | 4 (X-3, X-6, X-7, X-8) |
-| **Open — material** | 15 |
+| **Open — material** | 18 |
 | **Open — low** | 3 |
 | **Discharged, retained** | 3 (X-1b, X-2, X-4) |
-| **Total** | 25 |
+| **Total** | 28 |
+
+**+3 material on 2026-07-29:** X-26, X-27, X-28. All three are governance questions the
+roadmap registration record routed to this register
+(`docs/roadmap/MASTER_ROADMAP.md:166-206`) and that never arrived. Two were tracked in
+`docs/plans/OPEN_OBLIGATIONS.md` as obligations to *record a decision here* (`OBL-15`,
+`OBL-16`) without the contradiction itself ever being recorded; the fourth question,
+**v8.0 → v10.4 supersession**, was tracked in no document at all. **Recording is not
+deciding** — none of the three is answered.
 
 **Two ID spaces collided during this pass.** Two concurrent writers each appended an entry
 numbered **X-23**; the tag-identity entry was renumbered **X-24** and the agent-authority entry
@@ -368,12 +395,20 @@ of `handbooks/`. CPU-001 §6.2 uses the Appendix F set and marks the choice prov
 |---|---|
 | **Recorded Founder decision**, committed at `SPRINT_1F_FOLLOWUP_REGISTER.md:98-99` | *"Protected baselines — `sprint-1e-baseline` → `62f6291` (pre-remediation), `sprint-1e-remediated` → `d922f379` (ratified)."* |
 | **`standards/GIT_STANDARD.md` §Tags** (`:202-214`) | *"Use annotated tags for production releases… Tags should correspond to documented releases."* **No rule on baseline immutability or candidate freeze tags.** |
-| **`standards/GIT_STANDARD.md` §Branch Strategy** (`:44-47`) | Protected branches are `main` and `develop` **only** |
+| **`standards/GIT_STANDARD.md` §Branch Strategy** (`:42-68`) | Names the two long-lived branches — `feature/dev-hq-operating-system` and `main` — and explicitly declines to widen the protected set |
 
 The decision binds as tier 2. The standard does not reflect it, so a reader consulting only
 the standard would not know the tags are protected — and `validation/…`, the branch holding
 the entire Sprint 1E record, is not a protected branch under any rule.
 **Owner: Director of Operations** (standard amendment), **Founder** (approval).
+
+**Amended 2026-07-29 — the contradiction is unchanged, one side of it was factually wrong.**
+This row previously quoted the standard as protecting *"`main` and `develop` only."* `develop`
+has never existed in this repository (`git rev-parse develop` and `origin/develop` both fail),
+and `feature/dev-hq-operating-system` — the branch `origin/HEAD` points at — was named nowhere
+in the standard. The §Branch Strategy text was corrected to the two branches that exist. **No
+decision was taken and the protected set was not widened**; whether baseline tags and
+`validation/…` belong in it is still this entry's open question.
 
 ---
 
@@ -573,6 +608,85 @@ this entry.**
 
 ---
 
+## X-26 — v8.0 → v10.4 supersession: may prior claims be carried forward? **[N] Material**
+
+**Recorded 2026-07-29.** The roadmap registration record routes four open governance
+questions to this register (`docs/roadmap/MASTER_ROADMAP.md:166-206`). This was the fourth,
+and **it was tracked in no document at all** — not here, not in `OPEN_OBLIGATIONS.md`.
+
+| Side | Text |
+|---|---|
+| **Master Roadmap v10.4, §v10.4 Change Summary** (`MASTER_ROADMAP.md:236`) | *"This edition preserves the long-term capability roadmap… No Phase 1, Phase 2, Phase 2.5, Phase 2.6, governance, reliability, compliance, commercial-control, or enterprise-platform capability is removed or weakened."* |
+| **Repository** | Versions v8.1 through v10.3 were never present. **Neither was v8.0** — `git log --diff-filter=A -- docs/roadmap/MASTER_ROADMAP.md` returns one commit, `639be4f`, which registered v10.4 directly |
+
+**The question.** This is **X-17 one step further out, and worse.** X-17 asked whether
+v7.1-derived conclusions carry forward on v8.0's own preservation statement. But v8.0 was
+never in this repository either, so the planning documents, POH-001 rules R2/R3/R7/R8/R11/
+R12/R13b/R15, and Axis B that cite *"Master Roadmap v8.0"* rest on a document **no reviewer
+here has ever been able to open**, and are now two undocumented version steps behind the
+registered file.
+
+**Two readings**, exactly parallel to X-17:
+
+| Reading | Consequence |
+|---|---|
+| (a) v10.4's preservation statement is sufficient | v8.0-derived conclusions carry forward; citations are re-pointed to v10.4 sections and re-verified section-by-section |
+| (b) It is not sufficient | Every v8.0-derived conclusion is re-derived against v10.4 before it may gate work |
+
+**What the 2026-07-29 pass did.** Live *authority* citations only — the `Authority:` headers
+and the Axis B table in ACR-001, POH-001 and the governance-baseline packet — were re-pointed
+from "v8.0" to the registered v10.4 file. **No conclusion was carried forward, no section-by-
+section re-derivation was performed, and every historical and evidentiary v8.0 citation was
+left exactly as written.** Reading (a) was not adopted; it was not available to adopt.
+
+**Owner: Founder.** Extends **X-17**; blocks the same three plans.
+
+---
+
+## X-27 — Does the Section 23 Binding Operating Kernel supplement or override `AGENTS.md`? **[N] Material**
+
+**Recorded 2026-07-29**, discharging the roadmap's third routed question
+(`MASTER_ROADMAP.md:194-199`). Previously tracked only as half of `OBL-15`, which records the
+*obligation to decide*; the contradiction itself was recorded nowhere.
+
+| Side | Text |
+|---|---|
+| **Master Roadmap v10.4 §Authority Rule** (`MASTER_ROADMAP.md:232`) | *"The VIYBD HQ — BINDING OPERATING KERNEL in Section 23 controls mandatory coordination, prompting, review, remediation, evidence, authority, handoff, and Founder-facing output behavior"* — for **every** response |
+| **AGENT-001 (`AGENTS.md`)** | Governs the same domain: universal responsibilities, prohibitions, decision boundaries, communication standards, validation, handoff, escalation |
+
+Both claim the whole of agent conduct. Where they differ, nothing says which yields. This is
+**downstream of X-8** — under reading (i) of X-8 the roadmap is a tier-2 Founder decision and
+the kernel outranks `AGENTS.md`; under reading (ii) it does not.
+
+**Consequence while open:** v10.4's Axis B table carries a **Section 23 Binding Operating
+Kernel** row that §1.2 of this register deliberately does not, precisely because adopting it
+would answer this question by implication. **Owner: Founder.** Tracked as `OBL-15`.
+
+---
+
+## X-28 — Organization rename: Savrio → Viybd **[N] Material**
+
+**Recorded 2026-07-29**, discharging the roadmap's first routed question
+(`MASTER_ROADMAP.md:185-189`). Previously tracked only as `OBL-16`.
+
+| Side | Text |
+|---|---|
+| **Master Roadmap v10.4** | **Zero** occurrences of "Savrio" in the Founder-supplied body, against **24** of "Viybd" (17 `Viybd` + 7 `VIYBD`). Titled *"VIYBD HQ"* |
+| **Everything else** | `AGENTS.md`, CONST-001, GOV-001, ORG-001, the repository name `savrio-dev-hq`, the Mission Control UI, and every other registered governance document say **Savrio** |
+
+Counted over the roadmap body only — everything after the `END REGISTRATION RECORD` marker at
+`MASTER_ROADMAP.md:208`. The registration record above that marker is repository-added and
+says "Savrio" 4 times itself, so a whole-file count answers a different question.
+**Minor correction:** the registration record states *"15 of Viybd"* (`:185-186`); the body
+carries 17 case-sensitive `Viybd` and 24 including `VIYBD`. The zero-Savrio half is exact.
+
+Whether this is a company rename requiring a coordinated pass, or a roadmap-only naming
+change, is a **Founder decision**. It is recorded here rather than resolved because a
+unilateral pass either way would rewrite governing documents on an assumption.
+**Owner: Founder.** Tracked as `OBL-16`.
+
+---
+
 # 4. Discharged — retained under Appendix G
 
 | # | Item | How discharged | Verified |
@@ -602,6 +716,9 @@ CPU-001 §9.
 | **F-G5** | Commit the untracked ratification record and the three untracked Founder decisions | Record integrity | X-21 |
 | **F-G6** | Reviewer independence route for the next candidate | Track A's commit gate | X-3 |
 | **F-G7** | May v7.1-derived conclusions carry forward on v8.0's preservation statement? | Re-verification workload across three plans | X-17 |
+| **F-G9** | May v8.0-derived conclusions carry forward on v10.4's preservation statement — given v8.0 was never in this repository either? | The same three plans, plus POH-001 R2/R3/R7/R8/R11/R12/R13b/R15 and Axis B | X-26 |
+| **F-G10** | Does the Section 23 Binding Operating Kernel supplement or override `AGENTS.md`? | Whether Axis B gains a kernel row; agent conduct rules | X-27, `OBL-15` |
+| **F-G11** | Savrio → Viybd: company rename, or roadmap-only naming? | A coordinated pass across every governed document | X-28, `OBL-16` |
 | **F-A1** | 1E-F4 target — already-pinned message branch, or unpinned deferral guard | Track A start | CPU-001 §8.1 |
 | **F-A2** | RAT-5 disposition — record-only or in scope | Track A scope | CPU-001 §8.1 |
 | **F-A3** | 1E-F1 and 1E-F2 — in or out | Track A scope | CPU-001 §8.1 |

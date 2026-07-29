@@ -18,6 +18,13 @@ name: Release
 # Without those settings the publish job still runs its in-workflow gates, but
 # human approval and self-review prevention are enforced only by the
 # environment protection rules configured in repository settings.
+#
+# The set of checks a release is gated on is declared in this file, as
+# `verify-checks.env.REQUIRED_CHECKS`. It is this workflow's own list, not a
+# reading of the branch ruleset -- GitHub's required-status-check configuration
+# is a repository setting and this file cannot see it. Keeping the two
+# reconciled is a Founder-owned settings obligation; see OBL-29 in
+# docs/plans/OPEN_OBLIGATIONS.md.
 
 on:
   workflow_dispatch:
@@ -277,8 +284,44 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # The checks a release is gated on, by check-run name. A check-run name is
+      # the job's `name:` field, so these must be kept in step with the `name:`
+      # values in the workflows listed beside them. An unrecognised or renamed
+      # job shows up here as MISSING and fails the release closed.
+      #
+      # Naming the set is what makes this job's title true. Previously it
+      # accepted "every check run on the commit", which verified no *required*
+      # check at all -- one passing check of any kind satisfied it -- and could
+      # never pass, because the release workflow's own check runs are on the
+      # same commit and are still in progress while this job evaluates them.
+      #
+      # Deliberately NOT required, so the exclusions are reviewable:
+      #   * "Markdown (advisory)"  (lint.yml) -- the job reports findings and
+      #     always exits 0; it cannot fail, so requiring it asserts nothing.
+      #   * "Dependency Review"    (dependencies.yml) -- carries
+      #     `if: github.event_name == 'pull_request'`, so it never runs on the
+      #     push that produces a releasable commit on main.
+      #   * This workflow's own jobs -- a job cannot be its own precondition.
+      REQUIRED_CHECKS: |
+        Repository Integrity
+        Structured Data Validation
+        Application Validation (Conditional)
+        YAML
+        GitHub Actions
+        JSON
+        Formatting and Naming
+        Scripts (conditional)
+        Unit and Static Validation
+        End-to-End Smoke
+        Secret Scan
+        Credential and Artifact Audit
+        GitHub Actions Hardening
+        Static Analysis (Semgrep)
+        Manifest and Lockfile Health
+        npm Audit
     steps:
-      - name: Verify CI succeeded for the target commit
+      - name: Collect check runs for the target commit
         env:
           REPO: ${{ github.repository }}
           SHA: ${{ needs.validate.outputs.target_sha }}
@@ -286,55 +329,125 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Check runs (GitHub Actions and other check-run providers).
-          mapfile -t rows < <(gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate \
-            --jq '.check_runs[] | [.name, .status, (.conclusion // "pending")] | @tsv')
+          # Check runs (GitHub Actions and other check-run providers), one
+          # compact JSON record per line. `@json` guarantees a single line per
+          # record; --paginate walks every page.
+          gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate \
+            --jq '.check_runs[]
+                  | {id, name, status, conclusion, started_at, completed_at}
+                  | @json' > "${RUNNER_TEMP}/check-runs.jsonl"
 
           # Legacy combined commit status (e.g. external status contexts).
-          combined=$(gh api "repos/${REPO}/commits/${SHA}/status" --jq '.state')
+          gh api "repos/${REPO}/commits/${SHA}/status" --jq '.state' \
+            > "${RUNNER_TEMP}/combined-status.txt"
 
-          total=0
-          failed=0
-          for row in "${rows[@]:-}"; do
-            [[ -z "$row" ]] && continue
-            total=$((total + 1))
-            name=$(cut -f1 <<< "$row")
-            status=$(cut -f2 <<< "$row")
-            conclusion=$(cut -f3 <<< "$row")
-            if [[ "$status" != "completed" ]]; then
-              echo "::error::Check '${name}' is not completed (status=${status})."
-              failed=1
-            elif [[ "$conclusion" != "success" && "$conclusion" != "neutral" && "$conclusion" != "skipped" ]]; then
-              echo "::error::Check '${name}' did not succeed (conclusion=${conclusion})."
-              failed=1
-            fi
-          done
+          echo "Collected $(wc -l < "${RUNNER_TEMP}/check-runs.jsonl") check run record(s)."
 
-          if [[ "$combined" == "failure" || "$combined" == "error" ]]; then
-            echo "::error::Combined commit status for ${SHA} is '${combined}'."
-            failed=1
-          fi
+      - name: Verify every required check succeeded
+        env:
+          SHA: ${{ needs.validate.outputs.target_sha }}
+          CHECK_RUNS_FILE: ${{ runner.temp }}/check-runs.jsonl
+          COMBINED_STATUS_FILE: ${{ runner.temp }}/combined-status.txt
+        run: |
+          set -euo pipefail
+          python <<'PYTHON'
+          import json
+          import os
+          import sys
 
-          # Fail closed: refuse to publish a commit that has no CI evidence.
-          if [[ "$total" -eq 0 ]]; then
-            echo "::error::No CI check runs found for ${SHA}; refusing to publish without validation."
-            failed=1
-          fi
+          def error(message):
+              print(f"::error::{message}")
 
-          {
-            echo "## Required Checks"
-            echo ""
-            echo "- Target commit: ${SHA}"
-            echo "- Check runs evaluated: ${total}"
-            echo "- Combined status: ${combined}"
-            echo "- Result: $([[ "$failed" -eq 0 ]] && echo PASS || echo FAIL)"
-          } >> "$GITHUB_STEP_SUMMARY"
+          sha = os.environ["SHA"]
+          required = [line.strip() for line in
+                      os.environ["REQUIRED_CHECKS"].splitlines() if line.strip()]
+          if not required:
+              error("REQUIRED_CHECKS is empty; refusing to publish without a "
+                    "required-check set.")
+              sys.exit(1)
 
-          if [[ "$failed" -ne 0 ]]; then
-            echo "::error::Required checks did not pass for target commit ${SHA}."
-            exit 1
-          fi
-          echo "All ${total} check run(s) succeeded for ${SHA}."
+          with open(os.environ["COMBINED_STATUS_FILE"], encoding="utf-8") as handle:
+              combined = handle.read().strip() or "unknown"
+
+          runs = []
+          with open(os.environ["CHECK_RUNS_FILE"], encoding="utf-8") as handle:
+              for line in handle:
+                  line = line.strip()
+                  if line:
+                      runs.append(json.loads(line))
+
+          # A commit accumulates one check run per name for every workflow run
+          # that touched it, so a failure that was later re-run green is still
+          # in this list. Keep only the most recent run for each name --
+          # requiring every occurrence to be green would let a single historical
+          # failure block that commit from ever being released.
+          def recency(run):
+              return (run.get("completed_at") or "",
+                      run.get("started_at") or "",
+                      run.get("id") or 0)
+
+          latest = {}
+          for run in runs:
+              name = run.get("name") or ""
+              if name not in latest or recency(run) >= recency(latest[name]):
+                  latest[name] = run
+
+          failed = []
+          rows = []
+          for name in required:
+              run = latest.get(name)
+              if run is None:
+                  failed.append(name)
+                  error(f"Required check '{name}' has no check run on {sha}.")
+                  rows.append(f"| `{name}` | (absent) | **MISSING** |")
+                  continue
+              status = run.get("status") or "unknown"
+              conclusion = run.get("conclusion") or "pending"
+              if status != "completed":
+                  failed.append(name)
+                  error(f"Required check '{name}' is not completed "
+                        f"(status={status}).")
+                  verdict = "**NOT COMPLETED**"
+              elif conclusion not in ("success", "neutral"):
+                  # `skipped` counts as a failure here on purpose: a required
+                  # check that did not run is not evidence that it would have
+                  # passed. The previous version accepted it.
+                  failed.append(name)
+                  error(f"Required check '{name}' did not succeed "
+                        f"(conclusion={conclusion}).")
+                  verdict = "**FAIL**"
+              else:
+                  verdict = "PASS"
+              rows.append(f"| `{name}` | {status} / {conclusion} | {verdict} |")
+
+          if combined in ("failure", "error"):
+              failed.append("(combined commit status)")
+              error(f"Combined commit status for {sha} is '{combined}'.")
+
+          other = sorted(name for name in latest if name not in set(required))
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("## Required Checks\n\n")
+              out.write(f"- Target commit: `{sha}`\n")
+              out.write(f"- Required checks: {len(required)}\n")
+              out.write(f"- Check runs on the commit: {len(runs)} "
+                        f"({len(latest)} distinct names)\n")
+              out.write(f"- Combined commit status: {combined}\n")
+              out.write(f"- Result: {'FAIL' if failed else 'PASS'}\n\n")
+              out.write("| Required check | Latest run | Verdict |\n|---|---|---|\n")
+              for row in rows:
+                  out.write(row + "\n")
+              if other:
+                  out.write("\nPresent but not required, reported for information "
+                            "only: " + ", ".join(f"`{n}`" for n in other) + "\n")
+
+          if failed:
+              error(f"Required checks did not pass for target commit {sha}: "
+                    f"{', '.join(failed)}.")
+              sys.exit(1)
+
+          print(f"All {len(required)} required check(s) succeeded for {sha}.")
+          PYTHON
 
   publish:
     name: Publish Release

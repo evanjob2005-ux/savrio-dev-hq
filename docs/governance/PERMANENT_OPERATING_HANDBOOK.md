@@ -6,7 +6,8 @@
 policy and grants no authority. Every rule below is either (a) already controlling under a
 cited approved authority, or (b) explicitly marked **PROPOSED** and therefore not binding.
 **Authority:** CONST-001, GOV-001, ORG-001, AGENT-001 (`AGENTS.md`), ADR-0001, ADR-0002,
-Master Roadmap v8.0, recorded Founder decisions
+Master Roadmap (registered **v10.4** at `docs/roadmap/MASTER_ROADMAP.md`), recorded Founder
+decisions
 **Owner:** Director of Operations (consolidation); Founder (approval)
 **Baseline:** branch `validation/sprint-1e-overnight-2026-07-26`, HEAD `9069c12`
 
@@ -76,7 +77,8 @@ state the same eight tiers.
 
 ## 1.2 Axis B — source-of-truth precedence (which artifact is right about a fact)
 
-Source: **Master Roadmap v8.0, §Authority Rule** and its accompanying table.
+Source: **Master Roadmap §Authority Rule** and its accompanying table — registered **v10.4**,
+`docs/roadmap/MASTER_ROADMAP.md:230`.
 
 | Source | Authoritative for |
 |---|---|
@@ -84,7 +86,12 @@ Source: **Master Roadmap v8.0, §Authority Rule** and its accompanying table.
 | Current Progress Update (CPU-001) | Current sprint, candidate, owners, reviews, blockers, next gate |
 | Approved ADRs and recorded decisions | Architecture, security, policy, governance constraints |
 | Permanent Operating Handbook (this document) | Stable operating rules, authority boundaries, review behaviour, prompt standards |
-| Master Roadmap v8.0 | Long-term capability direction, dependencies, phase promises, completion gates |
+| Master Roadmap (registered v10.4) | Long-term capability direction, dependencies, phase promises, completion gates |
+
+**Citation corrected 2026-07-29.** Both rows previously read *"Master Roadmap v8.0"*, which
+exists at no path in this repository. See **ACR-001 §1.2** for the full correction note,
+including v10.4's additional Binding Operating Kernel row (not adopted here, pending X-8 /
+`OBL-15`) and the divergence from CPU-001's copy of this section (held open by `OBL-14`).
 
 ## 1.3 The unresolved seam between the two axes
 
@@ -196,9 +203,9 @@ mutated mid-review, producing a `FAIL` on candidate identity rather than on code
 **Status: PROPOSED. NOT BINDING.**
 
 Recorded here because it is repeatedly relied on in Sprint 1F planning and has **no approved
-source**. `standards/GIT_STANDARD.md` protects only `main` and `develop` (`:44-47`) and says
-nothing about candidate freezes, sprint baseline tags, worktree isolation, or concurrent
-session writes.
+source**. `standards/GIT_STANDARD.md` §Branch Strategy (`:42-68`) covers only the two
+long-lived branches and says nothing about candidate freezes, sprint baseline tags, worktree
+isolation, or concurrent session writes.
 
 The proposed rule, as practised and recommended:
 
@@ -520,9 +527,16 @@ UNKNOWN**. A mitigation that works for unknown reasons is not yet a rule; see R4
 
 ### R14a — Branch and history protection (CONTROLLING)
 
-Protected branches are `main` and `develop`. Force-pushing protected branches is to be
-avoided. Feature work occurs on dedicated branches.
-**Source:** `standards/GIT_STANDARD.md:44-47`, `:49`, `:253`.
+The long-lived branches are `feature/dev-hq-operating-system` (the repository default and
+active integration line) and `main`. Force-pushing protected branches is to be avoided.
+Feature work occurs on dedicated branches.
+**Source:** `standards/GIT_STANDARD.md:42-68`, `:272`.
+
+**Corrected 2026-07-29.** This clause previously read *"Protected branches are `main` and
+`develop`"*, faithfully reproducing the standard — which named a branch that has never
+existed in this repository, and omitted the branch that is actually the default. The standard
+was corrected; this clause follows it. What the protected set *should* contain remains
+**X-19**, unresolved.
 
 ### R14b — Repository conduct (CONTROLLING)
 

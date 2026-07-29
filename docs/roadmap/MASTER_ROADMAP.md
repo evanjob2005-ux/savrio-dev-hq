@@ -165,8 +165,22 @@ cited as evidence that any sprint, gate, view, or capability exists in code.**
 
 ## Open governance questions attached to this registration
 
-None is answered here. All should be recorded in
+None is answered here. All are recorded in
 `docs/governance/AUTHORITY_AND_CONTRADICTION_REGISTER.md`.
+
+**Routing, verified 2026-07-29.** This instruction previously read *"All should be recorded"*
+and was left unchecked. Three questions had gone to `docs/plans/OPEN_OBLIGATIONS.md` instead —
+correctly, as obligations to *record a decision* — but only one of the underlying
+contradictions (question 2, **X-8**) had ever been entered in the register, and question 4 was
+tracked in no document at all. **X-26, X-27 and X-28 were added to close that gap.** Each
+question below now names where it lives.
+
+| # | Question | Contradiction register | Obligation |
+|---|---|---|---|
+| 1 | Savrio → Viybd rename | **X-28** | `OBL-16` |
+| 2 | Authority tier of the roadmap | **X-8** | `OBL-15` |
+| 3 | Kernel supplements or overrides `AGENTS.md` | **X-27** | `OBL-15` |
+| 4 | v8.0 → v10.4 supersession | **X-26** | — |
 
 1. **Organization rename — Savrio → Viybd.** v10.4 contains **zero** occurrences of "Savrio"
    and 15 of "Viybd". `AGENTS.md`, the repository name `savrio-dev-hq`, and every registered

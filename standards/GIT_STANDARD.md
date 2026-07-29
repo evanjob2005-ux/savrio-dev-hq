@@ -41,10 +41,29 @@ Every commit should represent a meaningful, complete, and understandable unit of
 
 # Branch Strategy
 
-Protected branches:
+Long-lived branches:
 
+- `feature/dev-hq-operating-system` — the repository default branch, and the
+  active integration line. `origin/HEAD` points here.
 - `main`
-- `develop`
+
+Both are gated by CI: `ci.yml`, `lint.yml`, `frontend-tests.yml`, `security.yml`
+and `dependencies.yml` each trigger on `push` and `pull_request` for exactly
+these two branches.
+
+There is no `develop` branch. Earlier versions of this standard named `main` and
+`develop` as the protected branches; `develop` has never existed in this
+repository, and the actual default branch was named nowhere in the standard.
+
+**What "protected" means here is not settled by this document.** Branch
+protection is a repository setting, enforced by the `Sprint 1F active line
+protection` ruleset rather than by this standard, and several of its clauses are
+open obligations (`OBL-01`, `OBL-04` in `docs/plans/OPEN_OBLIGATIONS.md`).
+Whether the protected set should also cover baseline tags and `validation/…`
+branches is register item **X-19** in
+`docs/governance/AUTHORITY_AND_CONTRADICTION_REGISTER.md` and is a Founder
+decision. This section records which branches exist and what CI gates; it does
+not widen the protected set.
 
 Feature development should occur on dedicated branches.
 

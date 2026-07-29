@@ -44,23 +44,35 @@ README.md
 CONTRIBUTING.md
 SECURITY.md
 
-constitution/
-governance/
-handbooks/
-agents/
-workflows/
-templates/
-standards/
-playbooks/
-checklists/
-runbooks/
-adr/
-metrics/
-automation/
-scripts/
-.github/
-.vscode/
+docs/company/        Constitution, core values, governance, organization
+docs/governance/     Operating handbook, progress update, authority register
+docs/decisions/      Architecture Decision Records
+docs/workflows/      Standard operating procedures
+docs/plans/          Sprint plans and the Open Obligations Register
+docs/roadmap/        The registered Master Roadmap
+standards/           Engineering standards
+handbooks/           Role-specific operating manuals
+employees/           Employee role definitions, by department
+agents/              Executable AI agent definitions
+templates/           Reusable engineering templates
+
+app/                 Next.js pages and API route handlers
+components/          React components
+lib/                 Service layer and Dev HQ domain logic
+types/               Shared contracts
+trigger/             Trigger.dev task definitions
+
+e2e/                 Playwright end-to-end specs
+test/                Test setup and fixtures
+scripts/             Verification and conversion scripts
+.semgrep/            Semgrep rules and fixtures
+.github/             Workflows, templates, CODEOWNERS
 ```
+
+Every path above exists. There is no `constitution/`, `governance/`,
+`workflows/`, `playbooks/`, `checklists/`, `runbooks/`, `adr/`, `metrics/`,
+`automation/`, or `.vscode/` directory at the repository root — earlier versions
+of this guide listed all ten, and none of them was ever created.
 
 ---
 
@@ -69,13 +81,14 @@ scripts/
 Every contributor should complete the following:
 
 - Read the README
-- Read the Constitution
-- Review the Core Values
+- Read the Constitution — `docs/company/COMPANY_CONSTITUTION.md`
+- Review the Core Values — `docs/company/CORE_VALUES.md`
+- Read `AGENTS.md`, the universal AI employee handbook
 - Read CONTRIBUTING.md
 - Read SECURITY.md
-- Review the Engineering Standards
-- Review your assigned Handbook
-- Review your assigned Workflow
+- Review the Engineering Standards — `standards/`
+- Review your assigned Handbook — `handbooks/`
+- Review your assigned Workflow — `docs/workflows/`
 - Configure your development environment
 - Verify the project builds successfully
 
@@ -112,14 +125,14 @@ Examples:
 **standards/**
 - Engineering requirements
 
-**playbooks/**
-- Task-specific execution guides
+**docs/workflows/**
+- Standard operating procedures, including hotfix and incident response
 
-**runbooks/**
-- Production incident response
+**docs/decisions/**
+- Architecture Decision Records
 
-**adr/**
-- Architecture decisions
+**docs/plans/**
+- Sprint plans, and `OPEN_OBLIGATIONS.md` — accepted work not yet done
 
 ---
 
