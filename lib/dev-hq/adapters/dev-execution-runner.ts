@@ -20,6 +20,7 @@ import * as manager from "@/lib/dev-hq/execution-manager";
  * does not forward is worse than one it never accepted.
  */
 export class DevExecutionRunner implements ExecutionRunner {
+  /** Legacy active-only listing; not a dispatch-eligibility decision. */
   listReadyWork(): Promise<Task[]> {
     return manager.listReadyWork();
   }
