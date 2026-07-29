@@ -62,9 +62,19 @@ Cover each of these, and say explicitly when one is not applicable rather than s
 
 ## Findings format
 
+Use the Founder-mandated shared severity ladder:
+
+- **BLOCKER** — unresolved, and therefore forces `FAIL`.
+- **MAJOR** — material but non-blocking; carries a named owner and due point.
+- **MINOR** — limited and non-blocking; carries a named owner and due point.
+- **OBSERVATION** — non-defect context; creates no obligation.
+
+These severities do not change the Architecture Review verdict vocabulary, which remains
+`PASS`, `PASS WITH NON-BLOCKING FOLLOW-UPS`, or `FAIL` under GOV-001.
+
 For each finding, give all six:
 
-1. **Severity** — BLOCKER or NON-BLOCKING FOLLOW-UP.
+1. **Severity** — BLOCKER, MAJOR, MINOR, or OBSERVATION.
 2. **What** — the defect, with file, line, and quoted code.
 3. **Why it matters** — the concrete consequence: which state is corrupted, which record duplicates, which recovery fails, which reader sees what. Not "this is risky."
 4. **The exact constraint violated** — the ADR clause, contract comment, standard, or stated invariant, quoted. If no written constraint exists, say so and argue from first principles instead of implying one.

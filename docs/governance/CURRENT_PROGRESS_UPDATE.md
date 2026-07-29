@@ -1,16 +1,103 @@
 # Current Progress Update
 
 **Document ID:** CPU-001
-**Version:** 1.1.0
-**Status:** **DRAFT — pending independent governance-baseline review.** Content is verified;
-approval is not yet recorded.
+**Version:** 1.2.0
+**Status:** **CURRENT REVISION CANDIDATE — live evidence refreshed; independent review not
+yet recorded.** This is a state report, not release approval.
 **As of:** 2026-07-29
-**Revision basis:** governance state through parent
-`dee704f` on branch `chore/close-open-obligations`, plus this Founder-authorized governance
-candidate. This wording remains true when the candidate is committed; historical sections
-retain their stated bases.
-**Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap v8.0
+**Revision basis:** branch `chore/close-open-obligations`, HEAD
+`b32caec7c6a8df7fdcc100962021493aff7b365a`, plus this uncommitted documentation
+reconciliation. Historical sections retain their explicitly stated bases.
+**Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, ADR-0003,
+ADR-0004, Master Roadmap registered **v10.4** at `docs/roadmap/MASTER_ROADMAP.md`
 **Owner:** Director of Operations (maintenance); Founder (approval)
+
+---
+
+# 0. Current live state — branch obligation closure
+
+## 0.1 Current phase, work, and candidate
+
+| Field | Current value |
+|---|---|
+| **Phase / sprint** | **Phase 1 / Sprint 1F obligation closure.** Phase 2 has not started |
+| **Current work** | Close every in-scope local obligation that does not require new authority, external configuration, credentials, or an unavailable upstream release |
+| **Current branch** | `chore/close-open-obligations` |
+| **HEAD** | `b32caec7c6a8df7fdcc100962021493aff7b365a` — `test: close frontend harness control gaps` |
+| **Upstream relation at revision start** | 41 commits ahead, 0 behind `origin/chore/close-open-obligations` |
+| **Candidate** | No immutable candidate tag is recorded for the current 41-commit branch delta or this documentation reconciliation |
+| **Active owner** | Operations/governance reconciliation in progress; implementation work at HEAD is complete |
+| **Review state** | No Independent Code Review or Architecture Review verdict is bound to HEAD `b32caec` plus this uncommitted reconciliation |
+| **Release state** | **Not release-ready.** Local-runtime evidence is closed; production architecture and external protection remain open |
+
+At revision start the tracked tree was clean. The sole pre-existing untracked path was
+`.claude/settings.local.json`; it is user-owned, unrelated, and untouched. This revision
+changes governance and role documentation only.
+
+## 0.2 Current verified closure and validation
+
+`OBL-11` is **closed**. The optimized local-mode production build and real live
+store/state/UI Playwright path prove Founder approval creation and operation, Trigger
+continuation **dispatch** with execution and idempotency identity, and correct blocked-lane
+rendering. The boundary remains explicit: this does not prove continuation completion,
+durable production state, Founder authentication, or a real Trigger.dev WebSocket transport.
+
+| Check | Current result |
+|---|---|
+| Full Vitest | **848 passed, 2 Windows-only skipped** (850 collected) |
+| TypeScript | **PASS** |
+| ESLint | **PASS** |
+| Production build | **PASS** |
+| Playwright | **14/14 passed** across desktop and mobile |
+| Credential/artifact scan | **0 findings** |
+| `git diff --check` | **PASS** |
+
+The closed `OBL-11` record retains its historical **821-test** candidate result. A fresh run
+at HEAD `b32caec` after the later frontend-harness commits produced the current
+**848 passed, 2 Windows-only skipped** result above. TypeScript, ESLint, and the production
+build were also re-run at that HEAD; the Playwright and credential-scan rows retain the
+explicitly scoped OBL-11 closure evidence rather than claiming a new run.
+
+## 0.3 Current blockers and boundaries
+
+| Area | Current blocker or boundary |
+|---|---|
+| **Commit gate** | The current branch delta and this reconciliation need an immutable candidate identity and independent review. Because the branch includes architecture-boundary work, Architecture Review follows Independent Code Review |
+| **Production runtime** | Durable coordinated persistence, restart recovery, indexed storage, transport, and Founder authentication remain unselected/unprovisioned under ADR-0004's explicit partial boundary |
+| **Live Trigger.dev** | `OBL-20` remains open: no real WebSocket subscription smoke test has proved the negotiated transport and received an event |
+| **GitHub protections** | `OBL-01`, `OBL-04`, and `OBL-34` require a second trusted reviewer and repository/environment settings; `OBL-29` requires an authority decision |
+| **Workflow trust anchor** | `OBL-30` remains partial until candidate-controlled workflow verification is anchored externally |
+| **Governance** | Universal X-7, X-3, X-6, X-19, X-20, X-25, X-26, and the other open ACR-001 items remain open. X-7b, X-21, and X-24 are closed by already-recorded evidence in ACR-001 v1.2.0 |
+| **Roadmap provenance** | `OBL-12` remains open; the registered repository roadmap is v10.4, while the source `.docx` still needs its separately authorized re-save |
+| **Upstream compatibility** | `OBL-25` (ESLint 10) and `OBL-26` (TypeScript 7) remain blocked by upstream compatibility |
+| **Scope boundary** | RAT-5 remains record-only/out of implementation scope (F-A2). 1E-F1 was selected; 1E-F2 remains out of scope unless separately authorized |
+
+## 0.4 Exact next gate
+
+> **Freeze the current reviewed surface at an immutable candidate identity, then run
+> Independent Code Review.**
+
+Architecture Review follows only after Independent Code Review closes, because the branch
+contains lifecycle, adapter, persistence-boundary, and release-control work. Founder approval
+and any push/release follow the recorded review order. No production deployment, Phase 2
+implementation, or external repository-setting change is authorized by this update.
+
+## 0.5 Current roadmap authority
+
+Repository truth and verified command output control current implementation state. CPU-001
+controls current sprint, candidate, owners, reviews, blockers, and next gate. The registered
+Master Roadmap **v10.4** controls long-term capability direction and does not prove
+implementation. The roadmap and Section 23 kernel supplement the eight-tier authority
+hierarchy; they do not override it. See ACR-001 X-8 and X-27.
+
+---
+
+# HISTORICAL SNAPSHOTS — retained, not current
+
+Everything below this boundary is retained as dated evidence. It does not override §0's
+current branch, HEAD, tests, blockers, review state, or next gate. Statements such as
+“untracked,” “not started,” or “next gate” below describe their stated 2026-07-26 snapshot
+unless an in-section supersession note says otherwise.
 
 ---
 
