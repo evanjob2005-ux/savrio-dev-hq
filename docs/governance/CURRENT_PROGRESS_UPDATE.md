@@ -1,12 +1,14 @@
 # Current Progress Update
 
 **Document ID:** CPU-001
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Status:** **DRAFT — pending independent governance-baseline review.** Content is verified;
 approval is not yet recorded.
-**As of:** 2026-07-26
-**Verified at:** branch `validation/sprint-1e-overnight-2026-07-26`, HEAD
-`9069c12e8e7f61e823cbcbf728561f6207693f19`
+**As of:** 2026-07-29
+**Revision basis:** governance state through parent
+`dee704f` on branch `chore/close-open-obligations`, plus this Founder-authorized governance
+candidate. This wording remains true when the candidate is committed; historical sections
+retain their stated bases.
 **Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap v8.0
 **Owner:** Director of Operations (maintenance); Founder (approval)
 
@@ -194,18 +196,29 @@ Source: **Master Roadmap v8.0, §Authority Rule**.
 | Permanent Operating Handbook (POH-001) | Stable operating rules, authority boundaries, review behaviour, prompt standards |
 | Master Roadmap v8.0 | Long-term capability direction, dependencies, phase promises, completion gates |
 
-## 1.3 The unresolved seam between the two axes
+## 1.3 Recorded authority decision
 
-Axis A contains **no roadmap tier and no handbook tier**. Axis B asserts a position for both.
-This is unresolved and is register item **X-8** in ACR-001. Until it is answered, a claim
-resting only on the roadmap or only on POH-001 is an **unverifiable-tier premise** and must be
-labelled as such.
+Axis A controls governing authority. The roadmap kernel supplements it with planning and
+long-term capability direction; it cannot create a higher or conflicting tier. Material
+conflicts must be escalated rather than reconciled locally. See ACR-001 X-8.
 
 ## 1.4 The rule that governs all of the above
 
 **The repository and verified command output control implementation truth.** No document —
 including the roadmap, POH-001, and this one — is evidence that code exists, a test passes, a
 review happened, or a gate closed.
+
+## 1.5 Recorded identity decision
+
+Savrio and Dev HQ remain the current identity. Viybd remains the roadmap's source/historical
+product label. Any rebrand requires a separately commissioned, coordinated change; this
+revision does not authorize a mass rename. See ACR-001 X-28.
+
+## 1.6 Role-source convention
+
+Repository convention uses `agents/*/AGENT.md` for role definitions and `handbooks/*` for
+operating manuals. `employees/**` contains active/supporting role documents subject to higher
+authority. Conflicts escalate; this revision does not supersede or demote any source.
 
 ---
 
@@ -235,7 +248,7 @@ Pre-existing at the start of this pass (eleven paths):
 | `docs/plans/PHASE_2_PROGRAM_PLAN.md` | PLAN-P2-001 v1.1.0 — planning only, no implementation authorized |
 | `docs/plans/GOVERNANCE_UPDATE_PLAN.md` | GOV-PLAN-001 v0.3.0 — specialist draft, nothing approved |
 | `docs/research/RESEARCH_BACKLOG.md` | Research register |
-| `agents/claude-design/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | Mission Control UX specification v1.2.0 |
+| `agents/design-engineer/outputs/PHASE_1_MISSION_CONTROL_LITE_UX.md` | Mission Control UX specification v1.2.0 |
 | `agents/lead-software-engineer/outputs/CONTEXT_LIFECYCLE_MANAGER_SPEC.md` | SPEC-CLM-001 v1.1.0 — unapproved |
 | `agents/lead-software-engineer/outputs/CLM_COLLABORATION_HANDOFF.md` | CLM handoff |
 | `agents/lead-software-engineer/outputs/SPRINT_1E_SPEC_AMENDMENT_REPORT.md` | Sprint 1E spec amendment record |
@@ -467,7 +480,7 @@ records that work appeared against an unsettled specification.
 | **D-2 / Q-1** — deployment, persistence, transport, auth decision (ADR-0004) | **PARTIAL — authored but intentionally incomplete.** Explicit local-only deployment mode and append-only audit retention are decided. Persistence, transport, and Founder authentication remain undecided and continue to block production Track B phases. The earlier central assignment of ADR-0003 collided with the already-approved lifecycle ADR-0003; ADR immutability forbids retroactive renumbering, so the current Founder-authorized runtime record uses the next unused number. |
 | **D-6** — new dependencies (auth, web-push, jsdom) | **OPEN** |
 | **D-7** — HTTPS hosting | **OPEN** |
-| **D-8** — missing handbooks and standards | **OPEN.** A gate cannot certify against a standard that does not exist |
+| **D-8** — missing handbooks and standards | **CLOSED 2026-07-29.** All 19 handbook and 111 standard references resolve; the focused structural audit and ten-arm harness pass. This is structural evidence, not semantic proof |
 | **D-9** — ADR-0002 E5 amendment; Sprint 1E PE-1 amendment | **OPEN** |
 | **Frontend test infrastructure** | **ABSENT — verified.** `vitest.config.ts` collects `**/*.test.ts` under `environment: "node"`; no `.tsx` is collected and no Playwright configuration or e2e directory exists |
 
@@ -519,7 +532,7 @@ approved** (POH-001 R12); the choice is provisional and is register item **X-18*
 | Audit session(s) — UX/roadmap, repository/dependency | `COMPLETE` | A-1 and A-2 delivered 13:41 and 13:50 (§2.1a) | Their outputs read and incorporated |
 | independent-code-reviewer | `IDLE` | None | G-2, after a Track A candidate is frozen |
 | architecture-reviewer | `IDLE` | None | G-3, **only after G-2 returns a verdict** |
-| claude-design | `IDLE` | None | G-1 design review, before any Track B surface |
+| design-engineer | `IDLE` | None | G-1 design review, before any Track B surface |
 | Security owner | `IDLE` | None | G-4, before hosted deployment (Track B) |
 | Director of Operations | `IDLE` | None | Governance-baseline review routing |
 | research agent | `IDLE` | None | Rank-A backlog classification (pending, §7) |
@@ -564,7 +577,7 @@ CPU-001 exists to make visible rather than to smooth over.
 
 ## 8.2 Blocking Track B
 
-D-2/Q-1 (partial ADR-0004), D-6, D-7, D-8, D-9, and absent frontend test infrastructure — §5.2.
+D-2/Q-1 (partial ADR-0004), D-6, D-7, D-9, and absent frontend test infrastructure — §5.2.
 
 ## 8.3 Blocking the governance baseline
 
@@ -625,7 +638,6 @@ answered from the record rather than from memory.
 
 | # | Decision | Source |
 |---|---|---|
-| **F-G1** | **Which `AGENTS.md` authority tier the Master Roadmap and the Permanent Operating Handbook occupy** (X-8) | POH-001 §1.3 |
 | **F-G2** | **Approve POH-001**, and rule on each PROPOSED rule (R4, R11, R12, R13b) | POH-001 §0.2 |
 | **F-G3** | **Reviewer verdict vocabulary** — five incompatible vocabularies are in force (X-7) | ACR-001 §3 |
 | **F-G4** | **Identity of the Sprint 1F Preparation Handoff** (X-20) | §5.3 |
@@ -639,7 +651,7 @@ answered from the record rather than from memory.
 
 ## 9.3 Blocking Track B
 
-D-2/Q-1 (partial ADR-0004), D-6, D-7, D-8, D-9, plus Q-3, Q-4, Q-6, Q-7, Q-8 in the Mission Control
+D-2/Q-1 (partial ADR-0004), D-6, D-7, D-9, plus Q-3, Q-4, Q-6, Q-7, Q-8 in the Mission Control
 Lite plan.
 
 ## 9.4 Founder decisions already recorded
@@ -677,7 +689,7 @@ acceptance criteria stated there, and returns **one terminal verdict** with find
 - **Phase 2** — not authorized; see §11.
 - Any commit — this pass makes none.
 
-**After the governance-baseline review closes**, the sequence is: Founder rules on F-G1–F-G6
+**After the governance-baseline review closes**, the sequence is: Founder rules on the remaining F-G2–F-G6
 → POH-001 approved or returned → governance baseline committed → **F-A1 answered** → Track A
 begins at 1E-F4 under the §5.1 sequence.
 

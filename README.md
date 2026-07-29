@@ -75,7 +75,7 @@ Governance and process
 │   └── validation/       Dated validation evidence
 ├── standards/            Engineering standards
 ├── handbooks/            Role-specific operating manuals
-├── employees/            Employee role definitions, by department
+├── employees/            Active/supporting role documents, by department
 ├── agents/               Executable AI agent definitions and their outputs
 ├── templates/            Reusable engineering templates
 
@@ -180,23 +180,31 @@ Present today:
 - AI Agent Orchestrator
 - AI/LLM Engineer
 - Architecture Reviewer
+- Associate Software Engineer
+- Database Architect
 - Data Engineer
 - Design Engineer
 - DevOps Engineer
 - Growth Engineer
+- Independent Code Reviewer
+- Lead Software Engineer
 - Observability Engineer
+- Product Owner
 - Prompt Engineering Specialist
+- QA Engineer
+- Reliability Engineer
+- Research Analyst
+- Security Engineer
 - UI Prototyping Engineer
 
-Nine `agents/*/AGENT.md` definitions cite a handbook that does not exist yet.
-That gap is tracked as **OBL-19** in `docs/plans/OPEN_OBLIGATIONS.md`, not
-papered over here.
+All 19 `agents/*/AGENT.md` handbook references resolve. A focused structural
+audit checks that inventory; it does not replace substantive governance review.
 
 ---
 
 ## employees/
 
-Employee role definitions, organized by department: database, design,
+Active/supporting role documents, organized by department: database, design,
 engineering, operations, product, quality, reliability, research, security.
 
 ---

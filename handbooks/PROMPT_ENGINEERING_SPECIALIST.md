@@ -1,4 +1,5 @@
 # Prompt Engineering Specialist Handbook
+**Document ID:** HBK-PROMPT-ENGINEERING-SPECIALIST
 
 **Role ID:** ROLE-016
 
