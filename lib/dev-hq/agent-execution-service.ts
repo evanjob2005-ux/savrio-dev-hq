@@ -49,6 +49,7 @@ import {
   MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/dev-hq/constants";
 import { nextId, nowIso } from "@/lib/dev-hq/id";
+import { completeTaskForSuccessfulExecution } from "@/lib/dev-hq/task-completion-service";
 
 export const AGENT_EXECUTION_TASK_ID = "agent-execution";
 
@@ -716,12 +717,9 @@ function assertTaskDispatchable(task: Task): void {
       `Task ${task.id} is ${task.status}, not active; only an active task can be dispatched.`,
     );
   }
-  // Kept, but **not** the guard that stops a second owner today. Nothing in
-  // production writes `assigneeAgentId` to a non-null value: the repository sets
-  // it null at creation and only `claimTask` ever assigns it, which has no
-  // callers. So this branch is unreachable through any live path, and relying on
-  // it is what left `assertNoLiveExecutionForTask` missing. It stays because it
-  // is correct and becomes load-bearing the moment `claimTask` gains a caller.
+  // This is not the guard that stops a second live execution; that invariant is
+  // enforced against execution state below. It remains defensive for a task
+  // restored from a future durable adapter or imported by another governed path.
   if (task.assigneeAgentId) {
     throw new UndispatchableRequestError(
       `Task ${task.id} is already assigned to ${task.assigneeAgentId}; refusing to dispatch a second owner for it.`,
@@ -1206,6 +1204,7 @@ export async function handleExecutionComplete(
 
     await ensureRetryEvents(execution, attemptAgentId);
     await finalizeTerminalExecution(execution, attempt, attemptAgentId);
+    await completeTaskForSuccessfulExecution(execution.id);
     await requestReviewIfSucceeded(execution);
     return { execution, retried: false };
   }
@@ -1216,6 +1215,7 @@ export async function handleExecutionComplete(
   // provider's own output. So reconcile the records for every post-`running`
   // state rather than exiting merely because the execution is terminal.
   await reconcileRecordsFor(current);
+  await completeTaskForSuccessfulExecution(current.id);
   // The review request stays out of reconcileRecordsFor because that function
   // *reconstructs records a completed transition should already have left*, while
   // a review request *initiates new work*. Escalation qualifies under the first —

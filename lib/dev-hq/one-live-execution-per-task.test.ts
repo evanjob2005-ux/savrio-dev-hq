@@ -3,7 +3,7 @@
 // `assertTaskDispatchable` refuses a task whose `assigneeAgentId` is set, which
 // reads as the "one owner" guard and is not one: nothing in production ever
 // writes that field to a non-null value (the repository sets it null at
-// creation; only `claimTask` assigns it, and `claimTask` has no callers). So two
+// creation and no current production path assigns it). So two
 // dispatches carrying different idempotency keys against the same active task
 // both passed, and because `ensureExecution` keys on the *execution* id rather
 // than the task, both created their own canonical execution, both were assigned,
@@ -226,16 +226,16 @@ describe("one live agent execution per task (NBF-3)", () => {
 
   /**
    * NULL ARM 3. Identical starting state; the only difference is that the first
-   * execution has since reached a terminal state. A task legitimately
-   * accumulates terminal executions, and refusing on those would make a task
-   * dispatchable exactly once in its lifetime.
+   * execution has since reached a terminal state but its required review has
+   * not passed yet, so the task is still active. A task legitimately accumulates
+   * terminal executions, and the ownership guard is about live work, not rows.
    */
   it("null arm: a task whose previous execution finished can be dispatched again", async () => {
     const task = seedTask();
     const first = await dispatchAgentExecution({
       taskId: task.id,
       requiredCapabilities: ["validation"],
-      reviewPolicy: "none",
+      reviewPolicy: "basic",
       idempotencyKey: "terminal-key-a",
     });
     const assignmentId = (await getExecution(first.executionId!))!.assignmentId!;

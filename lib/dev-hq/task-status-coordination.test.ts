@@ -261,8 +261,8 @@ describe("Task.status coordination between the two orchestrators (ARCH-02)", () 
     });
   });
 
-  describe("the escalation lifecycle converges when it runs second", () => {
-    it("moves an already-completed task to needs_revision when an escalation is raised", async () => {
+  describe("Founder-terminal task outcomes outrank later machine escalations", () => {
+    it("records an escalation without reopening an already-completed task", async () => {
       const { executionId, taskId, approvalId } = await pendingFounderRequest();
       await finalizeWorkflowOutcome({
         executionId,
@@ -273,14 +273,38 @@ describe("Task.status coordination between the two orchestrators (ARCH-02)", () 
 
       await raiseOn(taskId, "exec-exhausted-1");
 
-      // The opposite interleaving of the same pair. Whichever runs second must
-      // observe the other and produce the consistent state, so the outcome does
-      // not depend on who happened to write last.
       expect(
         await statusOf(taskId),
-        "an escalation was raised on a completed task and the task kept " +
-          "reporting completed (ARCH-02)",
-      ).toBe("needs_revision");
+        "a machine-raised escalation overwrote the Founder-terminal outcome",
+      ).toBe("completed");
+      expect(hasOpenEscalationForTask(taskId)).toBe(true);
+      expect(await refusalEvents(taskId)).toHaveLength(1);
+    });
+
+    it("null arm: still moves an active task to needs_revision", async () => {
+      const { taskId } = await pendingFounderRequest();
+
+      await raiseOn(taskId, "exec-exhausted-active");
+
+      expect(await statusOf(taskId)).toBe("needs_revision");
+      expect(await refusalEvents(taskId)).toHaveLength(0);
+    });
+
+    it("preserves a Founder-rejected task while retaining the escalation record", async () => {
+      const { executionId, taskId, approvalId } = await pendingFounderRequest();
+      await finalizeWorkflowOutcome({
+        executionId,
+        decision: "rejected",
+        rejectionKind: "founder",
+        approvalId,
+      });
+
+      const escalation = await raiseOn(taskId, "exec-exhausted-rejected");
+
+      expect(await statusOf(taskId)).toBe("rejected");
+      expect(escalation.status).toBe("open");
+      expect(hasOpenEscalationForTask(taskId)).toBe(true);
+      expect(await refusalEvents(taskId)).toHaveLength(1);
     });
 
     it("refuses a resolution's terminal outcome while another escalation is still open", async () => {

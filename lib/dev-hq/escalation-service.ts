@@ -270,11 +270,19 @@ async function ensureEscalatedTaskStatus(
   await ensureTaskStatus(
     taskId,
     "needs_revision",
-    () => hasOpenEscalationForTask(taskId),
+    (current) =>
+      current.status !== "completed" &&
+      current.status !== "rejected" &&
+      hasOpenEscalationForTask(taskId),
     {
       escalationId: escalation.id,
       transition: "was raised",
-      cause: () => "after its escalation stopped holding the task",
+      cause: () => {
+        const current = getDevHqStore().tasks.get(taskId);
+        return current?.status === "completed" || current?.status === "rejected"
+          ? "because a terminal task outcome already holds Founder authority"
+          : "after its escalation stopped holding the task";
+      },
     },
   );
 }

@@ -162,7 +162,9 @@ describe("founder decision recency across escalation replays (P0-3)", () => {
       expect(await statusOf()).toBe("completed");
 
       const second = await raiseOn("exec-b");
-      expect(await statusOf()).toBe("needs_revision");
+      // Raising is a machine transition, not a Founder decision. It remains
+      // visible but cannot reopen the completed task (ADR-0003 D4).
+      expect(await statusOf()).toBe("completed");
       await resolveEscalation(second.id, "abandon");
 
       expect(

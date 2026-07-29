@@ -2,8 +2,9 @@
 
 **Document ID:** ACR-001
 **Version:** 1.0.0
-**Status:** **OPEN REGISTER.** Every item is recorded, none is resolved. This document
-decides nothing.
+**Status:** **ACTIVE REGISTER.** Open items and closed/discharged history are both
+retained. This document records decisions made by the authorized owner; it does
+not create decision authority.
 **As of:** 2026-07-26 · verified at HEAD `9069c12`, branch `validation/sprint-1e-overnight-2026-07-26`
 **Owner:** Director of Operations (maintenance); Founder (every decision below)
 **Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap
@@ -18,7 +19,8 @@ routed** rather than silently resolved by whichever agent notices it last.
 
 **Rules:**
 
-1. **Nothing here is resolved.** Recording is not deciding.
+1. Recording an open item is not deciding it. A closed item must cite the
+   authorized decision and remains retained as history.
 2. Every entry names **both sides with an exact citation**, per GOV-001:369-371 — *"An
    asserted ADR, standard, or contract violation quotes the text being applied. A constraint
    may not be paraphrased into existence."*
@@ -112,7 +114,8 @@ passes, a review happened, or a gate closed.
 |---|---|
 | **Open — blocking** | 4 (X-3, X-6, X-7, X-8) |
 | **Open — material** | 19 |
-| **Open — low** | 3 |
+| **Open — low** | 2 (X-18, X-22) |
+| **Closed, retained** | 1 (X-29) |
 | **Discharged, retained** | 3 (X-1b, X-2, X-4) |
 | **Total** | 29 |
 
@@ -124,11 +127,12 @@ roadmap registration record routed to this register
 **v8.0 → v10.4 supersession**, was tracked in no document at all. **Recording is not
 deciding** — none of the three is answered.
 
-**+1 material on 2026-07-29 (second entry that date):** **X-29**, recorded from the remediation
-range `0d83525..638e45c` at HEAD `638e45c`. Unlike every other entry in this register it records
-a **delegated** decision rather than an open one — what is missing is the ADR that should carry
-it, not the decision itself. **Recording is still not deciding**, and the delegation is attested
-only by a commit message.
+**X-29 history.** It was added as one material item on 2026-07-29 from the
+remediation range `0d83525..638e45c` at HEAD `638e45c`, when only an implementing
+author's attestation of delegation existed and the superseding ADR was missing.
+The later Founder instruction **“do these, all of them”** and ADR-0003 closed it.
+It is counted once under **Closed, retained**, not among the 19 open material
+items.
 
 **Two ID spaces collided during this pass.** Two concurrent writers each appended an entry
 numbered **X-23**; the tag-identity entry was renumbered **X-24** and the agent-authority entry
@@ -693,14 +697,15 @@ unilateral pass either way would rewrite governing documents on an assumption.
 
 ---
 
-## X-29 — The queue-stall deadline amends two approved ADRs; the amendment is delegated and **not yet written** **[N] Material**
+## X-29 — The queue-stall deadline amends two approved ADRs **[CLOSED 2026-07-29]**
 
 **Recorded 2026-07-29. Verified at HEAD `638e45c`, branch `chore/close-open-obligations`** — a
 different HEAD from the `[V]` marks in §0.1, which were taken at `9069c12`.
 
-This entry records a **delegation and an outstanding action**, not a contradiction awaiting a
-Founder answer. It is here because shipped behaviour now binds differently from two approved
-ADRs and the ADRs do not say so.
+This entry originally recorded a **delegation and an outstanding action**, not a
+contradiction awaiting a Founder answer. It is retained because shipped
+behaviour temporarily bound differently from two approved ADRs before ADR-0003
+closed the record gap.
 
 | Side | Text |
 |---|---|
@@ -719,12 +724,13 @@ that the work was waiting and never told that it then failed three times.
 
 **The decision, and the evidence for it.** `3471658`'s commit message records that both
 amendments *"were escalated to the Founder, who delegated the decision on 2026-07-29."*
-**That message is the whole of the evidence available in this repository.** There is no
-Founder-signed record, no entry in any decision document, and nothing in `git log` beyond the
+**At the time this entry was written, that message was the whole of the evidence
+available in this repository.** There was no Founder-signed record, no entry in
+any decision document, and nothing in `git log` beyond the
 assertion carried by the commit that made the change. Under §1.4 and register rule 3 that is
 worth stating rather than smoothing: the delegation is **attested by the implementing author**,
-not independently recorded. Recording it here does not ratify it, and this pass took no view on
-whether the delegation occurred as described.
+not independently recorded. The later closure paragraph records the independent
+Founder authorization that resolved this evidence gap.
 
 **The alternative that was weighed and rejected**, recorded under Appendix G so a later reader
 does not mistake it for an option nobody considered: leave O6 alone and fix only the silence, by
@@ -733,20 +739,23 @@ all**, because `queued` stays a resting state. It was rejected on the ground tha
 stranding **noisy without ever producing a founder decision** — the work still neither completes
 nor fails, and the founder receives a repeating notice rather than something to act on.
 
-**What is outstanding: neither ADR has been amended.** `git log -- docs/decisions/` shows the
+**Historical gap.** Neither original ADR was amended. `git log -- docs/decisions/` shows the
 two files last touched by `df9eb3d` and `4255635`, both far outside the remediation range
 `0d83525..638e45c`, and ADR-0002 E2 still publishes a two-member origin domain that the shipped
 type contradicts. `VERSIONING_POLICY.md:222-232` forbids closing this by editing them —
 *"Architecture Decision Records are immutable historical documents. Do not modify the original
 decision after approval. Instead: create a new ADR, reference the previous ADR, explain why the
-decision changed."* The outstanding action is therefore a **new ADR** superseding ADR-0001 O6
+decision changed."* The required action was therefore a **new ADR** superseding ADR-0001 O6
 and ADR-0002 E2's origin domain, not a patch to either. ADR numbers are assigned centrally
-(§7 rule 4), which is why none is proposed here.
+(§7 rule 4), which is why none was proposed in the original entry.
 
-**Owner: Director of Operations** (draft the superseding ADR), **Founder** (assign its number
-and approve). The lifecycle *decision* is delegated and is not reopened by this entry; only the
-record of it is missing. Intersects **X-1**, which is the same problem in the other direction —
-two approved ADRs disagreeing with each other rather than with the code.
+**Closure, 2026-07-29.** The Founder authorized all eight decisions in
+`docs/plans/OPEN_AT_HANDOFF.md` section 3 with **“do these, all of them.”**
+`docs/decisions/ADR-0003-stalled-execution-and-task-terminal-lifecycle.md` now
+supersedes ADR-0001 O6 and extends ADR-0002 E2 without editing either historical
+record. It names the 120-second O5-class deadline, `queue_stalled`, and the
+resolution semantics for linked queued/running work. X-29 is therefore closed;
+the original discrepancy remains here as retained history.
 
 ---
 
@@ -795,7 +804,6 @@ CPU-001 §9.
 | **X-12 owner ruling** | Author the missing handbook and three standards, or record accepted absences | Gate completeness | X-12 |
 | **X-19 owner ruling** | Amend `GIT_STANDARD.md` for baseline and freeze-tag protection **and require `^{commit}` peeling whenever a tag identity is asserted** | Tag safety | X-19, X-24 |
 | **X-24 owner ratification** | Ratify that `sprint-1e-baseline` is **unmoved** at `62f629128e…` and lift the §B.3 standing instruction | Sprint 1F tag-identity escalation | X-24 |
-| **X-29 owner action** | Draft the **new ADR** superseding ADR-0001 O6 (`queued` as a resting state) and ADR-0002 E2's two-member `EscalationOrigin` domain, and **assign its number**. The lifecycle decision is already delegated; the record is not. `VERSIONING_POLICY.md:222-232` forbids editing either ADR in place | Approved architecture matching shipped lifecycle behaviour | X-29 |
 
 ---
 
@@ -848,13 +856,17 @@ Recorded so that a later reader does not mistake omission for oversight.
 - **Working-tree volatility.** Three changes by another actor landed in the shared tree during
   this pass (X-23), and a second writer appended a colliding `X-23` while this section was
   being written. Re-verify every `[V]` mark against `git status` before relying on it.
-- **Appended 2026-07-29 at HEAD `638e45c`, branch `chore/close-open-obligations`:** **X-29**, by a
+- **Originally appended 2026-07-29 at HEAD `638e45c`, branch `chore/close-open-obligations`:** **X-29**, by a
   recording pass over the remediation range `0d83525..638e45c`. Both sides were read directly at
   that HEAD — the two ADR texts, `types/domain/escalation.ts`, and `git log -- docs/decisions/`
-  establishing that neither ADR has been touched. **The Founder delegation X-29 reports could not
-  be independently verified**; the only evidence is `3471658`'s commit message, and the entry says
-  so. No decision authority was exercised and no ADR was drafted, numbered, or amended.
-- **Contradictions resolved: 0.** That is the intended outcome. **X-24 is an exception in kind
+  establishing that neither ADR had been touched. At that time the Founder
+  delegation could not be independently verified; the only evidence was
+  `3471658`'s commit message, and no ADR was drafted, numbered, or amended.
+- **Closed 2026-07-29:** X-29, after the Founder instructed **“do these, all of
+  them”** for the eight decisions in `OPEN_AT_HANDOFF.md` section 3 and ADR-0003
+  recorded the superseding decision. This closure update changes no other
+  register item.
+- **Contradictions resolved: 1 (X-29).** **X-24 is an exception in kind
   and not in status:** its *factual* question is settled by command output under §1.4, but the
   entry is **not closed** — under register rule 4 the Director of Operations must record the
   determination. This pass forms a view; it does not decide.

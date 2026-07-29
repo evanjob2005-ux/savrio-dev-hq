@@ -50,6 +50,7 @@ import {
   REVIEW_RESPONSE_DEADLINE_MS,
 } from "@/lib/dev-hq/constants";
 import { nextCapabilityToken, nowIso } from "@/lib/dev-hq/id";
+import { completeTaskForSuccessfulExecution } from "@/lib/dev-hq/task-completion-service";
 
 export const AGENT_REVIEW_TASK_ID = "agent-review";
 
@@ -601,6 +602,9 @@ async function ensureReviewLoopStep(
   }
   if (review.status === "changes_requested") {
     return { revisionExecutionId: await ensureReviewRevision(review) };
+  }
+  if (review.status === "passed") {
+    await completeTaskForSuccessfulExecution(review.executionId, review.id);
   }
   return { revisionExecutionId: null };
 }

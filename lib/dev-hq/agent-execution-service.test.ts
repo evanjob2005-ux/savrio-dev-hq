@@ -239,6 +239,32 @@ describe("agent execution service", () => {
     // review of the completed work, which the default policy asks for.
     const dispatchedTasks = triggerMock.mock.calls.map((call) => call[0]);
     expect(dispatchedTasks).toEqual(["agent-execution", "agent-review"]);
+    expect(getDevHqStore().tasks.get(task.id)?.status).toBe("active");
+  });
+
+  it("completes a no-review task on success and converges on callback replay", async () => {
+    const task = seedTask();
+    const dispatched = await dispatchAgentExecution({
+      taskId: task.id,
+      requiredCapabilities: ["validation"],
+      instructions: "do work",
+      reviewPolicy: "none",
+    });
+    await handleExecutionRunning(dispatched.executionId!);
+
+    const callback = {
+      executionId: dispatched.executionId!,
+      status: "succeeded" as const,
+      instructions: "do work",
+    };
+    await handleExecutionComplete(callback);
+    expect(getDevHqStore().tasks.get(task.id)?.status).toBe("completed");
+
+    await handleExecutionComplete(callback);
+    expect(getDevHqStore().tasks.get(task.id)?.status).toBe("completed");
+    expect(triggerMock.mock.calls.map((call) => call[0])).toEqual([
+      "agent-execution",
+    ]);
   });
 
   it("re-dispatches a failed attempt under the retry budget", async () => {

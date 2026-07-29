@@ -84,13 +84,6 @@ export class DevTaskRepository implements TaskRepository {
     return saveTask({ ...existing, status, updatedAt: nowIso() });
   }
 
-  async claimTask(id: string, agentId: string): Promise<Task> {
-    return this.updateTask(id, {
-      assigneeAgentId: agentId,
-      status: "active",
-    });
-  }
-
   async listDependencies(taskId: string): Promise<TaskDependency[]> {
     void taskId;
     return [];

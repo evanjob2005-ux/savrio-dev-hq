@@ -176,21 +176,22 @@ before starting.
 
 ---
 
-## 3. FOUNDER DECISIONS — recorded, none ratified here
+## 3. FOUNDER DECISIONS — authorization recorded; execution split by batch
 
-Some rows describe provisional implementation that already exists. That code is
-evidence and a candidate policy, not a substitute for the Founder decision the
-row requires. This section records no new ratification.
+The Founder’s instruction on this handoff was **“do these, all of them.”** That
+ratifies the eight decisions as work to execute, without turning one batch into
+approval of another batch’s architecture. The rows below record their current
+disposition.
 
 | ID | Decision |
 |---|---|
-| **OBL-36** | What a Founder resolution means for a non-terminal escalated execution. `7979950` provisionally ends the existing non-terminal execution for all three verbs, but that implementation is not Founder ratification. **Scope correction recorded in `OPEN_OBLIGATIONS.md`:** the decision and closure evidence must cover `accept`, `abandon`, and `revise`, including queued and running executions and replay convergence. The policy decision itself remains open. |
+| **OBL-36** | **RATIFIED / CLOSED IN BATCH 1.** ADR-0003 records that `accept`, `abandon`, and `revise` first end a linked queued/running execution; tests cover all verbs, both non-terminal states, same-resolution replay, and newer-decision precedence. |
 | **OBL-34** | `environment: production-release` does not exist (`gh api .../environments` → `total_count: 0`). No human release approval or self-review prevention is enforced, so publishing can proceed without that approval. The P0-11 post-approval revalidation logic is correct but has no approval wait to operate across until the protected environment is configured. |
-| **X-29** | A **new superseding ADR** for the delegated stall-deadline decision. Not an amendment — `VERSIONING_POLICY.md:222-232` makes ADRs immutable. It must state: O6's resting→terminating change, the third `EscalationOrigin` member, the O5-class deadline value, and (per the architecture review) what resolution does to a non-terminal execution. |
-| **ARCH-02** | Whether a machine-raised escalation may reopen a founder-terminal task. An agent proved there is **no point on the write path** where a terminal guard can live without contradicting ARCH-02's convergence rule — both `updateTaskStatusIf` and `ensureEscalatedTaskStatus` break asserted contracts. Governance, not implementation. |
+| **X-29** | **RATIFIED / CLOSED IN BATCH 1.** ADR-0003 supersedes ADR-0001 O6 and extends ADR-0002 E2 without editing either immutable ADR. It records the 120-second O5-class deadline, `queue_stalled`, and resolution of linked non-terminal work. |
+| **ARCH-02** | **RATIFIED / CLOSED IN BATCH 1.** A machine-raised escalation retains its escalation, evidence, and refusal record but does not reopen a `completed` or `rejected` task. Because task provenance is not modeled, ADR-0003 explicitly protects terminal status generically rather than claiming every terminal status was Founder-produced. |
 | **OBL-30** | Wiring `verify-workflow-structure.py` into CI. Still runs nowhere. |
-| **OBL-37** | Removing `claimTask` from a published port. |
-| **OBL-38** | Nothing marks an agent task `completed` on success — it stays `active` forever. Sprint 1F's execution board reads exactly that field. |
+| **OBL-37** | **RATIFIED / CLOSED IN BATCH 1.** `claimTask` is removed from `TaskRepository` and the development adapter; ADR-0003 requires any future replacement to use coordinated lifecycle preconditions. |
+| **OBL-38** | **RATIFIED / CLOSED IN BATCH 1.** `reviewPolicy: none` completes on success; `basic`/`full` complete only after a passed review; changes-requested/escalated and stale older results do not complete. |
 | **§6** | ARCH-10, `proxy.ts` NODE_ENV, ARCH-03, ARCH-06, ARCH-07, SVC-05, SVC-06 — all verified untouched by both architecture reviews. |
 
 ---

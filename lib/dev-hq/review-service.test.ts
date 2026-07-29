@@ -494,13 +494,51 @@ describe("review service", () => {
   });
 
   describe("outcomes", () => {
-    it("terminates the loop on acceptance", async () => {
+    it("lets only the newest succeeded execution's passed review complete the task", async () => {
       seedTask();
-      const executionId = await succeedExecution();
+      const firstExecutionId = await succeedExecution({
+        reviewPolicy: "basic",
+        idempotencyKey: "review-order-first",
+      });
+      const secondExecutionId = await succeedExecution({
+        reviewPolicy: "basic",
+        idempotencyKey: "review-order-second",
+      });
+      const { reviewStore } = getDevHqAdapters();
+      const firstReview = (await reviewStore.getReview(
+        reviewIdFor(firstExecutionId),
+      ))!;
+      const secondReview = (await reviewStore.getReview(
+        reviewIdFor(secondExecutionId),
+      ))!;
+      expect(firstReview.status).toBe("pending");
+      expect(secondReview.status).toBe("pending");
+
+      await handleReviewComplete({
+        reviewId: firstReview.id,
+        callbackToken: firstReview.callbackToken!,
+        outcome: "passed",
+      });
+      expect(getDevHqStore().tasks.get("task-rv-1")?.status).toBe("active");
+
+      await handleReviewComplete({
+        reviewId: secondReview.id,
+        callbackToken: secondReview.callbackToken!,
+        outcome: "passed",
+      });
+      expect(getDevHqStore().tasks.get("task-rv-1")?.status).toBe("completed");
+    });
+
+    it.each(["basic", "full"] as const)(
+      "completes the task only after a %s review passes",
+      async (reviewPolicy) => {
+      seedTask();
+      const executionId = await succeedExecution({ reviewPolicy });
       const reviewId = reviewIdFor(executionId);
       const { reviewStore, evidenceStore } = getDevHqAdapters();
       const token = (await reviewStore.getReview(reviewId))!.callbackToken!;
 
+      expect(getDevHqStore().tasks.get("task-rv-1")?.status).toBe("active");
       const result = await handleReviewComplete({
         reviewId,
         callbackToken: token,
@@ -519,7 +557,16 @@ describe("review service", () => {
       expect(
         evidence.some((e) => e.uri === `review:${reviewId}:outcome`),
       ).toBe(true);
-    });
+      expect(getDevHqStore().tasks.get("task-rv-1")?.status).toBe("completed");
+
+      await handleReviewComplete({
+        reviewId,
+        callbackToken: token,
+        outcome: "passed",
+      });
+      expect(getDevHqStore().tasks.get("task-rv-1")?.status).toBe("completed");
+      },
+    );
 
     it("records advisory findings without continuing the loop", async () => {
       seedTask();
@@ -561,6 +608,9 @@ describe("review service", () => {
 
       expect(result.review.status).toBe("changes_requested");
       expect(result.revisionExecutionId).toBeTruthy();
+      expect(getDevHqStore().tasks.get("task-rv-1")?.status).not.toBe(
+        "completed",
+      );
     });
 
     it("authorizes exactly one revision execution and dispatches it", async () => {

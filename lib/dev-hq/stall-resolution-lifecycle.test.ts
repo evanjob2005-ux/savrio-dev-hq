@@ -314,6 +314,42 @@ describe("founder resolution of a queue-stall escalation ends the stalled work",
     });
   });
 
+  describe("a resolution ends an execution that started running after the stall", () => {
+    it.each(["accept", "abandon", "revise"] as const)(
+      "%s cancels the linked running execution before applying the decision",
+      async (resolution) => {
+        const { executionId, agent, escalation } = await stalledAndEscalated();
+        restoreCapacity(agent);
+        await handleExecutionReclaim(PAST_DEADLINE());
+        await handleExecutionRunning(executionId);
+        expect((await getExecution(executionId))?.status).toBe("running");
+
+        await resolveEscalation(escalation.id, resolution);
+
+        expect((await getExecution(executionId))?.status).toBe("cancelled");
+        // Assignment does not claim the agent; only the running callback moves
+        // availability to busy. Cancellation must release the old running hold.
+        expect(getDevHqStore().agents.get(SATISFYING_AGENT)?.availability).toBe(
+          "available",
+        );
+        expect(await statusOf()).toBe(
+          resolution === "accept"
+            ? "completed"
+            : resolution === "abandon"
+              ? "rejected"
+              : "active",
+        );
+        if (resolution === "revise") {
+          const revisions = taskExecutions().filter(
+            (execution) => execution.id !== executionId,
+          );
+          expect(revisions).toHaveLength(1);
+          expect(["queued", "running"]).toContain(revisions[0].status);
+        }
+      },
+    );
+  });
+
   // --- (b) a terminal founder decision must not be reversed --------------------
 
   describe("(b) an abandoned task is not resurrected by a later escalation", () => {
