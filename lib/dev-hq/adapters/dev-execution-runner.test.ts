@@ -139,7 +139,7 @@ describe("DevExecutionRunner", () => {
   it("surfaces no_agent_available from the manager", async () => {
     const task = seedTask();
     const decision = await runner.assignExecution(task.id, {
-      requiredCapabilities: ["qa"],
+      requiredCapabilities: ["no-such-capability"],
     });
     expect(decision.assigned).toBe(false);
     expect(decision.reason).toBe("no_agent_available");

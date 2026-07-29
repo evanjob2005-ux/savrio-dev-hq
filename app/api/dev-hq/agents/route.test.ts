@@ -15,7 +15,9 @@ describe("GET /api/dev-hq/agents", () => {
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as { agents: Array<{ id: string }> };
-    expect(body.agents).toHaveLength(5);
+    // Five roster agents plus agent-executive-orchestrator, which ADR-0001 D5
+    // requires the seed to register so escalation records join to a real identity.
+    expect(body.agents).toHaveLength(6);
     expect(body.agents.map((agent) => agent.id)).toContain("agent-orchestrator");
   });
 });

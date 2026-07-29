@@ -2,7 +2,10 @@
 // Single Next.js process, non-durable, not for production.
 
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
-import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
+import {
+  EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  FOUNDER_REQUEST_WORKFLOW_ID,
+} from "@/lib/dev-hq/constants";
 import type {
   DevHqState,
   DevHqStoreData,
@@ -81,8 +84,54 @@ function createSeedWorkflow(): Workflow {
 function createSeedAgents(): Map<string, Agent> {
   const agents = new Map<string, Agent>();
   for (const agent of MISSION_CONTROL_PLACEHOLDERS.agents) {
-    agents.set(agent.id, { ...agent, capabilities: [...agent.capabilities] });
+    agents.set(agent.id, {
+      ...agent,
+      // Seed the concurrency primitive UNLOCKED, whatever the roster displays.
+      //
+      // ADR-0001 D6 makes availability the compare-and-set primitive: claiming
+      // requires "available", and only releasing an execution writes it back.
+      // The placeholder roster carries "busy"/"waiting" as cosmetic UI status,
+      // and copying that through seeded three agents into a lock nobody holds
+      // and nothing can release -- not-available, so never selected, so never
+      // claimed, so never released. Terminal.
+      //
+      // That stranded five of the ten capabilities frozen by ADR-0001 O3
+      // (implementation, review, corrections, qa, accessibility): dispatch
+      // found no eligible agent, the execution sat queued forever, and because
+      // no attempt was consumed no escalation was ever raised. Work that
+      // neither completes nor fails.
+      //
+      // Display status is a view-model concern and belongs in Mission Control.
+      availability: "available",
+      capabilities: [...agent.capabilities],
+    });
   }
+
+  // ADR-0001 D5 requires the seed to reuse ids already hard-referenced
+  // elsewhere, naming this one explicitly. It was referenced but never seeded:
+  // escalation-service and founder-request-service persist it as
+  // raisedByAgentId, createdByAgentId and actorId, and getAgent() returned null
+  // for every one of them -- so an escalation's "raised by" joined to nothing.
+  // The events looked right only because a hardcoded label string masked it.
+  if (!agents.has(EXECUTIVE_ORCHESTRATOR_AGENT_ID)) {
+    agents.set(EXECUTIVE_ORCHESTRATOR_AGENT_ID, {
+      id: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+      name: "Executive Orchestrator",
+      provider: "internal",
+      role: "Executive Orchestrator",
+      // Deliberately no capabilities. This is a system actor, not a worker: it
+      // exists so escalation and founder-request records join to a real
+      // identity, and it must never win a dispatch. Every production
+      // selectAgent call specifies requiredCapabilities, so an empty set makes
+      // it unselectable without needing a special case in the registry.
+      capabilities: [],
+      availability: "available",
+      accentColor: "#c9a227",
+      initials: "EO",
+      lastActiveAt: null,
+    });
+  }
+
   return agents;
 }
 

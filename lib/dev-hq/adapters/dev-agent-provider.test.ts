@@ -39,7 +39,9 @@ describe("DevAgentProvider", () => {
 
   it("lists the seeded registry", async () => {
     const agents = await provider.listAgents();
-    expect(agents).toHaveLength(5);
+    // Five roster agents plus agent-executive-orchestrator, which ADR-0001 D5
+    // requires the seed to register so escalation records join to a real identity.
+    expect(agents).toHaveLength(6);
   });
 
   it("gets an agent by id and returns null when missing", async () => {

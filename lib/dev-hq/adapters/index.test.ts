@@ -19,7 +19,9 @@ describe("dev HQ adapters composition root", () => {
 
   it("serves the seeded roster through the agent provider", async () => {
     const { agentProvider } = getDevHqAdapters();
-    expect(await agentProvider.listAgents()).toHaveLength(5);
+    // Five roster agents plus agent-executive-orchestrator, which ADR-0001 D5
+    // requires the seed to register so escalation records join to a real identity.
+    expect(await agentProvider.listAgents()).toHaveLength(6);
   });
 
   it("keeps the execution runner usable for ready-work queries", async () => {

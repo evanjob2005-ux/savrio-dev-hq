@@ -33,9 +33,12 @@ describe("agent registry", () => {
 
   it("seeds the canonical roster from placeholders", () => {
     const agents = listAgents();
-    expect(agents).toHaveLength(5);
+    // Five roster agents plus agent-executive-orchestrator, which ADR-0001 D5
+    // requires the seed to register because escalation records reference it.
+    expect(agents).toHaveLength(6);
     expect(agents.map((a) => a.id)).toContain("agent-orchestrator");
     expect(agents.map((a) => a.id)).toContain("agent-supervisor");
+    expect(agents.map((a) => a.id)).toContain("agent-executive-orchestrator");
   });
 
   it("looks up agents by id", () => {
@@ -52,16 +55,18 @@ describe("agent registry", () => {
   });
 
   it("treats only available agents as eligible", () => {
-    // Seed availability: orchestrator+supervisor available; claude+codex busy;
-    // gemini waiting.
+    // Arranged here rather than inherited from the seed. The seed now unlocks
+    // every agent, because availability is the concurrency primitive and a
+    // seeded lock is one nothing can ever release.
+    saveAgent({ ...getAgent("agent-claude")!, availability: "busy" });
+
     expect(isAvailable(getAgent("agent-orchestrator")!)).toBe(true);
     expect(isAvailable(getAgent("agent-claude")!)).toBe(false);
 
-    const eligible = findEligibleAgents();
-    expect(eligible.map((a) => a.id).sort()).toEqual([
-      "agent-orchestrator",
-      "agent-supervisor",
-    ]);
+    const eligible = findEligibleAgents().map((a) => a.id);
+    expect(eligible).not.toContain("agent-claude");
+    expect(eligible).toContain("agent-orchestrator");
+    expect(eligible).toContain("agent-supervisor");
   });
 
   it("filters eligible agents by required capabilities", () => {
@@ -81,12 +86,30 @@ describe("agent registry", () => {
   });
 
   it("returns null when no available agent matches", () => {
-    // gemini has qa but is only "waiting", not available.
+    // Arrange the unavailability rather than relying on the seed: gemini is the
+    // only agent with "qa", so making it busy is what makes this case real.
+    saveAgent({ ...getAgent("agent-gemini")!, availability: "busy" });
     expect(selectAgent({ requiredCapabilities: ["qa"] })).toBeNull();
     expect(selectAgent({ requiredCapabilities: ["nonexistent"] })).toBeNull();
   });
 
+  it("satisfies every capability the roster claims to cover", () => {
+    // The counterpart to the case above. Previously "qa" returned null from a
+    // clean store and a test asserted that as correct, which is how a seeded
+    // deadlock stayed invisible.
+    expect(selectAgent({ requiredCapabilities: ["qa"] })?.id).toBe("agent-gemini");
+    expect(selectAgent({ requiredCapabilities: ["implementation"] })?.id).toBe(
+      "agent-claude",
+    );
+  });
+
   it("picks the least-recently-active eligible agent by default", () => {
+    // Restrict the field to the two agents this case is about, so the assertion
+    // does not silently depend on how many others the roster happens to carry.
+    for (const id of ["agent-claude", "agent-codex", "agent-gemini",
+                      "agent-executive-orchestrator"]) {
+      saveAgent({ ...getAgent(id)!, availability: "busy" });
+    }
     // supervisor lastActiveAt 19:45 is older than orchestrator's 21:00.
     expect(selectAgent()?.id).toBe("agent-supervisor");
   });
@@ -98,7 +121,12 @@ describe("agent registry", () => {
   });
 
   it("ignores a preferred agent that is not eligible and falls back", () => {
-    // claude is busy -> not eligible; fall back to least-recently-active available.
+    // Arrange claude as busy, then confirm the fallback. Restrict the remaining
+    // field so the fallback target is determined by lastActiveAt, not by roster size.
+    for (const id of ["agent-claude", "agent-codex", "agent-gemini",
+                      "agent-executive-orchestrator"]) {
+      saveAgent({ ...getAgent(id)!, availability: "busy" });
+    }
     expect(selectAgent({ preferredAgentId: "agent-claude" })?.id).toBe(
       "agent-supervisor",
     );

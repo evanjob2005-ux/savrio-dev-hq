@@ -133,7 +133,7 @@ describe("dispatchAgentExecutionAction", () => {
     const task = seedTask();
     const outcome = await dispatchAgentExecutionAction({
       taskId: task.id,
-      requiredCapabilities: ["qa"], // no available agent has qa
+      requiredCapabilities: ["no-such-capability"],
     });
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
