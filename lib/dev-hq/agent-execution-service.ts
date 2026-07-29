@@ -715,9 +715,58 @@ function assertTaskDispatchable(task: Task): void {
       `Task ${task.id} is ${task.status}, not active; only an active task can be dispatched.`,
     );
   }
+  // Kept, but **not** the guard that stops a second owner today. Nothing in
+  // production writes `assigneeAgentId` to a non-null value: the repository sets
+  // it null at creation and only `claimTask` ever assigns it, which has no
+  // callers. So this branch is unreachable through any live path, and relying on
+  // it is what left `assertNoLiveExecutionForTask` missing. It stays because it
+  // is correct and becomes load-bearing the moment `claimTask` gains a caller.
   if (task.assigneeAgentId) {
     throw new UndispatchableRequestError(
       `Task ${task.id} is already assigned to ${task.assigneeAgentId}; refusing to dispatch a second owner for it.`,
+    );
+  }
+}
+
+/**
+ * Refuse a dispatch for a task that already has live agent-backed work (NBF-3).
+ *
+ * **This is the check that actually makes one task have one owner.** The
+ * `assigneeAgentId` branch above reads as though it did, and it cannot: the
+ * field is permanently null (see the note there). Two dispatches carrying
+ * different idempotency keys against the same active task therefore both passed
+ * every gate, and — because `ensureExecution` keys on the *execution* id, not the
+ * task — both created their own canonical execution, both were assigned, and both
+ * were dispatched. One task, two live agent executions, two independent 3-attempt
+ * retry budgets, two review loops, and two escalation paths racing on a single
+ * `Task.status`.
+ *
+ * Liveness, not existence, is the condition. A task legitimately accumulates
+ * terminal executions — every retry-exhausted failure, every succeeded execution
+ * a review later revises — and refusing on those would make a task dispatchable
+ * exactly once in its lifetime. `queued` and `running` are the two states in
+ * which an execution still owns the task's outcome.
+ *
+ * `routing` restricts this to agent-backed work, the same discriminator
+ * `isQueueStalled` and `reconcileAttemptRecords` use. A founder-request execution
+ * carries none and is never assigned an agent (ADR-0001 D2), so it is not a
+ * competing owner and must not block a dispatch.
+ *
+ * Evaluated only when this call would CREATE the canonical execution, exactly as
+ * the two asserts above are and for the same reason: a replay converges on the
+ * execution its own key already made, and that execution is itself live — so
+ * re-checking on a replay would make every recovery refuse itself.
+ */
+function assertNoLiveExecutionForTask(taskId: string): void {
+  for (const execution of getDevHqStore().executions.values()) {
+    if (execution.taskId !== taskId) continue;
+    if (!execution.routing) continue;
+    if (execution.status !== "queued" && execution.status !== "running") continue;
+    throw new UndispatchableRequestError(
+      `Task ${taskId} already has a live agent execution (${execution.id}, ${execution.status}); ` +
+        "refusing to dispatch a second one. Two live executions on one task run two " +
+        "independent retry budgets, two review loops, and two escalation paths against a " +
+        "single task status. Resume the existing dispatch instead, or wait for it to finish.",
     );
   }
 }
@@ -891,6 +940,7 @@ export async function dispatchAgentExecution(
   const executionId = dispatchExecutionIdFor(idempotencyKey);
   if (!getDevHqStore().executions.has(executionId)) {
     assertTaskDispatchable(task);
+    assertNoLiveExecutionForTask(task.id);
     assertCapabilitiesSatisfiable(request.requiredCapabilities);
   }
 
@@ -1271,7 +1321,17 @@ async function reconcileUnescalatedFailures(): Promise<void> {
     // Agent executions only (founder-request executions have no agent/assignment).
     if (!execution.agentId || !execution.assignmentId) continue;
     if ((execution.attempt ?? 0) < MAX_EXECUTION_ATTEMPTS) continue;
-    if (await escalationStore.findByExecution(execution.id)) continue;
+    // Scoped to the origin this backstop raises (F-5). The lookup used to ask
+    // "has this execution escalated at all?", which the moment `queue_stalled`
+    // existed became a different question from the one this loop needs: an
+    // execution that stalled in the queue, then got capacity and genuinely
+    // exhausted its retry budget, carries a `queue_stalled` escalation — and the
+    // agnostic lookup found it and skipped raising the real one. That was
+    // unreachable only because `reconcileAttemptRecords` runs earlier in the same
+    // sweep and raises it first, which is an ordering accident, not a guarantee.
+    if (await escalationStore.findByExecution(execution.id, "retry_exhausted")) {
+      continue;
+    }
     await raiseRetryExhaustionEscalation(execution);
   }
 }

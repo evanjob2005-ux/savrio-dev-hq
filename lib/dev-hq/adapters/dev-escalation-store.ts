@@ -37,10 +37,18 @@ export class DevEscalationStore implements EscalationStore {
     );
   }
 
-  async findByExecution(executionId: string): Promise<Escalation | null> {
+  async findByExecution(
+    executionId: string,
+    origin: Escalation["origin"],
+  ): Promise<Escalation | null> {
+    // Matched on the same pair `createEscalation` dedupes on, so this lookup and
+    // that write agree about what "already escalated" means. Without the origin
+    // they did not: one escalation of any origin hid every other.
     return (
       [...getDevHqStore().escalations.values()].find(
-        (escalation) => escalation.executionId === executionId,
+        (escalation) =>
+          escalation.executionId === executionId &&
+          escalation.origin === origin,
       ) ?? null
     );
   }

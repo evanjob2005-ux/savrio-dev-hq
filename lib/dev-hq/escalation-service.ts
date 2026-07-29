@@ -31,6 +31,7 @@ import {
   FOUNDER_USER_ID,
   MAX_EXECUTION_ATTEMPTS,
   MAX_REVIEW_ITERATIONS,
+  TASK_STATUS_REFUSED_EVENT_TYPE,
 } from "@/lib/dev-hq/constants";
 import type {
   Escalation,
@@ -180,9 +181,76 @@ async function ensureTaskStatus(
   taskId: string,
   status: Task["status"],
   precondition: (current: Task) => boolean,
+  refusal: TaskStatusRefusal,
 ): Promise<void> {
   const { taskRepository } = getDevHqAdapters();
-  await taskRepository.updateTaskStatusIf(taskId, status, precondition);
+  const applied = await taskRepository.updateTaskStatusIf(
+    taskId,
+    status,
+    precondition,
+  );
+  // Null is the precondition refusing (or the task being gone). A write that was
+  // simply already at the target returns the task, so a no-op is not reported as
+  // a divergence.
+  if (!applied) {
+    await recordTaskStatusRefusal(taskId, status, refusal);
+  }
+}
+
+/**
+ * What a refused `Task.status` write needs in order to be recorded honestly: the
+ * escalation whose transition wanted it, a phrase naming that transition, and a
+ * cause evaluated at the call site.
+ *
+ * The cause is a thunk supplied per site rather than derived here, because the
+ * authorizing fact differs by transition and only the site knows which of its
+ * conditions could have been the one that refused.
+ */
+interface TaskStatusRefusal {
+  escalationId: string;
+  transition: string;
+  cause: () => string;
+}
+
+/**
+ * Record that an escalation lifecycle transition's conditional `Task.status`
+ * write was refused (NBF-2).
+ *
+ * **The other half of ARCH-02.** That fix made both `Task.status` orchestrators
+ * write through `updateTaskStatusIf`, and gave the founder-request side a
+ * `TASK_STATUS_REFUSED_EVENT_TYPE` entry when its precondition refused. This side
+ * discarded the `Task | null` and recorded nothing — so an escalation could
+ * resolve `accept` while the task stayed `rejected`, and the only trace was two
+ * records that disagree and no entry saying why.
+ *
+ * The reasoning is already written down, in that constant's own doc comment, in
+ * terms that never mentioned which flow it applied to: "an unrecorded divergence
+ * is indistinguishable from one that never happened." It applies identically
+ * here. The refusal itself remains the correct outcome; what was missing was the
+ * record of it.
+ *
+ * Descriptive only — nothing reads it back. One entry per (escalation, intended
+ * status): a replay of the same transition is the same refusal, not a second one.
+ */
+async function recordTaskStatusRefusal(
+  taskId: string,
+  intended: Task["status"],
+  refusal: TaskStatusRefusal,
+): Promise<void> {
+  const { taskRepository, eventLogger } = getDevHqAdapters();
+  const current = await taskRepository.getTask(taskId);
+  await eventLogger.log({
+    type: TASK_STATUS_REFUSED_EVENT_TYPE,
+    entityType: "task",
+    entityId: taskId,
+    message:
+      `Escalation ${refusal.escalationId} ${refusal.transition} but did not set task ` +
+      `${taskId} to "${intended}": the task now reads "${current?.status ?? "missing"}" ` +
+      `${refusal.cause()}. The other decision stands.`,
+    actorId: null,
+    actorLabel: "System",
+    dedupeKey: `${TASK_STATUS_REFUSED_EVENT_TYPE}:${refusal.escalationId}:${intended}`,
+  });
 }
 
 /**
@@ -194,9 +262,19 @@ async function ensureTaskStatus(
  * when the founder resolved the escalation inside the gap, which would otherwise
  * strand the task in `needs_revision` with nothing outstanding.
  */
-async function ensureEscalatedTaskStatus(taskId: string): Promise<void> {
-  await ensureTaskStatus(taskId, "needs_revision", () =>
-    hasOpenEscalationForTask(taskId),
+async function ensureEscalatedTaskStatus(
+  escalation: Escalation,
+): Promise<void> {
+  const taskId = escalation.taskId;
+  await ensureTaskStatus(
+    taskId,
+    "needs_revision",
+    () => hasOpenEscalationForTask(taskId),
+    {
+      escalationId: escalation.id,
+      transition: "was raised",
+      cause: () => "after its escalation stopped holding the task",
+    },
   );
 }
 
@@ -226,6 +304,19 @@ async function ensureResolvedTaskStatus(
     () =>
       !hasOpenEscalationForTask(escalation.taskId) &&
       isNewestResolutionForTask(escalation),
+    {
+      escalationId: escalation.id,
+      transition: `resolved ${escalation.resolution ?? "terminally"}`,
+      // Re-evaluated for the message only. Both conditions are read again here
+      // rather than captured at commit time, and the wording says "now" because
+      // that is all a post-hoc reading can honestly claim.
+      cause: () =>
+        hasOpenEscalationForTask(escalation.taskId)
+          ? "and an unresolved founder escalation now holds it"
+          : !isNewestResolutionForTask(escalation)
+            ? "after a later founder decision on this task superseded this one"
+            : "after another transition landed first",
+    },
   );
 }
 
@@ -270,16 +361,41 @@ async function activateTaskForLiveRevision(
   if (!observed || observed.status === target) {
     return;
   }
-  await taskRepository.updateTaskStatusIf(taskId, target, (current) => {
-    if (current.status !== observed.status) {
-      return false; // another actor moved the task since it was observed
-    }
-    if (!isNewestResolutionForTask(escalation)) {
-      return false; // a later founder decision on this task supersedes ours
-    }
-    const status = revisionStatusNow(executionId);
-    return status !== null && !isTerminalExecution(status);
-  });
+  const applied = await taskRepository.updateTaskStatusIf(
+    taskId,
+    target,
+    (current) => {
+      if (current.status !== observed.status) {
+        return false; // another actor moved the task since it was observed
+      }
+      if (!isNewestResolutionForTask(escalation)) {
+        return false; // a later founder decision on this task supersedes ours
+      }
+      const status = revisionStatusNow(executionId);
+      return status !== null && !isTerminalExecution(status);
+    },
+  );
+  // The refusal is correct — but a revise that resolved while its task keeps a
+  // different status is exactly the divergence ARCH-02 exists to record, and this
+  // half recorded nothing (NBF-2). Three distinct conditions can refuse here, so
+  // the cause is re-read for the message; the early return above is a genuine
+  // no-op (the task already holds the target) and is deliberately not reported.
+  if (!applied) {
+    await recordTaskStatusRefusal(taskId, target, {
+      escalationId: escalation.id,
+      transition: "resolved revise",
+      cause: () => {
+        const status = revisionStatusNow(executionId);
+        if (status === null || isTerminalExecution(status)) {
+          return `because its revision execution ${executionId} is ${status ?? "missing"} rather than live`;
+        }
+        if (!isNewestResolutionForTask(escalation)) {
+          return "after a later founder decision on this task superseded this one";
+        }
+        return "after another transition landed first";
+      },
+    });
+  }
 }
 
 /**
@@ -534,7 +650,7 @@ export async function raiseReviewExhaustionEscalation(
     return escalation;
   }
 
-  await ensureEscalatedTaskStatus(escalation.taskId);
+  await ensureEscalatedTaskStatus(escalation);
   await ensureEscalationEvidence({
     ref: `escalation:${escalation.id}:raised`,
     taskId: escalation.taskId,
@@ -588,7 +704,7 @@ export async function raiseRetryExhaustionEscalation(
     return escalation;
   }
 
-  await ensureEscalatedTaskStatus(escalation.taskId);
+  await ensureEscalatedTaskStatus(escalation);
   await ensureEscalationEvidence({
     ref: `escalation:${escalation.id}:raised`,
     taskId: escalation.taskId,
@@ -702,7 +818,7 @@ export async function raiseQueueStallEscalation(
     return escalation;
   }
 
-  await ensureEscalatedTaskStatus(escalation.taskId);
+  await ensureEscalatedTaskStatus(escalation);
   await ensureEscalationEvidence({
     ref: `escalation:${escalation.id}:raised`,
     taskId: escalation.taskId,

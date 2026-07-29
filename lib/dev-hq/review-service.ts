@@ -814,9 +814,16 @@ export async function reconcileReviews(
       review.status === "changes_requested" &&
       (!review.revisionExecutionId ||
         !getDevHqStore().executions.get(review.revisionExecutionId));
+    // Scoped to the origin this branch is measuring (F-5). An execution can carry
+    // a `retry_exhausted` or `queue_stalled` escalation as well, and the agnostic
+    // lookup counted either of those as "the review escalation is already there",
+    // under-reporting exactly the repair `ensureReviewLoopStep` then performs.
     const escalationMissing =
       review.status === "escalated" &&
-      !(await escalationStore.findByExecution(review.executionId));
+      !(await escalationStore.findByExecution(
+        review.executionId,
+        "review_exhausted",
+      ));
 
     await ensureReviewLoopStep(review);
 

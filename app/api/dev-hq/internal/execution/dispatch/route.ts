@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { rejectInternalDevRequest } from "@/lib/dev-hq/internal-guard";
 import {
+  ConflictingDispatchRequestError,
   dispatchAgentExecution,
   UndispatchableRequestError,
 } from "@/lib/dev-hq/agent-execution-service";
@@ -86,7 +87,19 @@ export async function POST(request: Request) {
     // A request the system can never run is the caller's to fix, not an internal
     // failure. Reported as 500 it reads as "transient, try again" about a
     // dispatch that would be refused identically every time.
-    if (error instanceof UndispatchableRequestError) {
+    //
+    // Both refusals map here, and the pair was split incoherently across the two
+    // dispatch surfaces (NBF-1). This route classified only
+    // `UndispatchableRequestError`, so a replayed key carrying a different
+    // request — the one case an idempotency key exists to detect — fell through
+    // to 500 and told the caller the server had broken. `lib/dev-hq/actions.ts`
+    // had the mirror-image gap: it classified only `ConflictingDispatchRequestError`.
+    // Each surface handled exactly the error the other one missed, so no caller
+    // of either got both answers right.
+    if (
+      error instanceof UndispatchableRequestError ||
+      error instanceof ConflictingDispatchRequestError
+    ) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     const message = error instanceof Error ? error.message : "Unknown error";

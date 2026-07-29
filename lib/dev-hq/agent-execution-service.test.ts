@@ -906,20 +906,39 @@ describe("agent execution service", () => {
       expect(triggerMock).toHaveBeenCalledTimes(1);
     });
 
+    /**
+     * Rewritten for NBF-3, and the change is the finding.
+     *
+     * This asserted `{ executions: 2, assignments: 2 }` for two distinct keys
+     * against **one task** — which is precisely the defect: one task with two
+     * live agent-backed executions, two independent retry budgets and two
+     * escalation paths. It was pinning that as the contract. The claim worth
+     * keeping is that distinct keys are distinct logical dispatches, and that is
+     * true (and legitimate) across two tasks. The same-task form is now refused;
+     * see `lib/dev-hq/one-live-execution-per-task.test.ts`.
+     */
     it("still treats distinct keys as distinct logical dispatches", async () => {
-      const task = seedTask();
-      const first = await dispatchWithKey(task.id, "dispatch-key-a");
-      const second = await dispatchWithKey(task.id, "dispatch-key-b");
+      const first = await dispatchWithKey(seedTask().id, "dispatch-key-a");
+      const second = await dispatchWithKey(
+        seedTask({ id: "task-ax-keys" }).id,
+        "dispatch-key-b",
+      );
 
       expect(second.executionId).not.toBe(first.executionId);
       expect(second.triggerRunId).not.toBe(first.triggerRunId);
       expect(storeCounts()).toEqual({ executions: 2, assignments: 2 });
     });
 
+    /**
+     * Subject is key ALLOCATION — an omitted key gets a fresh one per call — not
+     * how many executions one task may hold. Moved to two tasks so it states only
+     * that, rather than depending on the NBF-3 defect to be observable.
+     */
     it("allocates a key when the caller omits one", async () => {
-      const task = seedTask();
-      const first = await dispatchAgentExecution({ taskId: task.id });
-      const second = await dispatchAgentExecution({ taskId: task.id });
+      const first = await dispatchAgentExecution({ taskId: seedTask().id });
+      const second = await dispatchAgentExecution({
+        taskId: seedTask({ id: "task-ax-alloc" }).id,
+      });
 
       expect(first.executionId).toBeTruthy();
       expect(second.executionId).not.toBe(first.executionId);
@@ -1414,7 +1433,10 @@ describe("agent execution service", () => {
       await handleExecutionReclaim();
       expect(await exhaustedCount(executionId)).toBe(1);
       expect(
-        await getDevHqAdapters().escalationStore.findByExecution(executionId),
+        await getDevHqAdapters().escalationStore.findByExecution(
+          executionId,
+          "retry_exhausted",
+        ),
       ).not.toBeNull();
     });
 
@@ -1603,16 +1625,23 @@ describe("agent execution service", () => {
     });
 
     it("recovers the loser of a pre-claim race for a capacity-one agent", async () => {
-      const task = seedTask();
       // Two distinct logical dispatches both select the one available agent with
       // this capability: selection proposes, only the claim reserves (ADR-0001).
+      //
+      // Two TASKS, not two dispatches of one task. The race being exercised is
+      // over a capacity-one *agent*, and two tasks competing for one supervisor
+      // is its realistic shape; the same-task form was only ever a convenience,
+      // and it is what NBF-3 now refuses. Nothing else about this test changes —
+      // the loser is still queued, dispatched, unclaimed and leaseless.
+      const task = seedTask();
+      const otherTask = seedTask({ id: "task-ax-race" });
       const first = await dispatchAgentExecution({
         taskId: task.id,
         requiredCapabilities: ["validation"],
         idempotencyKey: "race-key-a",
       });
       const second = await dispatchAgentExecution({
-        taskId: task.id,
+        taskId: otherTask.id,
         requiredCapabilities: ["validation"],
         idempotencyKey: "race-key-b",
       });

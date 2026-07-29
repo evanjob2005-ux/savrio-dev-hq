@@ -10,6 +10,7 @@ import {
   ConflictingDispatchRequestError,
   dispatchAgentExecution,
   dispatchExecutionIdFor,
+  UndispatchableRequestError,
   type DispatchAgentExecutionResult,
 } from "@/lib/dev-hq/agent-execution-service";
 
@@ -70,12 +71,26 @@ export async function dispatchAgentExecutionAction(input: {
     });
     return { ok: true, resolved: true, result };
   } catch (error) {
-    // A conflicting replay is definitive: the stored request differs, so this
-    // identity will never accept these parameters and holding it helps nobody.
-    const conflicting = error instanceof ConflictingDispatchRequestError;
+    // Two definitive refusals, and only one of them was classified (NBF-1).
+    //
+    // A conflicting replay is definitive because the stored request differs, so
+    // this identity will never accept these parameters. An undispatchable request
+    // is definitive for a stronger reason: both eligibility asserts run *before*
+    // `ensureExecution`, and only when the canonical execution does not yet
+    // exist, so nothing was created and there is provably nothing to recover.
+    //
+    // Leaving it unclassified had a concrete cost on the shipped path. The
+    // founder ticks `validation` and `routing` in DispatchAgentPanel — two
+    // adjacent checkboxes the capability-partitioned roster cannot satisfy
+    // together — the request is refused, this returned `resolved: false`, the
+    // panel never retired the pending key, and it showed a retryable-looking hold
+    // on a request that will be refused identically forever.
+    const definitive =
+      error instanceof ConflictingDispatchRequestError ||
+      error instanceof UndispatchableRequestError;
     return {
       ok: false,
-      resolved: conflicting,
+      resolved: definitive,
       error: error instanceof Error ? error.message : "Dispatch failed.",
       // The canonical id is derived from the key, so the browser can be told
       // which execution to look at even when the call failed part-way through.

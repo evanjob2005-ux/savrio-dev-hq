@@ -69,19 +69,49 @@ describe("DevEscalationStore", () => {
     expect(await store.findOpenByExecution("exec-missing")).toBeNull();
   });
 
-  it("finds an escalation by execution regardless of status", async () => {
+  it("finds an escalation by execution and origin regardless of status", async () => {
     const escalation = await store.createEscalation({
       origin: "retry_exhausted",
       taskId: "t",
       executionId: "exec-1",
       summary: "a",
     });
-    expect((await store.findByExecution("exec-1"))?.id).toBe(escalation.id);
+    expect((await store.findByExecution("exec-1", "retry_exhausted"))?.id).toBe(
+      escalation.id,
+    );
     await store.resolveEscalation({ escalationId: escalation.id, resolution: "accept" });
     // findOpenByExecution excludes resolved; findByExecution still returns it.
     expect(await store.findOpenByExecution("exec-1")).toBeNull();
-    expect((await store.findByExecution("exec-1"))?.id).toBe(escalation.id);
-    expect(await store.findByExecution("exec-missing")).toBeNull();
+    expect((await store.findByExecution("exec-1", "retry_exhausted"))?.id).toBe(
+      escalation.id,
+    );
+    expect(await store.findByExecution("exec-missing", "retry_exhausted")).toBeNull();
+  });
+
+  /**
+   * F-5. `createEscalation` dedupes per (execution, origin), so that pair is the
+   * identity of an escalation — and a lookup keyed on the execution alone answers
+   * a different question than the writer asks. One escalation of any origin used
+   * to hide every other one on the same execution.
+   */
+  it("does not report one origin's escalation when asked about another", async () => {
+    const stall = await store.createEscalation({
+      origin: "queue_stalled",
+      taskId: "t",
+      executionId: "exec-1",
+      summary: "stalled",
+    });
+
+    expect((await store.findByExecution("exec-1", "queue_stalled"))?.id).toBe(
+      stall.id,
+    );
+    expect(
+      await store.findByExecution("exec-1", "retry_exhausted"),
+      "a queue_stalled escalation was returned for a retry_exhausted lookup; a backstop asking whether this execution had exhausted its retries would skip raising the real escalation (F-5)",
+    ).toBeNull();
+    expect(
+      await store.findByExecution("exec-1", "review_exhausted"),
+    ).toBeNull();
   });
 
   it("resolves once, then returns null on repeat", async () => {

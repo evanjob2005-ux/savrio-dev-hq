@@ -473,6 +473,36 @@ export async function finalizeWorkflowOutcome(input: {
     );
   }
 
+  // The founder's decision is honoured in name and inverted in effect (MINOR-1).
+  //
+  // The check above binds `decision`. Nothing bound `rejectionKind`, and it is
+  // not a lesser field: `taskStatusForOutcome` reads it, and "validation" routes
+  // the task to `needs_revision` instead of `rejected`. So a caller past the
+  // internal guard could POST {decision:"rejected", rejectionKind:"validation"}
+  // against a correctly-bound, founder-decided approval, pass every authority
+  // check here, send the task to needs_revision — and still have
+  // `approval.rejected` logged below, saying the founder's rejection took effect.
+  //
+  // The founder never chooses a rejection kind. `decideFounderRequest` records
+  // only "approved" | "rejected"; "validation" is produced by exactly one caller,
+  // `runExecutiveReview`, which finalises from `executive_review` before any
+  // founder gate exists and passes no `approvalId` at all. An approval-bound
+  // finalization claiming a validation rejection is therefore not a legitimate
+  // request under any caller the system has — it is the founder's authority being
+  // spent on an outcome the founder did not choose.
+  //
+  // Refused rather than coerced to "founder": the caller stated an outcome, and
+  // quietly rewriting it would leave them believing the request they sent is the
+  // one that ran, which is the same defect class one step further along.
+  if (approval && input.rejectionKind === "validation") {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} carries the founder's decision for execution ${run.executionId} ` +
+        `and cannot finalize it as a "validation" rejection: that routes task ${run.taskId} to ` +
+        `"needs_revision" rather than "rejected", while the timeline records that the founder's ` +
+        "decision took effect. Validation rejections are raised by executive review and carry no approval.",
+    );
+  }
+
   // A founder-gated workflow finalising with no approval identity at all. The
   // outcome would be attributed to Evan on the timeline with nothing behind it.
   if (!approval && (await isAwaitingFounderAuthority(run))) {
