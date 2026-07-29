@@ -31,8 +31,12 @@ reviews:
     - "!docs/**"
     - "!**/*.md"
     - "!**/*.docx"
-    # Generated and vendored output carries no review value.
-    - "!package-lock.json"
+    # package-lock.json is deliberately NOT excluded. It was, and on the first
+    # dependency pull request CodeRabbit saw exactly one file and rated the
+    # change trivial, because the filter had removed the entire subject under
+    # review. A lockfile diff is noise on a feature PR and is the whole point on
+    # a dependency PR, and dependency PRs are most of what an automated reviewer
+    # will ever see here.
     - "!**/*.tsbuildinfo"
     - "!playwright-report/**"
     - "!test-results/**"
@@ -56,6 +60,20 @@ reviews:
         These tests are the executable proof behind Phase 1 exit gates. Flag
         assertions that could pass while the feature is broken, and any use of
         arbitrary sleeps in place of deterministic waits.
+    - path: "package.json"
+      instructions: >-
+        The overrides block forces transitive dependencies past versions their
+        parents declare support for. For any change to it, flag entries that
+        exceed a parent's declared range, cross a major boundary, or alter a
+        module's call convention for existing consumers. State explicitly which
+        checks do NOT cover the change: npm audit does not execute code, and a
+        clean lint run only covers the rules currently enabled.
+    - path: "package-lock.json"
+      instructions: >-
+        Review resolution changes, not formatting. Flag any downgrade, any
+        integrity or resolved-URL change at an unchanged version, any new
+        package entering production scope, and any lockfileVersion change.
+        Ignore ordering and whitespace.
 
 chat:
   auto_reply: true

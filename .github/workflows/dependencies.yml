@@ -110,9 +110,13 @@ jobs:
     name: npm Audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Dependency changes on pull requests are covered by the dependency-review
-    # job; this scheduled/push audit avoids duplicating that work.
-    if: github.event_name != 'pull_request'
+    # Runs on pull requests as well as push and schedule. It previously skipped
+    # pull requests on the reasoning that dependency-review covered them; that
+    # reasoning was wrong, because the two jobs test different properties.
+    # dependency-review inspects only the vulnerabilities a diff INTRODUCES,
+    # while this job asserts a property of the WHOLE tree. Skipping it on pull
+    # requests meant the proof closing an obligation ran only after merge, so
+    # the gate was never bound to the candidate it was supposed to gate.
     defaults:
       run:
         shell: bash
@@ -142,6 +146,20 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+
+      # package-lock.json was produced by npm 11.16.0, and Node 22 bundles npm
+      # 10.9.4, which resolves peer ranges differently against this lockfile.
+      # ci.yml and frontend-tests.yml already pin for that reason; the audit job
+      # did not, and it now runs on every pull request -- so an ideal-tree
+      # resolution failure here would present as a broken gate on every PR
+      # rather than as the lockfile problem it actually is.
+      - name: Pin npm to the version that produced the lockfile
+        if: steps.detect.outputs.npm == 'true'
+        # --ignore-scripts: bootstrapping the package manager must not run
+        # dependency lifecycle hooks. --no-audit: npm's implicit audit here
+        # would run before the pin takes effect and is not the gate; the
+        # explicit audit step below is.
+        run: npm install --global --ignore-scripts --no-audit npm@11.16.0
 
       - name: Run npm audit
         if: steps.detect.outputs.npm == 'true'
