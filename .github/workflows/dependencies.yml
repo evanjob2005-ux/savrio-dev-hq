@@ -155,7 +155,11 @@ jobs:
       # rather than as the lockfile problem it actually is.
       - name: Pin npm to the version that produced the lockfile
         if: steps.detect.outputs.npm == 'true'
-        run: npm install --global npm@11.16.0
+        # --ignore-scripts: bootstrapping the package manager must not run
+        # dependency lifecycle hooks. --no-audit: npm's implicit audit here
+        # would run before the pin takes effect and is not the gate; the
+        # explicit audit step below is.
+        run: npm install --global --ignore-scripts --no-audit npm@11.16.0
 
       - name: Run npm audit
         if: steps.detect.outputs.npm == 'true'
