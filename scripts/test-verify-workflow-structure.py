@@ -22,16 +22,25 @@ Pass --matrix-only or --null-audit to run just one phase.
 """
 
 import pathlib
+import os
+import json
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
 VERIFIER = "scripts/verify-workflow-structure.py"
-BASE = "origin/feature/dev-hq-operating-system"
+BASE = os.environ.get(
+    "WORKFLOW_STRUCTURE_BASE", "origin/feature/dev-hq-operating-system"
+)
 
 
 def run_in(root, *args):
+    if (pathlib.Path(root) / ".use-missing-raw-base").exists():
+        args = ("0000000000000000000000000000000000000001",)
+    elif not args:
+        args = (BASE,)
     out = subprocess.run([sys.executable, VERIFIER, *args], cwd=root,
                          capture_output=True)
     return out.returncode, out.stdout.decode("utf-8", errors="replace")
@@ -123,7 +132,16 @@ def _(root):
 
 @case("change a `with:` input (node-version)", 1)
 def _(root):
-    edit(root, "ci.yml", 'node-version: "22"', 'node-version: "18"')
+    p = root / ".github/workflows/ci.yml"
+    text = p.read_text(encoding="utf-8")
+    match = re.search(r'node-version:\s*["\']?(\d+)', text)
+    assert match, "selected baseline fixture has no node-version input"
+    current = match.group(1)
+    replacement = "18" if current != "18" else "20"
+    p.write_text(
+        text[:match.start(1)] + replacement + text[match.end(1):],
+        encoding="utf-8", newline="",
+    )
 
 
 @case("rename a step", 1)
@@ -146,12 +164,7 @@ def _(root):
 
 @case("base ref missing: must NOT report success", 2, "CANNOT COMPARE")
 def _(root):
-    subprocess.run(["git", "update-ref", "-d", f"refs/remotes/{BASE.split('/', 1)[1]}"
-                    if BASE.startswith("origin/") else BASE],
-                   cwd=root, capture_output=True)
-    subprocess.run(["git", "update-ref", "-d",
-                    "refs/remotes/origin/feature/dev-hq-operating-system"],
-                   cwd=root, capture_output=True)
+    (root / ".use-missing-raw-base").write_text("intentional missing object\n")
 
 
 @case("workflow file deleted", 1)
@@ -251,6 +264,55 @@ def _(root):
     edit(root, "ci.yml", "name: Continuous Integration\n", "name: CI (disabled)\n")
 
 
+@case("add workflow run-name (future runs acquire a different identity)", 1)
+def _(root):
+    edit(root, "ci.yml", "name: Continuous Integration\n",
+         "name: Continuous Integration\nrun-name: replaced identity\n")
+
+
+@case("literal run-name '<absent>' cannot collide with missing-field state", 1)
+def _(root):
+    edit(root, "ci.yml", "name: Continuous Integration\n",
+         "name: Continuous Integration\nrun-name: <absent>\n")
+
+
+@case("add an empty job (container identity is structural)", 1)
+def _(root):
+    p = root / ".github/workflows/ci.yml"
+    with p.open("a", encoding="utf-8", newline="") as handle:
+        handle.write("\n  empty-identity-job: {}\n")
+
+
+@case("add an empty steps container (presence differs from no steps key)", 1)
+def _(root):
+    p = root / ".github/workflows/ci.yml"
+    with p.open("a", encoding="utf-8", newline="") as handle:
+        handle.write("\n  empty-steps-job:\n    steps: []\n")
+
+
+@case("add an empty step (step identity is structural)", 1)
+def _(root):
+    edit(root, "ci.yml", "    steps:\n", "    steps:\n      - {}\n", count=1)
+
+
+@case("add job-level name (required-check identity changes)", 1)
+def _(root):
+    edit(root, "ci.yml", "    name: Application Validation (Conditional)\n",
+         "    name: Replaced application check\n")
+
+
+@case("add job-level with (reusable-workflow inputs change)", 1)
+def _(root):
+    edit(root, "ci.yml", "  application-validation:\n",
+         "  application-validation:\n    with:\n      unexpected: value\n")
+
+
+@case("add a future unknown workflow structural field", 1)
+def _(root):
+    edit(root, "ci.yml", "name: Continuous Integration\n",
+         "name: Continuous Integration\nfuture-policy-field: deny\n")
+
+
 # ---------------------------------------------------------------------------
 # CI-10. "Could not evaluate" must be distinguishable from "property violated"
 # and must say what it could not do -- rule 5. Both of these exited 1 with an
@@ -272,6 +334,27 @@ def _(root):
 def _(root):
     (root / ".github/workflows/ci.yml").write_text(
         "- this is a list, not a workflow\n", encoding="utf-8", newline="")
+
+
+@case("job is not a mapping: exit 2 and say so", 2, "job 'broken' did not parse as a mapping")
+def _(root):
+    (root / ".github/workflows/ci.yml").write_text(
+        "name: broken\non: push\njobs:\n  broken: []\n",
+        encoding="utf-8", newline="")
+
+
+@case("steps is not a list: exit 2 and say so", 2, "steps did not parse as a list")
+def _(root):
+    (root / ".github/workflows/ci.yml").write_text(
+        "name: broken\non: push\njobs:\n  broken:\n    steps: {}\n",
+        encoding="utf-8", newline="")
+
+
+@case("step is not a mapping: exit 2 and say so", 2, "step 0 did not parse as a mapping")
+def _(root):
+    (root / ".github/workflows/ci.yml").write_text(
+        "name: broken\non: push\njobs:\n  broken:\n    steps:\n      - nope\n",
+        encoding="utf-8", newline="")
 
 
 @case("workflow present but unreadable: exit 2, not the exit 1 of DELETED", 2,
@@ -349,6 +432,121 @@ def matrix():
     return passed, failed
 
 
+def approval_cases():
+    """Exact-diff approval is explicit, exact, and cannot remain stale."""
+    passed = failed = 0
+    print("\nINTENTIONAL-CHANGE APPROVAL CASES")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = scratch(tmp)
+        manifest = root / "approval.json"
+        original_ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        edit(root, "ci.yml", "run: npm ci", "run: npm install")
+        written = subprocess.run(
+            [sys.executable, VERIFIER, BASE, "--write-approval", str(manifest),
+             "--rationale", "Reviewed fixture change"],
+            cwd=root, capture_output=True,
+        )
+        approved = subprocess.run(
+            [sys.executable, VERIFIER, BASE, "--approval-manifest", str(manifest)],
+            cwd=root, capture_output=True,
+        )
+        ok = written.returncode == 0 and approved.returncode == 0
+        passed += ok
+        failed += not ok
+        print(f"  [{'PASS' if ok else 'FAIL'}] intentional workflow + exact manifest is green")
+
+        pristine = manifest.read_text(encoding="utf-8")
+        approved_ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        for label, field, value in [
+            ("base identity", "base_commit", "0" * 40),
+            ("candidate workflow tree", "candidate_workflow_tree", "sha256:" + "1" * 64),
+            ("changed file set", "changed_files", ["other.yml"]),
+            ("canonical diff", "diff_digest", "sha256:" + "2" * 64),
+            ("rationale", "rationale", "tampered rationale"),
+        ]:
+            data = json.loads(pristine)
+            data["approvals"][0][field] = value
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            tampered = subprocess.run(
+                [sys.executable, VERIFIER, BASE,
+                 "--approval-manifest", str(manifest)],
+                cwd=root, capture_output=True,
+            )
+            ok = tampered.returncode == 1
+            passed += ok
+            failed += not ok
+            print(f"  [{'PASS' if ok else 'FAIL'}] tampered {label} is red")
+        manifest.write_text(pristine, encoding="utf-8")
+
+        # Container identities participate in approval material too. Otherwise
+        # an empty job could be added after approval without changing any
+        # field row, allowing an unapproved workflow structure to ride an
+        # approved field change.
+        with (root / ".github/workflows/ci.yml").open(
+                "a", encoding="utf-8", newline="") as handle:
+            handle.write("\n  post-approval-empty-job: {}\n")
+        container_mismatch = subprocess.run(
+            [sys.executable, VERIFIER, BASE,
+             "--approval-manifest", str(manifest)],
+            cwd=root, capture_output=True,
+        )
+        ok = container_mismatch.returncode == 1
+        passed += ok
+        failed += not ok
+        print(f"  [{'PASS' if ok else 'FAIL'}] post-approval empty container is red")
+        (root / ".github/workflows/ci.yml").write_text(
+            approved_ci, encoding="utf-8", newline=""
+        )
+
+        # A second, unapproved structural change cannot ride the first approval.
+        edit(root, "ci.yml",
+             "      - name: Pin npm to the version that produced the lockfile\n"
+             "        if: steps.detect.outputs.node == 'true'\n",
+             "      - name: Pin npm to the version that produced the lockfile\n")
+        mismatch = subprocess.run(
+            [sys.executable, VERIFIER, BASE, "--approval-manifest", str(manifest)],
+            cwd=root, capture_output=True,
+        )
+        ok = mismatch.returncode == 1
+        passed += ok
+        failed += not ok
+        print(f"  [{'PASS' if ok else 'FAIL'}] unrelated deleted guard is red")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = scratch(tmp)
+        manifest = root / "approval.json"
+        edit(root, "ci.yml", "run: npm ci", "run: npm install")
+        subprocess.run(
+            [sys.executable, VERIFIER, BASE, "--write-approval", str(manifest),
+             "--rationale", "stale fixture"],
+            cwd=root, capture_output=True,
+        )
+        (root / ".github/workflows/ci.yml").write_text(
+            original_ci, encoding="utf-8", newline=""
+        )
+        stale = subprocess.run(
+            [sys.executable, VERIFIER, BASE, "--approval-manifest", str(manifest)],
+            cwd=root, capture_output=True,
+        )
+        ok = stale.returncode == 1
+        passed += ok
+        failed += not ok
+        print(f"  [{'PASS' if ok else 'FAIL'}] manifest-only/stale approval is red")
+
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["approvals"][0]["base_commit"] = "0" * 40
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        historical = subprocess.run(
+            [sys.executable, VERIFIER, BASE, "--approval-manifest", str(manifest)],
+            cwd=root, capture_output=True,
+        )
+        ok = historical.returncode == 0
+        passed += ok
+        failed += not ok
+        print(f"  [{'PASS' if ok else 'FAIL'}] no-diff post-merge run ignores historical approval")
+    return passed, failed
+
+
 def main():
     flags = set(sys.argv[1:])
     unknown = flags - {"--matrix-only", "--null-audit"}
@@ -361,6 +559,9 @@ def main():
         passed, failed = passed + p, failed + f
     if "--matrix-only" not in flags:
         p, f = null_audit()
+        passed, failed = passed + p, failed + f
+    if not flags:
+        p, f = approval_cases()
         passed, failed = passed + p, failed + f
 
     print(f"\n{passed} passed, {failed} failed")
