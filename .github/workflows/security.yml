@@ -194,6 +194,49 @@ jobs:
               ("bad/backtick-value.ts",
                f'const apiToken = `{OPAQUE}`;\n',
                [GENERIC]),
+              # --- round four ------------------------------------------------
+              # The uniform name and value variations are generated below this
+              # list, ONE CLAIM PER FILE. The shapes that are not uniform are
+              # written out here.
+              #
+              # The real-world instance of a run-together name: ngrok's
+              # configuration file spells the key `authtoken`, so a committed
+              # ngrok.yml was invisible end to end while the same file written
+              # `auth_token` was caught. It is a .yml, so it also keeps the
+              # UNQUOTED arm of the run-together fix covered -- the generated
+              # names above it are all quoted TypeScript.
+              ("bad/ngrok.yml", f"version: 2\nauthtoken: {OPAQUE}\n",
+               [GENERIC]),
+              # QUOTED NAMES OUTSIDE IDENTIFIER SHAPE. A bare name cannot start
+              # with a digit or contain a space; a quoted property name can.
+              # Binding the quoted arm to the bare charset meant these produced
+              # ZERO matches rather than unflagged ones, while {"secret": ...}
+              # was caught. Two files, because they are two different characters
+              # and one file would be kept red by whichever still worked.
+              ("bad/quoted-name-digit.json",
+               '{\n' f'  "2fa_secret": "{OPAQUE}"\n' '}\n', [GENERIC]),
+              ("bad/quoted-name-space.json",
+               '{\n' f'  "api key": "{OPAQUE}"\n' '}\n', [GENERIC]),
+              # A name the .env rule already knew and the generic rule did not,
+              # with the value shape that goes with it.
+              ("bad/sentry-dsn.ts",
+               'const SENTRY_DSN = '
+               '"https://9aQXZ1mLpR44TvBnKd@o1.ingest.sentry.io/2";\n',
+               [GENERIC]),
+              # The reconciliation in the other direction: a name only the .env
+              # rule's substring matching reaches. Both rules must report it now
+              # that they read one vocabulary, so this entry asserts BOTH labels.
+              # Splitting the word lists again drops one of them.
+              ("bad/reconciled/.env.example", f"AUTHTOKEN={OPAQUE}\n",
+               ["Secret value in environment file", GENERIC]),
+              # The .env rule's LOWER THRESHOLD, which nothing else reaches.
+              # `private` counts on its own in a .env file and not in source
+              # code, so this is the only fixture that fails if the env-only tier
+              # is emptied -- every other .env fixture here carries a tier-1 word
+              # as well and would stay red without it. Exactly one label, because
+              # the generic rule correctly does NOT fire on this name.
+              ("bad/env-tier/.env.example", f"PRIVATE_CERT={OPAQUE}\n",
+               ["Secret value in environment file"]),
               # --- the high-confidence rules ---------------------------------
               ("bad/embedded-private-key.txt", PEM, ["Private key block"]),
               # Deliberately NEUTRAL variable names. A sensitive name would make
@@ -245,6 +288,88 @@ jobs:
                ["Committed build or dependency artifact"]),
           ]
 
+          # ONE CLAIM PER FILE, and this is not tidiness. Round four was first
+          # written as four fixtures holding five names each, and TWO separate
+          # mutations of the fix passed the control: removing ssh, deploy and
+          # host from the vocabulary left sshKey, DEPLOY_KEY and hostKey
+          # undetected while `passphrase` in the same file kept that file red.
+          # The scanner appends ONE "Generic secret assignment" finding per file
+          # however many lines matched, so a fixture bundling several claims is
+          # satisfied by whichever claim still works, and the rest are asserted
+          # by nothing. That is the same shape as asserting a count instead of a
+          # mapping -- the mapping was exact and still measured nothing, because
+          # the FIXTURE was the thing that was coarse.
+          #
+          # Every term added to the vocabulary in this round has a file here. A
+          # term with no file has no acceptance evidence, so a term that could
+          # not be given one was not added.
+          SENSITIVE_NAMES = [
+              # ONE DIGIT adjacent to the sensitive word. The identifier splitter
+              # broke at camelCase boundaries only, so a trailing digit fused
+              # into the word and no term matched: PASSWORD was caught and
+              # PASSWORD1 was not. Writing API_KEY1 beside API_KEY2 is what a key
+              # rotation looks like, so the bypass sat on the exact spelling a
+              # credential acquires while it is being replaced.
+              "PASSWORD1", "API_KEY2", "SECRET2", "token2",
+              # RUN-TOGETHER WORDS. Each was missed while its separated spelling
+              # was caught, so coverage depended on the author's separator habit
+              # rather than on risk. `apikey` used to be hard-coded into the word
+              # list, which is what made the asymmetry visible: one fused
+              # spelling had been written down by hand and the rest had not.
+              "apitoken", "authtoken", "accesstoken", "secretkey", "privatekey",
+              # APIKEY is here because `apikey` was REMOVED from the word list
+              # this round. It is the one fused spelling that used to be written
+              # down by hand, and decomposition now reaches it like the rest; if
+              # decomposition is ever weakened, this must not quietly fall back
+              # to being the only fused name that works.
+              "APIKEY",
+              # `pass` and `creds` came from reconciling the .env word list into
+              # the shared vocabulary. SMTP_PASS is the name that list carried
+              # PASS for, and neither term had a fixture on the generic side.
+              "SMTP_PASS", "apiCreds",
+              # Names the .env rule already treated as sensitive and the generic
+              # rule did not -- the two-word-list divergence as inputs. Each was
+              # caught in a .env file and missed in a .ts file, for the same
+              # value.
+              "sshKey", "DEPLOY_KEY", "hostKey", "passphrase",
+          ]
+          KNOWN_BAD += [(f"bad/name/{name}.ts",
+                         f'const {name} = "{OPAQUE}";\n', [GENERIC])
+                        for name in SENSITIVE_NAMES]
+
+          # THE VERSION-RANGE REGRESSION, one value per file. The exemption added
+          # to clear the lockfile false positive was applied to the value in
+          # EVERY file, and its prerelease tail was a 20-character window with no
+          # shape requirement, so an opaque secret shaped like a version became
+          # exempt in source code. All three were caught before it existed.
+          SECRET_VALUES = [
+              ("leading-digit", f"1-{OPAQUE}"),
+              ("prerelease-tail", f"1.2.3-{OPAQUE}"),
+              ("all-numeric", "12345678901234567890"),
+              # THE FILE-KIND ARM. This value is a genuine dependency range,
+              # identical to the one in good/package-lock.json below. The only
+              # difference between the two fixtures is the file the value sits
+              # in, so removing the manifest gate turns this one green while
+              # nothing else moves.
+              ("genuine-range", "^3.0.0 || ^4.0.0"),
+          ]
+          KNOWN_BAD += [(f"bad/value/{slug}.ts",
+                         f'const apiToken = "{value}";\n', [GENERIC])
+                        for slug, value in SECRET_VALUES]
+
+          # THE VALUE-SHAPE ARM, which the file-kind arm cannot reach. Inside a
+          # manifest the exemption IS consulted, so this is the only place the
+          # tightened version pattern is load-bearing: bad/value/*.ts stays red
+          # on file kind alone and cannot notice the tail being loosened. Both
+          # values were exempt under the original `[-+][0-9A-Za-z.\-]{1,20}` tail
+          # and bare `[0-9]+` core. A manifest is somewhere a person genuinely
+          # pastes a token -- npm publish configuration lives there.
+          KNOWN_BAD += [
+              (f"bad/manifest/{slug}/package.json",
+               '{\n' f'  "apiToken": "{value}"\n' '}\n', [GENERIC])
+              for slug, value in (("prerelease-tail", f"1.2.3-{OPAQUE}"),
+                                  ("all-numeric", "12345678901234567890"))]
+
           # NULL ARM (rule 2). Correct inputs, in the SAME tree as the known-bad
           # ones, that must produce NO finding. Without these the control
           # asserts only "the scanner still fires", which a scanner mutated to
@@ -276,11 +401,48 @@ jobs:
               # this repository: an npm package name is not a variable name, and
               # "js-tokens" splits to a sensitive word. Kept as a fixture so the
               # version-range exemption cannot be dropped silently.
-              ("good/lockfile-excerpt.json",
+              #
+              # The BASENAME is load-bearing and this fixture used to be called
+              # lockfile-excerpt.json, which is not one. The exemption now
+              # applies only in a dependency manifest or lockfile, so a fixture
+              # merely shaped like one would prove the opposite of what it is
+              # here to prove. Its known-bad twin, bad/version-range-in-source.ts,
+              # holds the IDENTICAL value in an ordinary source file and must be
+              # reported: between them the two fixtures pin the exemption to the
+              # file kind rather than to the value.
+              ("good/package-lock.json",
                '{\n'
                '  "js-tokens": "^3.0.0 || ^4.0.0",\n'
                '  "api-key-generator": ">=1.4.0 <2.0.0"\n'
                '}\n'),
+              ("good/package.json",
+               '{\n'
+               '  "dependencies": {\n'
+               '    "js-tokens": "^3.0.0 || ^4.0.0",\n'
+               '    "next": ">=15.0.0 <16.0.0-canary.20260729"\n'
+               '  }\n'
+               '}\n'),
+              # The null half of round four's word-list work. Every one of these
+              # gains a term that is adjacent to the vocabulary, and none of them
+              # may become a finding: `monkey` and `keyboard` must not decompose
+              # to `key`, `tokenizer` must not decompose to `token`, `bypass` and
+              # `passthrough` must not decompose to `pass`, and a digit boundary
+              # must SPLIT a word rather than strip digits out of it.
+              ("good/near-vocabulary.ts",
+               'const monkeyBusiness = "aaaaaaaaaaaaaaaaaaaa";\n'
+               'const keyboardLayout = "bbbbbbbbbbbbbbbbbbbb";\n'
+               'const tokenizerConfig = "cccccccccccccccccccc";\n'
+               'const bypassReason = "dddddddddddddddddddd";\n'
+               'const passthroughMode = "eeeeeeeeeeeeeeeeeeee";\n'
+               'const monkey2 = "ffffffffffffffffffff";\n'
+               'const storageKey7 = "gggggggggggggggggggg";\n'),
+              # The env rule's null arm, at its LOWER threshold. A host and a
+              # service URL are endpoints, not credentials, and matching the key
+              # qualifiers as substrings in a .env file would flag both.
+              ("good/endpoints/.env.example",
+               "DATABASE_HOST=db.internal.example.com\n"
+               "SERVICE_URL=https://api.example.com/v1\n"
+               "NEXT_PUBLIC_APP_URL=https://app.example.com\n"),
               ("good/interpolated.ts",
                "const authToken = `Bearer ${session.accessToken}`;\n"),
               ("good/passthrough.ts",
@@ -494,15 +656,40 @@ jobs:
           #     bypass in TypeScript too.
           #
           #     The quote is captured and back-referenced so it must be balanced
-          #     -- `"name': ...` is not a property -- and it stays optional so
-          #     the bare `apiToken = "..."` form is unaffected. Backticks are
+          #     -- `"name': ...` is not a property -- and the bare
+          #     `apiToken = "..."` form is unaffected. Backticks are
           #     deliberately absent: they are a valid string quote but not a
           #     valid object-key quote.
+          #
+          # A BARE name is a program identifier and cannot begin with a digit or
+          # contain a space. A QUOTED name is under no such constraint, and
+          # binding the quoted form to the bare charset meant a quoted property
+          # name outside it produced ZERO matches rather than an unflagged one:
+          #
+          #     {"2fa_secret": "Zx91QpLm44TvBnRw02"}     zero matches
+          #     {"api key":    "Zx91QpLm44TvBnRw02"}     zero matches
+          #
+          # while {"secret": "..."} was caught -- so one digit at the front of a
+          # JSON key was a complete bypass, and 2fa/oauth2/x509 names are exactly
+          # where a leading digit occurs. The quoted arm therefore has its own,
+          # wider name pattern. It is capped at four space-separated components,
+          # each still identifier-shaped, so it describes a property name and not
+          # a sentence of prose that happens to sit in front of a colon.
+          BARE_NAME = r"[A-Za-z0-9_$][A-Za-z0-9_$.\-]*"
+          QUOTED_NAME = BARE_NAME + r"(?: " + BARE_NAME + r"){0,3}"
+
           GENERIC_SECRET = re.compile(
-              r"(?P<namequote>['\"])?"
-              r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]*)"
-              r"(?(namequote)(?P=namequote))"
+              r"(?:(?P<namequote>['\"])(?P<quotedname>" + QUOTED_NAME + r")"
+              r"(?P=namequote)|(?P<name>" + BARE_NAME + r"))"
               r"\s*[:=]\s*(?P<quote>['\"`])(?P<value>[^'\"`\n]{16,})(?P=quote)")
+
+          def matched_name(match):
+              """The assigned-to name, from whichever arm matched.
+
+              Python forbids two groups sharing a name, so the quoted and bare
+              arms capture separately and are reunited here. UNQUOTED_SECRET has
+              only the bare group, and reads correctly through this too."""
+              return match.groupdict().get("quotedname") or match.group("name")
 
           # Unquoted assignments outside .env files: YAML, TOML, INI, shell.
           # `api_token: 9aQXZ1mLpR44TvBnKd` in a committed config file is the
@@ -513,7 +700,7 @@ jobs:
           # value.
           UNQUOTED_SECRET = re.compile(
               r"(?m)^[^\S\n]*(?:export[^\S\n]+)?"
-              r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]*)"
+              r"(?P<name>" + BARE_NAME + r")"
               r"[^\S\n]*[:=][^\S\n]*"
               r"(?P<value>[^\s'\"`#<>{}\[\]]{16,})[^\S\n]*$")
 
@@ -552,15 +739,59 @@ jobs:
           # muted, because a lockfile regenerates and a pragma inside it would
           # not survive.
           #
-          # The exemption is on the VALUE and stays tight: each chunk must be a
-          # numeric-core version, optionally preceded by a range operator. The
-          # leading digit is not enough on its own -- "9aQXZ1mLpR44TvBnKd" is a
-          # plausible token that starts with one -- so the character after the
-          # numeric core must be a separator, never more alphanumerics.
+          # THE EXEMPTION IS SCOPED TO DEPENDENCY MANIFESTS AND LOCKFILES, and
+          # that scoping is the point rather than a refinement of it. Its
+          # justification -- "a dependency specifier is not a credential" -- is
+          # true in package-lock.json and false everywhere else, but it was
+          # applied to the VALUE IN EVERY FILE, in both the quoted and the
+          # unquoted rule. That handed the scanner a regression: an opaque secret
+          # shaped like a version was exempt in TypeScript, in YAML, in .env
+          # templates, anywhere.
+          #
+          #     const apiToken = "1-Zx91QpLm44TvBnRw02"        undetected
+          #     const apiToken = "1.2.3-Zx91QpLm44TvBnRw02"    undetected
+          #     const apiToken = "12345678901234567890"        undetected
+          #
+          # all three of which the scanner caught before the exemption existed.
+          # The prerelease tail `[0-9A-Za-z.\-]{1,20}` was a twenty-character
+          # window with no shape requirement at all, and a bare `[0-9]+` core
+          # swallowed any all-numeric secret whole.
+          #
+          # Two things close it, and both are needed:
+          #
+          #   1. FILE KIND. Outside these files the exemption is never consulted,
+          #      so no value in source code can reach it. A dependency specifier
+          #      really does not appear in a .ts file.
+          #   2. VALUE SHAPE, tightened. The numeric core now requires at least
+          #      one dot, so a bare integer is not a version -- and no real
+          #      specifier is a 16-plus-digit integer, which is the shortest an
+          #      all-numeric value can be and still reach this rule. The
+          #      prerelease tail is now dot-separated identifiers that are each
+          #      numeric or short and lowercase, so `-beta.1`, `-rc.2` and
+          #      `-canary.20260729` pass while `-Zx91QpLm44TvBnRw02` does not.
+          #
+          # Honest residual: inside a manifest, a value that genuinely parses as
+          # a set of dotted numeric versions is still exempt under any name. A
+          # credential of that shape and length does not exist in practice, and
+          # the pragma clears it if one ever does.
+          DEPENDENCY_MANIFESTS = frozenset({
+              "package.json", "package-lock.json", "npm-shrinkwrap.json",
+              "yarn.lock", "pnpm-lock.yaml", "bun.lock",
+              "deno.json", "deno.jsonc", "deno.lock",
+              "composer.json", "composer.lock",
+              "Gemfile", "Gemfile.lock",
+              "Cargo.toml", "Cargo.lock",
+              "go.mod", "go.sum",
+              "requirements.txt", "requirements-dev.txt",
+              "pyproject.toml", "poetry.lock", "Pipfile", "Pipfile.lock",
+          })
+
+          VERSION_CORE = r"[0-9]+(?:\.(?:[0-9]+|[x*]))+"
+          PRERELEASE_ID = r"(?:[0-9]+|[a-z][a-z0-9]{0,7})"
           VERSION_TOKEN = re.compile(
-              r"^(?:[\^~]|[><]=?|=)?"
-              r"[0-9]+(?:\.(?:[0-9]+|[x*]))*"
-              r"(?:[-+][0-9A-Za-z.\-]{1,20})?$")
+              r"^(?:[\^~]|[><]=?|=)?" + VERSION_CORE
+              + r"(?:[-+]" + PRERELEASE_ID
+              + r"(?:\." + PRERELEASE_ID + r"){0,3})?$")
 
           def looks_like_version_range(value):
               chunks = [c for c in re.split(r"\s*\|\|\s*|\s+", value.strip())
@@ -569,26 +800,70 @@ jobs:
                   chunk == "-" or VERSION_TOKEN.match(chunk)
                   for chunk in chunks)
 
-          ALWAYS_SENSITIVE = {
-              "secret", "secrets", "password", "passwords", "passwd", "pwd",
-              "token", "tokens", "apikey", "apikeys",
-              "credential", "credentials",
-          }
+          # ONE VOCABULARY, READ BY BOTH RULES IN THIS SCANNER.
+          #
+          # There were two. These sets judged quoted and unquoted assignments,
+          # while ENV_ASSIGNMENT below carried a SECOND word list spelled as a
+          # regex alternation -- and that one already treated AUTH, DSN, SALT,
+          # PRIVATE, ACCESS, REFRESH and SK as sensitive while these did not. One
+          # scanner with two word lists means a word added to close a gap closes
+          # it in one rule and leaves it open in the other, which is exactly how
+          # SENTRY_DSN came to be caught in a .env file and missed in a
+          # TypeScript file. There is now one place to add a word.
+          #
+          # The two rules still apply DIFFERENT THRESHOLDS to these terms, and
+          # that difference is now deliberate instead of accidental: in a .env
+          # file every name names a configuration value, so a bare KEY or AUTH is
+          # almost certainly a credential; in source code `key`, `access` and
+          # `session` are ordinary words, and a rule that flags every one of them
+          # is a rule that gets muted.
 
-          # "key" on its own is NOT treated as sensitive. It is one of the most
-          # common words in this codebase in entirely innocent roles -- React's
-          # `key` prop, `idempotencyKey`, PENDING_DISPATCH_STORAGE_KEY -- and a
-          # rule that flags all of them is a rule that gets muted, which is the
-          # failure mode this repository has already been burned by. It counts
-          # only when the name also carries a word that makes it a credential
-          # rather than a lookup key, which is what distinguishes
+          # Tier 1: makes a name a credential wherever it appears.
+          # `apikey` is deliberately NOT listed. It used to be, and its presence
+          # was the evidence that this list was being patched by example rather
+          # than by rule: APIKEY was caught only because someone had written that
+          # one spelling down, while apitoken, authtoken, accesstoken, secretkey
+          # and privatekey -- the identical shape -- were all missed. It is now
+          # reached by decomposition (api + key) like every other compound.
+          ALWAYS_SENSITIVE = frozenset({
+              "secret", "secrets", "password", "passwords", "passwd", "pwd",
+              "pass", "passphrase", "passphrases",
+              "token", "tokens", "credential", "credentials", "cred", "creds",
+              "dsn",
+          })
+
+          # Tier 2. "key" on its own is NOT treated as sensitive. It is one of
+          # the most common words in this codebase in entirely innocent roles --
+          # React's `key` prop, `idempotencyKey`, PENDING_DISPATCH_STORAGE_KEY --
+          # and a rule that flags all of them is a rule that gets muted, which is
+          # the failure mode this repository has already been burned by. It
+          # counts only when the name also carries a word that makes it a
+          # credential rather than a lookup key, which is what distinguishes
           # SUPABASE_SERVICE_ROLE_KEY and API_KEY from idempotencyKey.
-          KEY_WORDS = {"key", "keys"}
-          KEY_QUALIFIERS = {
+          KEY_WORDS = frozenset({"key", "keys"})
+          KEY_QUALIFIERS = frozenset({
               "api", "private", "signing", "sign", "encryption", "encrypt",
               "access", "auth", "service", "role", "master", "session",
               "refresh", "bearer", "webhook", "publishable",
-          }
+              # sshKey, DEPLOY_KEY and hostKey are credentials by any reading,
+              # and were missed for want of the qualifier rather than the rule.
+              "ssh", "deploy", "host",
+          })
+
+          # Tier 3: counts on its own ONLY in a .env-format file, where a name
+          # names a configuration value rather than a program variable. These are
+          # exactly the terms the old ENV_ASSIGNMENT alternation treated as
+          # sensitive and these sets did not; keeping them env-only is what stops
+          # the reconciliation from turning `session`, `access` and `private`
+          # into repository-wide noise. "sk" is here rather than in KEY_WORDS
+          # because a two-letter word is too weak a signal outside a .env file.
+          ENV_ALSO_SENSITIVE = frozenset({
+              "auth", "access", "refresh", "private", "session", "salt",
+              "signing", "webhook", "bearer", "sk",
+          })
+
+          VOCABULARY = (ALWAYS_SENSITIVE | KEY_WORDS | KEY_QUALIFIERS
+                        | ENV_ALSO_SENSITIVE)
 
           # A name saying it holds a HEADER may hold a header name rather than a
           # value. DEV_HQ_INTERNAL_TOKEN_HEADER is "x-dev-hq-internal-token":
@@ -604,10 +879,12 @@ jobs:
           # credential must not be cancellable by a word sitting next to it.
           HEADER_WORDS = {"header", "headers"}
 
-          # Two camelCase boundaries, and the second one is not cosmetic.
+          # Four identifier boundaries, and none of them is cosmetic.
           #
           #   lower/digit -> UPPER   apiToken   -> api  | Token
           #   UPPER -> UPPER+lower   APIToken   -> API  | Token
+          #   letter -> digit        PASSWORD1  -> PASSWORD | 1
+          #   digit  -> letter       2fa_secret -> 2 | fa | secret
           #
           # With only the first, an uppercase RUN swallowed the word after it:
           # APIToken split to ["apitoken"], JWTSecret to ["jwtsecret"] and
@@ -618,23 +895,98 @@ jobs:
           # habit, and the conventional way to write an acronym was the way that
           # evaded it. AWSAccessKeyId lost "access" the same way, which cost the
           # qualifier that makes a "key" a credential.
+          #
+          # The DIGIT boundaries close the same class one notch smaller. Without
+          # them a single digit adjacent to the sensitive word fused into it and
+          # switched the rule off for the line:
+          #
+          #     PASSWORD1  undetected      PASSWORD   caught
+          #     API_KEY2   undetected      API_KEY_2  caught
+          #     SECRET2    undetected
+          #     token2     undetected
+          #
+          # Key rotation is the routine reason to write exactly that -- API_KEY1
+          # alongside API_KEY2 during a cutover -- so the bypass sat on the one
+          # spelling a credential acquires when it is being replaced. The
+          # boundary splits rather than strips, so `monkey2` still yields
+          # "monkey" and not "key".
           IDENTIFIER_BOUNDARY = re.compile(
-              r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+              r"(?<=[a-z0-9])(?=[A-Z])"
+              r"|(?<=[A-Z])(?=[A-Z][a-z])"
+              r"|(?<=[A-Za-z])(?=[0-9])"
+              r"|(?<=[0-9])(?=[A-Za-z])")
 
           def _identifier_words(name):
-              """Split an identifier into lowercase words on _, -, ., $ and
-              camelCase boundaries, so API_KEY, apiKey, APIKey and
-              serviceRoleKey all yield a standalone "key" while monkey and
-              keyboard do not."""
+              """Split an identifier into lowercase words on _, -, ., $, space
+              and camelCase/digit boundaries, so API_KEY, apiKey, APIKey,
+              serviceRoleKey and API_KEY2 all yield a standalone "key" while
+              monkey and keyboard do not."""
               spaced = IDENTIFIER_BOUNDARY.sub("_", name)
-              return [word.lower() for word in re.split(r"[_$.\-]+", spaced)
+              return [word.lower() for word in re.split(r"[_$.\- ]+", spaced)
                       if word]
 
+          # A word may run several vocabulary terms together with no separator at
+          # all. Every one of these was invisible while its separated spelling
+          # was caught:
+          #
+          #     apitoken  authtoken  accesstoken  secretkey  privatekey
+          #
+          # against apiToken, auth_token, ACCESS_TOKEN and so on, all detected.
+          # Coverage therefore depended on whether the author reached for a
+          # separator, which is a property of house style rather than of risk.
+          # It is not hypothetical: ngrok's configuration file spells the key
+          # `authtoken:`, so a committed ngrok.yml was invisible end to end while
+          # the same file written `auth_token:` was caught.
+          #
+          # This is deliberately NOT substring matching, which would flag
+          # `tokenizer`, `monkey` and `keyboard`. A word is decomposed only if it
+          # splits ENTIRELY into known terms -- `authtoken` is auth + token,
+          # while `tokenizer` leaves "izer" over, `monkey` leaves "mon" over and
+          # `keyboard` leaves "board" over, so all three stay opaque and are then
+          # compared whole, exactly as before.
+          def _decompose(word, limit=4):
+              if word in VOCABULARY:
+                  return [word]
+              if limit <= 0:
+                  return None
+              for size in range(len(word) - 1, 1, -1):
+                  if word[:size] not in VOCABULARY:
+                      continue
+                  tail = _decompose(word[size:], limit - 1)
+                  if tail is not None:
+                      return [word[:size]] + tail
+              return None
+
+          def _identifier_terms(name):
+              """Every vocabulary term the identifier contains, with run-together
+              words broken up. A word that does not decompose is kept whole."""
+              terms = set()
+              for word in _identifier_words(name):
+                  parts = _decompose(word)
+                  terms.update(parts if parts is not None else [word])
+              return terms
+
           def has_sensitive_name(name):
-              words = set(_identifier_words(name))
-              if words & ALWAYS_SENSITIVE:
+              terms = _identifier_terms(name)
+              if terms & ALWAYS_SENSITIVE:
                   return True
-              return bool(words & KEY_WORDS) and bool(words & KEY_QUALIFIERS)
+              return bool(terms & KEY_WORDS) and bool(terms & KEY_QUALIFIERS)
+
+          # The .env threshold. Substring matching for the unambiguous tier-1 and
+          # key terms preserves what the old ENV_ASSIGNMENT alternation did --
+          # it matched them as substrings of an all-caps run, so a fused name
+          # like MYSECRETVALUE was caught and word matching alone would have
+          # quietly dropped it. The tier-3 terms are matched as WORDS rather than
+          # substrings on purpose: `host` and `service` as substrings would flag
+          # DATABASE_HOST and SERVICE_URL, which are endpoints, not credentials.
+          ENV_SUBSTRING_TERMS = ALWAYS_SENSITIVE | KEY_WORDS
+          ENV_WORD_TERMS = ALWAYS_SENSITIVE | KEY_WORDS | ENV_ALSO_SENSITIVE
+
+          def has_sensitive_env_name(name):
+              lowered = name.lower()
+              if any(term in lowered for term in ENV_SUBSTRING_TERMS):
+                  return True
+              return bool(_identifier_terms(name) & ENV_WORD_TERMS)
 
           # A value is treated as a fixture only if it announces itself as one.
           # Anything that does not is reported, in every file, including tests.
@@ -719,13 +1071,19 @@ jobs:
 
           # .env-format files assign unquoted, so GENERIC_SECRET cannot see them.
           # Template files are allowed to exist but must not carry a real value.
-          # PASS/DSN/CRED/AUTH/SK are included because SMTP_PASS, SENTRY_DSN and
-          # STRIPE_SK are common and were not matched by the shorter alternation.
+          #
+          # The name is captured and judged by has_sensitive_env_name above
+          # rather than spelled as a second alternation here. That alternation
+          # WAS the scanner's second word list: it knew AUTH, DSN, SALT, PRIVATE,
+          # ACCESS, REFRESH and SK were sensitive while the generic rule did not,
+          # so the same name was a credential in a .env file and an ordinary
+          # identifier in a .ts file. `export` is now accepted because a .env
+          # file that spells it was otherwise exempt from a rule the same file
+          # without it fails.
           ENV_ASSIGNMENT = re.compile(
-              r"(?im)^[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD|PASS|DSN"
-              r"|CRED|AUTH|SK|SIGNING|WEBHOOK|BEARER|SESSION|SALT"
-              r"|PRIVATE|ACCESS|REFRESH|APIKEY|PWD)[A-Z0-9_]*"
-              r"\s*=\s*(\S{16,})\s*$")
+              r"(?m)^[^\S\n]*(?:export[^\S\n]+)?"
+              r"(?P<name>[A-Za-z0-9_$.\-]+)[^\S\n]*=[^\S\n]*"
+              r"(?P<value>\S{16,})[^\S\n]*$")
 
           # URL-shaped variables are not name-matched, because most are public
           # endpoints. What matters is an embedded credential, so match the
@@ -774,23 +1132,32 @@ jobs:
                   out.append(match.groupdict().get("value") or match.group(1))
               return out
 
-          def generic_secret_hits(text):
+          def generic_secret_hits(text, path):
+              # The version-range exemption is reachable only from a dependency
+              # manifest or lockfile. Everywhere else a value that happens to
+              # look like a version is judged like any other value.
+              manifest = os.path.basename(path) in DEPENDENCY_MANIFESTS
+
+              def exempt_version(value):
+                  return manifest and looks_like_version_range(value)
+
               return _unsuppressed(text, [
                   m for m in GENERIC_SECRET.finditer(text)
-                  if is_sensitive_assignment(m.group("name"), m.group("value"))
+                  if is_sensitive_assignment(matched_name(m), m.group("value"))
                   and "${" not in m.group("value")
-                  and not looks_like_version_range(m.group("value"))
+                  and not exempt_version(m.group("value"))
                   and not looks_synthetic(m.group("value"))] + [
                   m for m in UNQUOTED_SECRET.finditer(text)
-                  if is_sensitive_assignment(m.group("name"), m.group("value"))
+                  if is_sensitive_assignment(matched_name(m), m.group("value"))
                   and "${" not in m.group("value")
                   and not looks_like_code_expression(m.group("value"))
-                  and not looks_like_version_range(m.group("value"))
+                  and not exempt_version(m.group("value"))
                   and not looks_synthetic(m.group("value"))])
 
           def env_secret_hits(text):
               matches = [m for m in ENV_ASSIGNMENT.finditer(text)
-                         if not looks_synthetic(m.group(1))]
+                         if has_sensitive_env_name(m.group("name"))
+                         and not looks_synthetic(m.group("value"))]
               matches += [m for m in ENV_URL_CREDENTIAL.finditer(text)
                           if not looks_synthetic(m.group(1))]
               return _unsuppressed(text, matches)
@@ -863,7 +1230,7 @@ jobs:
               # Judged on value shape, in every file including tests. A fixture
               # must announce itself ("test-", "fake_", "example."); anything
               # that does not is reported wherever it appears.
-              if generic_secret_hits(text):
+              if generic_secret_hits(text, name):
                   findings.append((name, "Generic secret assignment"))
 
               # A suppression without a reason is not a suppression. Reported
@@ -1221,7 +1588,9 @@ jobs:
                    "$internal/compliant" "$internal/compliantbraced" \
                    "$internal/nested/deeper" \
                    "$internal/compliantnested/deeper" \
-                   "$control/lib/dev-hq"
+                   "$control/lib/dev-hq" \
+                   "$control/app/dev-hq" "$control/components/dev-hq" \
+                   "$control/trigger/dev-hq"
 
           cp .semgrep/fixtures/route-guard-result-discarded.ts "$internal/discarded/route.ts"
           cp .semgrep/fixtures/route-arrow-no-guard.ts         "$internal/arrow/route.ts"
@@ -1242,12 +1611,39 @@ jobs:
           cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
           cp .semgrep/fixtures/token-renamed.ts                "$control/lib/dev-hq/token-renamed.ts"
           cp .semgrep/fixtures/token-env-aliased.ts            "$control/lib/dev-hq/token-env-aliased.ts"
+          # ROOT ARM. The token rule declares FOUR include roots and all three
+          # fixtures above sit in lib/dev-hq/, so three of them were asserted by
+          # nothing: deleting `- "/trigger/**"` exempted the entire Trigger.dev
+          # worker directory -- where a second token-verification site is most
+          # likely, since that is the process the internal callbacks run in --
+          # and this control stayed fully green. One plain read per root, so
+          # removing any root is visible.
+          cp .semgrep/fixtures/token-plain-read.ts             "$control/app/dev-hq/token-reader.ts"
+          cp .semgrep/fixtures/token-plain-read.ts             "$control/components/dev-hq/token-reader.ts"
+          cp .semgrep/fixtures/token-plain-read.ts             "$control/trigger/dev-hq/token-reader.ts"
+          # XSS RULE. It had no known-bad fixture and no null arm at all, so
+          # deleting the rule outright left this control green -- the same
+          # deficiency, under rule 1, that the credential job in this file just
+          # spent a commit fixing. One known-bad and one compliant file in each
+          # of its two include roots.
+          cp .semgrep/fixtures/xss-dangerously-set-inner-html.tsx "$control/app/dev-hq/xss-panel.tsx"
+          cp .semgrep/fixtures/xss-dangerously-set-inner-html.tsx "$control/components/dev-hq/xss-panel.tsx"
 
-          # NULL ARM. These four are correct and must produce no finding.
+          # NULL ARM. These are correct and must produce no finding.
           cp .semgrep/fixtures/compliant-route.ts              "$internal/compliant/route.ts"
           cp .semgrep/fixtures/compliant-route-braced.ts       "$internal/compliantbraced/route.ts"
           cp .semgrep/fixtures/compliant-route-nested.ts       "$internal/compliantnested/deeper/route.ts"
           cp .semgrep/fixtures/compliant-env-reader.ts         "$control/lib/dev-hq/compliant-env-reader.ts"
+          # The null half of each root arm above. Without these, a token rule
+          # widened to fire on any process.env read still detects every known-bad
+          # fixture in every root, and the root arms would prove only that the
+          # roots are reachable rather than that the rule still discriminates
+          # there.
+          cp .semgrep/fixtures/compliant-env-reader.ts         "$control/app/dev-hq/compliant-env-reader.ts"
+          cp .semgrep/fixtures/compliant-env-reader.ts         "$control/components/dev-hq/compliant-env-reader.ts"
+          cp .semgrep/fixtures/compliant-env-reader.ts         "$control/trigger/dev-hq/compliant-env-reader.ts"
+          cp .semgrep/fixtures/compliant-html-render.tsx       "$control/app/dev-hq/safe-panel.tsx"
+          cp .semgrep/fixtures/compliant-html-render.tsx       "$control/components/dev-hq/safe-panel.tsx"
 
           cp -r .semgrep "$control/.semgrep"
 
@@ -1264,6 +1660,7 @@ jobs:
 
           GUARD = "dev-hq-internal-route-missing-guard"
           TOKEN = "dev-hq-internal-token-verified-outside-guard"
+          XSS = "dev-hq-dangerously-set-inner-html"
 
           EXPECTED = {
               ("app/api/dev-hq/internal/discarded/route.ts", GUARD),
@@ -1290,6 +1687,22 @@ jobs:
               ("lib/dev-hq/token-destructured.ts", TOKEN),
               ("lib/dev-hq/token-renamed.ts", TOKEN),
               ("lib/dev-hq/token-env-aliased.ts", TOKEN),
+              # ROOT ARM, one entry per include root the TOKEN rule declares.
+              # All three fixtures above are in lib/, so `/app/**`,
+              # `/components/**` and `/trigger/**` were declared and asserted by
+              # nothing: deleting `- "/trigger/**"` silently exempted the
+              # Trigger.dev worker directory while this control reported all 13
+              # known-bad detected and exit 0. lib/ is not repeated here -- it is
+              # already covered three times over.
+              ("app/dev-hq/token-reader.ts", TOKEN),
+              ("components/dev-hq/token-reader.ts", TOKEN),
+              ("trigger/dev-hq/token-reader.ts", TOKEN),
+              # The XSS rule's first acceptance evidence of any kind. It had no
+              # known-bad fixture and no null arm, so deleting it outright left
+              # this control green. One entry per include root, for the same
+              # reason as above.
+              ("app/dev-hq/xss-panel.tsx", XSS),
+              ("components/dev-hq/xss-panel.tsx", XSS),
           }
 
           # NULL ARM. These files are correct, sit in the same scanned tree as
@@ -1312,6 +1725,16 @@ jobs:
               # a widened pattern that fires on everything it reaches there.
               "app/api/dev-hq/internal/compliantnested/deeper/route.ts",
               "lib/dev-hq/compliant-env-reader.ts",
+              # The null half of each root arm. A rule widened to fire on any
+              # process.env read, or on anything mentioning html, still detects
+              # every known-bad fixture in every root; only these files tell a
+              # working rule from one widened into noise THERE rather than only
+              # in lib/.
+              "app/dev-hq/compliant-env-reader.ts",
+              "components/dev-hq/compliant-env-reader.ts",
+              "trigger/dev-hq/compliant-env-reader.ts",
+              "app/dev-hq/safe-panel.tsx",
+              "components/dev-hq/safe-panel.tsx",
           }
 
           results = json.load(open("findings.json"))["results"]

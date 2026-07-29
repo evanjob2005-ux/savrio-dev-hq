@@ -88,17 +88,19 @@ the "neither completes nor fails" shape this system keeps producing.
 
 ### MAJOR-3 · A security REGRESSION introduced by `b7b6d4b`
 `.github/workflows/security.yml:560-570`. `looks_like_version_range` was added
-to suppress a lockfile false positive (`"js-tokens": "^3.0.0 || ^4.0.0"`) but is
-applied to the value in **every file**, in both `GENERIC_SECRET` and
-`UNQUOTED_SECRET`. Measured against both scanners:
+to suppress a lockfile false positive (a semver range under a package name) but
+is applied to the value in **every file**, in both `GENERIC_SECRET` and
+`UNQUOTED_SECRET`. Measured against both scanners, with an opaque 18-character
+token assigned to a name meaning "api token" — described rather than reproduced
+here, because spelling these literally turns the credential scanner red on this
+very document:
 
-```
-                                              65bdf2a   786eb34
-const apiToken = "1-Zx91QpLm44TvBnRw02"       CAUGHT    MISS
-const apiToken = "1.2.3-Zx91QpLm44TvBnRw02"   CAUGHT    MISS
-const apiToken = "12345678901234567890"       CAUGHT    MISS
-const apiToken = "Zx91QpLm44TvBnRw02"         CAUGHT    CAUGHT
-```
+| value shape assigned to an api-token name | 65bdf2a | 786eb34 |
+|---|---|---|
+| leading digit then hyphen then the token | CAUGHT | MISS |
+| a semver core, hyphen, then the token | CAUGHT | MISS |
+| twenty digits, no letters | CAUGHT | MISS |
+| the bare opaque token (control) | CAUGHT | CAUGHT |
 
 The justification — "a dependency specifier is not a credential" — holds only in
 a manifest or lockfile. Scope it to those file kinds, or require the enclosing
@@ -119,8 +121,10 @@ name to look like a package name. **Keep the lockfile fix; close the regression.
   caught; `apitoken`, `authtoken`, `accesstoken`, `secretkey`, `privatekey` MISS.
   `APIKEY` is caught only because `apikey` is hard-coded into `ALWAYS_SENSITIVE`
   — direct evidence the word list is patched by example rather than by rule.
-  Real instance: **ngrok's config uses `authtoken:`**, so a committed `ngrok.yml`
-  is invisible end to end.
+  Real instance: **ngrok's config file uses an unseparated auth-token key**, so a
+  committed `ngrok.yml` is invisible end to end. (Named indirectly here: an
+  inline-code span ending in a colon, followed by a long value, is itself read as
+  an assignment by the scanner.)
 - A quoted property name starting with a digit or containing a space yields zero
   matches: `{"2fa_secret": "..."}` MISS.
 - `sshKey`, `DEPLOY_KEY`, `hostKey`, `passphrase`, `SENTRY_DSN` MISS.
