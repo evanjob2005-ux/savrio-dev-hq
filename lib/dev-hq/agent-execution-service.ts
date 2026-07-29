@@ -18,6 +18,7 @@ import type {
 import {
   ensureAssignment,
   ensureExecution,
+  findLiveAgentExecutionForTask,
   getExecution,
   reclaimStale,
   releaseAssignmentForReassignment,
@@ -756,19 +757,22 @@ function assertTaskDispatchable(task: Task): void {
  * the two asserts above are and for the same reason: a replay converges on the
  * execution its own key already made, and that execution is itself live — so
  * re-checking on a replay would make every recovery refuse itself.
+ *
+ * The *condition* is `findLiveAgentExecutionForTask`, shared with the review
+ * service's revision path (MAJOR-1) so the two cannot drift on what counts as
+ * live. Only the refusal below is this path's own: dispatch is a request being
+ * authorized now, and a caller asking for work that cannot be admitted is owed a
+ * refusal rather than a silent postponement.
  */
 function assertNoLiveExecutionForTask(taskId: string): void {
-  for (const execution of getDevHqStore().executions.values()) {
-    if (execution.taskId !== taskId) continue;
-    if (!execution.routing) continue;
-    if (execution.status !== "queued" && execution.status !== "running") continue;
-    throw new UndispatchableRequestError(
-      `Task ${taskId} already has a live agent execution (${execution.id}, ${execution.status}); ` +
-        "refusing to dispatch a second one. Two live executions on one task run two " +
-        "independent retry budgets, two review loops, and two escalation paths against a " +
-        "single task status. Resume the existing dispatch instead, or wait for it to finish.",
-    );
-  }
+  const live = findLiveAgentExecutionForTask(taskId);
+  if (!live) return;
+  throw new UndispatchableRequestError(
+    `Task ${taskId} already has a live agent execution (${live.id}, ${live.status}); ` +
+      "refusing to dispatch a second one. Two live executions on one task run two " +
+      "independent retry budgets, two review loops, and two escalation paths against a " +
+      "single task status. Resume the existing dispatch instead, or wait for it to finish.",
+  );
 }
 
 /**

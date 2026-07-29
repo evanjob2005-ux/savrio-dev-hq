@@ -36,7 +36,11 @@ import type {
   ReviewPolicy,
 } from "@/types/domain";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
-import { ensureAssignment, ensureExecution } from "@/lib/dev-hq/execution-manager";
+import {
+  ensureAssignment,
+  ensureExecution,
+  findLiveAgentExecutionForTask,
+} from "@/lib/dev-hq/execution-manager";
 import { getDevHqStore } from "@/lib/dev-hq/store";
 import { hasCapabilities, listAgents } from "@/lib/dev-hq/agent-registry";
 import {
@@ -664,6 +668,34 @@ async function ensureReviewOutcomeRecords(review: Review): Promise<void> {
  * a marker that blocks it. The revision inherits the reviewed execution's routing,
  * request, and review policy, so the re-review judges the same authorized work
  * under the same restrictions — and starts with a full execution retry budget (E6).
+ *
+ * **The revision waits for the task, it does not race it (MAJOR-1).** This was
+ * the third path that could put two live agent-backed executions on one task,
+ * after manual dispatch (638e45c) and the founder `revise` (7979950), and it is
+ * reachable with nothing unusual happening: the reviewed execution succeeded, so
+ * it is terminal, so the task is legitimately dispatchable again; a late reviewer
+ * callback — which the response deadline and the dispatch allowance exist because
+ * of — then lands its revision on top of whatever was dispatched in the meantime.
+ *
+ * Postponed rather than refused, and the difference is the whole design. The
+ * review has already been DECIDED; something must record the revision it
+ * authorized. Throwing here would abandon that decision at the one point no
+ * caller can recover it — a late callback finds the review terminal and returns
+ * without re-running this step, so only `reconcileReviews` would retry, and it
+ * would throw on every sweep, taking the whole sweep down for every other review
+ * with it. That trades one defect for the "neither completes nor fails" shape.
+ *
+ * Escalating instead would claim something untrue: the loop is not exhausted, and
+ * `Escalation.origin` admits no case for "waiting on the task", so saying this to
+ * the founder would mean a new origin — a governance decision (ADR-0002 E2,
+ * D-E1), not an engineering one.
+ *
+ * So the revision stays owed. The wait is bounded by the competing execution's
+ * own bounded lifecycle (retry budget, claim deadline, queue-stall deadline —
+ * each of which terminates in an escalation), `reconcileReviews` already
+ * re-attempts a `changes_requested` review whose revision is missing, and the
+ * postponement is recorded so a decided review that is waiting is
+ * distinguishable from one that is finished.
  */
 async function ensureReviewRevision(review: Review): Promise<string | null> {
   const { reviewStore } = getDevHqAdapters();
@@ -674,6 +706,23 @@ async function ensureReviewRevision(review: Review): Promise<string | null> {
     reviewId: review.id,
     executionId: revisionExecutionIdFor(review.id),
   });
+
+  // Evaluated only when this call would CREATE the revision, exactly as the
+  // dispatch guard is and for the same reason: once the revision exists it is
+  // ITSELF the task's live agent execution, and `reconcileReviews` re-runs this
+  // step for every resolved review on every sweep — so an unconditional check
+  // would refuse the revision it had just created, on every pass, forever.
+  // `exceptExecutionId` is belt to that brace: it keeps the answer right for any
+  // caller that reaches here with the execution already made.
+  if (!getDevHqStore().executions.has(executionId)) {
+    const competing = findLiveAgentExecutionForTask(review.taskId, {
+      exceptExecutionId: executionId,
+    });
+    if (competing) {
+      await ensureRevisionDeferredEvent(review, competing);
+      return null;
+    }
+  }
 
   const execution = await ensureExecution({
     executionId,
@@ -712,6 +761,38 @@ async function ensureReviewRevision(review: Review): Promise<string | null> {
     reviewInstructions(execution),
   );
   return executionId;
+}
+
+/**
+ * Record that a decided review's revision is owed but not yet created, because
+ * the task still holds live agent work (MAJOR-1).
+ *
+ * This changes no outcome — the revision is created by the next reconciliation
+ * that finds the task free — it supplies the record without which a decided
+ * review sitting with no revision is indistinguishable from one that never
+ * authorized a revision at all. The same reasoning, and the same shape, as
+ * `ensureAssignmentDeferredEvent` for a capacity decline (ADR-0001 O6).
+ *
+ * Keyed on the review alone, deliberately. `reconcileReviews` re-attempts this
+ * every sweep and would otherwise append an entry per pass, for as long as the
+ * competing execution runs, to an append-only timeline (ADR-0002 E5). One review
+ * authorizes at most one revision, so one entry is the honest count; the
+ * revision's own assignment event is what later records that the wait ended.
+ *
+ * Recorded against the reviewed execution, which is the entity the review's other
+ * events are recorded against — not the competing execution, whose own lifecycle
+ * this is not an event in.
+ */
+async function ensureRevisionDeferredEvent(
+  review: Review,
+  competing: Execution,
+): Promise<void> {
+  await logReviewEvent({
+    type: REVIEW_EVENT_TYPE.revisionDeferred,
+    review,
+    message: `Review ${review.id} requested changes, but task ${review.taskId} already has a live agent execution (${competing.id}, ${competing.status}); the revision is deferred until that execution is terminal rather than dispatched alongside it.`,
+    dedupeKey: `${REVIEW_EVENT_TYPE.revisionDeferred}:${review.id}`,
+  });
 }
 
 /**
@@ -825,9 +906,14 @@ export async function reconcileReviews(
         "review_exhausted",
       ));
 
-    await ensureReviewLoopStep(review);
+    const { revisionExecutionId } = await ensureReviewLoopStep(review);
 
-    if (revisionMissing) result.revisions += 1;
+    // Counted on the repair having HAPPENED, not on it having been needed. A
+    // revision can be deferred because the task still holds live agent work
+    // (MAJOR-1), and a sweep that reports repairing what it postponed reports
+    // progress it did not make — which is how a loop that is making none looks
+    // green from the outside for as long as it is stuck.
+    if (revisionMissing && revisionExecutionId) result.revisions += 1;
     if (escalationMissing) result.escalations += 1;
   }
 

@@ -180,6 +180,14 @@ export const DEFAULT_REVIEW_POLICY = "basic";
 /**
  * Review lifecycle event names, emitted from the review service (ADR-0002 E3).
  * One event per accepted transition; none are emitted for a no-op callback.
+ *
+ * `revisionDeferred` records that a `changes_requested` review's revision was
+ * NOT created because the task already held live agent work (MAJOR-1). The
+ * review is decided and the revision is still owed — reconciliation creates it
+ * once the task is free — so this is a postponement, not an outcome, and the
+ * timeline is the only thing that can say a decided review is waiting rather
+ * than finished. Keyed per review, so the sweep that re-attempts it every minute
+ * appends one entry rather than one per pass.
  */
 export const REVIEW_EVENT_TYPE = {
   started: "review.started",
@@ -187,6 +195,7 @@ export const REVIEW_EVENT_TYPE = {
   passed: "review.passed",
   changesRequested: "review.changes_requested",
   escalated: "review.escalated",
+  revisionDeferred: "review.revision_deferred",
 } as const;
 
 /**

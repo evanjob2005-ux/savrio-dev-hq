@@ -209,6 +209,48 @@ function applyFailedAttempt(
 
 // --- lifecycle API ----------------------------------------------------------
 
+/**
+ * The agent-backed execution that currently owns a task's outcome, if any.
+ *
+ * **One definition of "live", shared by every path that creates an execution on
+ * a task.** Three separate paths reach `ensureExecution` — manual dispatch, a
+ * founder `revise`, and a review-authorized revision — and each one is a way to
+ * put a second live execution on one task. 638e45c and 7979950 closed the first
+ * two with the same condition spelled out separately; a third copy is how the
+ * three drift apart, so the condition lives here, in the module that owns
+ * execution state, and the *policy* about what to do with the answer stays with
+ * each caller.
+ *
+ * Liveness, not existence. A task legitimately accumulates terminal executions —
+ * every retry-exhausted failure, every succeeded execution a review later
+ * revises — and keying on existence would make a task dispatchable exactly once
+ * in its lifetime. `queued` and `running` are the two states in which an
+ * execution still owns the task's outcome.
+ *
+ * `routing` restricts this to agent-backed work, the same discriminator
+ * `isQueueStalled` and `reconcileAttemptRecords` use. A founder-request
+ * execution carries none and is never assigned an agent (ADR-0001 D2), so it is
+ * not a competing owner.
+ *
+ * `exceptExecutionId` excludes one id from the answer. Callers that ask about a
+ * task on a replay are asking "is anything ELSE live" — the execution they are
+ * about to converge on is itself live, and counting it would make every recovery
+ * refuse itself.
+ */
+export function findLiveAgentExecutionForTask(
+  taskId: string,
+  options?: { exceptExecutionId?: string },
+): Execution | null {
+  for (const execution of getDevHqStore().executions.values()) {
+    if (execution.taskId !== taskId) continue;
+    if (execution.id === options?.exceptExecutionId) continue;
+    if (!execution.routing) continue;
+    if (execution.status !== "queued" && execution.status !== "running") continue;
+    return execution;
+  }
+  return null;
+}
+
 /** Tasks eligible to be dispatched to an agent: active and unassigned. */
 export async function listReadyWork(): Promise<Task[]> {
   return [...getDevHqStore().tasks.values()].filter(
