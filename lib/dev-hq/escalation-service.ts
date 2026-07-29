@@ -20,9 +20,13 @@ import {
   ensureExecution,
   getExecution,
 } from "@/lib/dev-hq/execution-manager";
-import { getDevHqStore } from "@/lib/dev-hq/store";
+import {
+  getDevHqStore,
+  getEscalationResolutionOrder,
+} from "@/lib/dev-hq/store";
 import {
   ESCALATION_EVENT_TYPE,
+  EXECUTION_QUEUE_STALL_DEADLINE_MS,
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_USER_ID,
   MAX_EXECUTION_ATTEMPTS,
@@ -113,6 +117,52 @@ export function hasOpenEscalationForTask(taskId: string): boolean {
 }
 
 /**
+ * Whether this escalation carries the **newest** founder decision on its task
+ * (P0-3).
+ *
+ * `hasOpenEscalationForTask` establishes that no decision is *outstanding*. It
+ * does not establish that this decision is the *current* one, and the two are
+ * different facts. Both were missing until now, but only the first was checked:
+ *
+ *   1. E1 and E2 are both open on task T. E1 resolves `accept` — refused,
+ *      correctly, because E2 is still open.
+ *   2. E2 resolves `abandon`. Nothing is open, so T becomes `rejected`.
+ *   3. E1's request is retried — a duplicate POST, a client retry, a
+ *      reconciliation. `resolveEscalation` re-reads E1, finds the persisted
+ *      `accept`, sees nothing open, and writes T `completed`.
+ *
+ * Step 3 passes every precondition the module had, because each one asks about
+ * the present state and none asks *whose decision this is*. The founder's most
+ * recent instruction was "abandon", and the task now reports completed.
+ *
+ * Read synchronously, with no await anywhere in it, for the same reason
+ * `hasOpenEscalationForTask` is: it is evaluated inside `updateTaskStatusIf`'s
+ * precondition, which the repository runs in the same synchronous step as the
+ * write. An await here would reopen the gap and the recency check would once
+ * again be a decision made from a stale reading.
+ *
+ * An unresolved escalation is not the newest decision — it is not a decision at
+ * all — so a null position refuses. A scan, bounded by the escalation count,
+ * matching every other escalation lookup in this module.
+ */
+function isNewestResolutionForTask(escalation: Escalation): boolean {
+  const position = getEscalationResolutionOrder(escalation.id);
+  if (position === null) {
+    return false;
+  }
+  for (const other of getDevHqStore().escalations.values()) {
+    if (other.id === escalation.id || other.taskId !== escalation.taskId) {
+      continue;
+    }
+    const otherPosition = getEscalationResolutionOrder(other.id);
+    if (otherPosition !== null && otherPosition > position) {
+      return false; // a later founder decision on this task supersedes ours
+    }
+  }
+  return true;
+}
+
+/**
  * Move the task to the status an escalation lifecycle transition implies,
  * committing the decision atomically against the escalation state that
  * authorizes it (ARCH-02).
@@ -159,15 +209,23 @@ async function ensureEscalatedTaskStatus(taskId: string): Promise<void> {
  * Declaring the task finished under an outstanding founder decision is the same
  * untruth the founder-request flow is now stopped from telling; the rule is one
  * rule, applied wherever a flow wants to call a task done.
+ *
+ * Also refuses when a *later* founder decision has since been committed on the
+ * task (P0-3). Both conditions are required and neither implies the other: the
+ * first is about a decision that has not been made yet, the second about one
+ * that has been made and won. A replay arriving after everything closed passes
+ * the first and is caught only by the second.
  */
 async function ensureResolvedTaskStatus(
-  taskId: string,
+  escalation: Escalation,
   status: Task["status"],
 ): Promise<void> {
   await ensureTaskStatus(
-    taskId,
+    escalation.taskId,
     status,
-    () => !hasOpenEscalationForTask(taskId),
+    () =>
+      !hasOpenEscalationForTask(escalation.taskId) &&
+      isNewestResolutionForTask(escalation),
   );
 }
 
@@ -191,13 +249,22 @@ function revisionStatusNow(executionId: string): Execution["status"] | null {
  * synchronously with the write:
  *   - the revision must still be non-terminal at commit time, and
  *   - the task must still hold the status it was observed with, so any other
- *     actor's transition refuses this write rather than being overwritten.
+ *     actor's transition refuses this write rather than being overwritten, and
+ *   - this revise must still be the newest founder decision on the task (P0-3).
+ *
+ * The third is not covered by the other two. A superseded `revise` whose
+ * revision execution is still queued is still non-terminal, and a task the
+ * founder has since abandoned is stably `rejected` — so the replay observes it,
+ * finds it unchanged at commit time, and reopens abandoned work as `active`.
+ * "Still live" is a fact about the execution; it says nothing about whether the
+ * decision that authorized it is still the operative one.
  */
 async function activateTaskForLiveRevision(
-  taskId: string,
+  escalation: Escalation,
   executionId: string,
 ): Promise<void> {
   const { taskRepository } = getDevHqAdapters();
+  const taskId = escalation.taskId;
   const target = taskStatusForResolution("revise");
   const observed = await taskRepository.getTask(taskId);
   if (!observed || observed.status === target) {
@@ -206,6 +273,9 @@ async function activateTaskForLiveRevision(
   await taskRepository.updateTaskStatusIf(taskId, target, (current) => {
     if (current.status !== observed.status) {
       return false; // another actor moved the task since it was observed
+    }
+    if (!isNewestResolutionForTask(escalation)) {
+      return false; // a later founder decision on this task supersedes ours
     }
     const status = revisionStatusNow(executionId);
     return status !== null && !isTerminalExecution(status);
@@ -540,6 +610,120 @@ export async function raiseRetryExhaustionEscalation(
 }
 
 /**
+ * Raise a founder escalation for an execution that has been queued past the
+ * stall deadline with no agent (P0-5).
+ *
+ * Closes the residue commit 70c767e disclosed and deliberately did not assert:
+ * dispatch a satisfiable capability, then remove the satisfying agent from the
+ * roster, and the execution neither completes nor fails. Every existing recovery
+ * misses it by construction — reclaim looks at `running` attempts, the claim
+ * deadline looks at dispatched ones, and `reconcileQueuedDispatches` declines
+ * identically on every sweep without consuming an attempt, so the retry budget
+ * never exhausts and `raiseRetryExhaustionEscalation` is never reached.
+ *
+ * **Three lifecycle judgements, resolved by the Founder (delegated) 2026-07-29:**
+ *
+ *  1. *The bound* is `EXECUTION_QUEUE_STALL_DEADLINE_MS`, derived from
+ *     `EXECUTION_CLAIM_DEADLINE_MS` rather than chosen. Amends ADR-0001 O6 —
+ *     see that constant.
+ *
+ *  2. *Breaching it consumes no attempt.* Attempts count work an agent
+ *     performed (ADR-0001 D1: the counter increments only when a full dispatch
+ *     is exhausted). Nothing ran here, so charging an attempt would record work
+ *     that never happened — the same fabrication `reconcileRecordsFor` refuses
+ *     when it declines to invent a "failed" outcome for a requeued execution —
+ *     and would delay the founder's decision by three deadlines.
+ *
+ *  3. *The origin is `queue_stalled`*, a third member of `EscalationOrigin`
+ *     added under the same decision. **The first implementation of this function
+ *     used `retry_exhausted`**, as the closest fit the existing union allowed,
+ *     and disclosed the cost; the cost was then judged too high to ship. Two
+ *     reasons, and the second is the load-bearing one:
+ *       - It reads falsely. The founder's queue would carry "exhausted its retry
+ *         budget after 1 attempt" about work that made zero attempts.
+ *       - Escalations dedupe per (execution, origin). Sharing `retry_exhausted`
+ *         means that if capacity returns and this execution later *genuinely*
+ *         exhausts its retry budget, that second escalation collides with this
+ *         one and is silently swallowed — the founder is never told about the
+ *         real failure, because they were once told about the stall. A distinct
+ *         origin is what makes the two independently raisable.
+ *
+ * The execution is deliberately left `queued` and is not transitioned. Marking
+ * it `failed` at attempt 1 would put its status and its attempt counter in
+ * disagreement, which `assertRetryExhausted` and `reconcileUnescalatedFailures`
+ * both read as exhaustion; and leaving it queued means that if capacity returns
+ * before the founder acts, the authorized work still runs — which is exactly the
+ * path the dedupe argument above depends on being reachable.
+ *
+ * Idempotent by the same construction as every other raise here: the store
+ * dedupes per (execution, origin) and each side effect is re-applied only when
+ * missing, so a sweep every minute converges on one escalation.
+ */
+export async function raiseQueueStallEscalation(
+  execution: Execution,
+  queuedSince: string,
+  now: string,
+): Promise<Escalation> {
+  if (execution.status !== "queued") {
+    throw new Error(
+      `Cannot raise a queue-stall escalation for execution ${execution.id}: status is "${execution.status}", not "queued".`,
+    );
+  }
+  if (execution.agentId) {
+    throw new Error(
+      `Cannot raise a queue-stall escalation for execution ${execution.id}: it holds agent ${execution.agentId}, so it is not stalled without one.`,
+    );
+  }
+  const stalledForMs =
+    new Date(now).getTime() - new Date(queuedSince).getTime();
+  if (stalledForMs <= EXECUTION_QUEUE_STALL_DEADLINE_MS) {
+    throw new Error(
+      `Cannot raise a queue-stall escalation for execution ${execution.id}: queued ${stalledForMs}ms, within the ${EXECUTION_QUEUE_STALL_DEADLINE_MS}ms stall deadline.`,
+    );
+  }
+
+  const { escalationStore } = getDevHqAdapters();
+  const required = execution.routing?.requiredCapabilities ?? [];
+  const summary =
+    `Execution ${execution.id} has been queued for ${Math.round(stalledForMs / 1000)}s ` +
+    `at attempt ${execution.attempt ?? 1} with no agent` +
+    `${required.length > 0 ? ` able to satisfy [${required.join(", ")}]` : ""}, ` +
+    `past the ${Math.round(EXECUTION_QUEUE_STALL_DEADLINE_MS / 1000)}s stall deadline. ` +
+    "No attempt was consumed, so it can neither complete nor fail on its own and needs a founder decision.";
+
+  const escalation = await escalationStore.createEscalation({
+    origin: "queue_stalled",
+    taskId: execution.taskId,
+    executionId: execution.id,
+    summary,
+    raisedByAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  });
+  if (escalation.status === "resolved") {
+    return escalation;
+  }
+
+  await ensureEscalatedTaskStatus(escalation.taskId);
+  await ensureEscalationEvidence({
+    ref: `escalation:${escalation.id}:raised`,
+    taskId: escalation.taskId,
+    executionId: escalation.executionId,
+    label: "Escalation raised: queued past the stall deadline",
+    summary: escalation.summary,
+    createdByAgentId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  });
+  await ensureEscalationEvent({
+    type: ESCALATION_EVENT_TYPE.raised,
+    taskId: escalation.taskId,
+    escalationId: escalation.id,
+    message: `Escalation ${escalation.id} raised for task ${escalation.taskId}: ${escalation.summary}`,
+    actorId: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+    actorLabel: "Executive Orchestrator",
+  });
+
+  return escalation;
+}
+
+/**
  * Founder resolution of an escalation. Idempotent: the transition is applied once
  * and re-resolving is a no-op that re-returns the escalation. Side effects are
  * reconciled idempotently (Fix 3). Throws EscalationNotFoundError for a missing id
@@ -589,11 +773,11 @@ export async function resolveEscalation(
 
   if (appliedResolution !== "revise") {
     await ensureResolvedTaskStatus(
-      resolved.taskId,
+      resolved,
       taskStatusForResolution(appliedResolution),
     );
   } else if (revision) {
-    await activateTaskForLiveRevision(resolved.taskId, revision.id);
+    await activateTaskForLiveRevision(resolved, revision.id);
   }
 
   await ensureEscalationEvidence({

@@ -168,6 +168,7 @@ function createEmptyStore(): DevHqStoreData {
     evidence: new Map(),
     evidenceUris: new Map(),
     escalations: new Map(),
+    escalationResolutionOrder: new Map(),
     reviews: new Map(),
     reviewFindings: new Map(),
     eventKeys: new Map(),
@@ -400,4 +401,37 @@ export function saveEscalation(escalation: Escalation): Escalation {
 
 export function getEscalation(escalationId: string): Escalation | null {
   return getDevHqStore().escalations.get(escalationId) ?? null;
+}
+
+/**
+ * Stamp this escalation's resolution with its position in the store's total
+ * order of founder decisions, and return that position (P0-3).
+ *
+ * Call it in the same synchronous step as the resolution write, with no await
+ * between the two: that is what makes the order a faithful record of which
+ * decision was committed last, and it is the same argument that makes
+ * `appendEvent`'s dedupe key and `ensureEvidenceByUri` hold.
+ *
+ * Assigned once. A replay of an already-resolved escalation reads back the
+ * position it was given when it was resolved rather than being promoted to the
+ * front of the order, which is precisely the thing a replay must not do.
+ */
+export function recordEscalationResolution(escalationId: string): number {
+  const store = getDevHqStore();
+  const existing = store.escalationResolutionOrder.get(escalationId);
+  if (existing !== undefined) return existing;
+  const position = store.escalationResolutionOrder.size + 1;
+  store.escalationResolutionOrder.set(escalationId, position);
+  return position;
+}
+
+/**
+ * This escalation's position in the resolution order, or null when it carries no
+ * committed founder decision. Null is not "oldest": an unresolved escalation has
+ * no decision to be superseded and none to supersede with.
+ */
+export function getEscalationResolutionOrder(
+  escalationId: string,
+): number | null {
+  return getDevHqStore().escalationResolutionOrder.get(escalationId) ?? null;
 }

@@ -8,6 +8,7 @@ import type { Escalation } from "@/types/domain";
 import {
   getDevHqStore,
   getEscalation,
+  recordEscalationResolution,
   saveEscalation,
 } from "@/lib/dev-hq/store";
 import { nextId, nowIso } from "@/lib/dev-hq/id";
@@ -85,12 +86,21 @@ export class DevEscalationStore implements EscalationStore {
     if (!existing || existing.status !== "open") {
       return null;
     }
-    return saveEscalation({
+    const resolved = saveEscalation({
       ...existing,
       status: "resolved",
       resolution: input.resolution,
       resolvedAt: input.at ?? nowIso(),
     });
+    // Take the next position in the store's total order of founder decisions,
+    // synchronously with the write above (P0-3). This is the only place a
+    // resolution is committed, so it is the only place that can say which
+    // decision came last — and the escalation service reads it back to refuse a
+    // superseded replay's task write. Deliberately not derived from
+    // `resolvedAt`: at millisecond resolution two resolutions can tie, and a tie
+    // reads as "nothing newer exists", which is how the older decision wins.
+    recordEscalationResolution(resolved.id);
+    return resolved;
   }
 
   async reserveRevisionExecution(

@@ -61,6 +61,28 @@ export interface DevHqStoreData {
    */
   evidenceUris: Map<string, Evidence>;
   escalations: Map<string, Escalation>;
+  /**
+   * The order in which founder escalation resolutions were committed, keyed by
+   * escalation id. **The recency authority for founder decisions** (P0-3): the
+   * task outcome belongs to the escalation with the highest position here, and
+   * an escalation that is not the highest is replaying a superseded decision.
+   *
+   * A counter rather than `Escalation.resolvedAt`, which is the obvious
+   * candidate and is not sufficient. `resolvedAt` is millisecond-resolution
+   * wall-clock, so two resolutions committed in the same millisecond compare
+   * equal, and "no later decision exists" and "a later decision exists that I
+   * cannot distinguish from mine" become the same reading — under which the
+   * replay wins. A total order has no ties, so the comparison is decidable for
+   * every pair.
+   *
+   * Assigned in the same synchronous step as the resolution write, by the only
+   * code that performs one, for the same reason `eventKeys` and `evidenceUris`
+   * are keyed in the store: a service-level read-then-write cannot order two
+   * callers that both pass the read before either writes.
+   *
+   * Append-only and never removed, so `size` is a monotonic sequence.
+   */
+  escalationResolutionOrder: Map<string, number>;
   reviews: Map<string, Review>;
   /** Findings keyed by their deterministic id, so a replay cannot duplicate one. */
   reviewFindings: Map<string, ReviewFinding>;

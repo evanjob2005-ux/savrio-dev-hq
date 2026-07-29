@@ -31,13 +31,20 @@ import {
   saveExecution,
 } from "@/lib/dev-hq/store";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
-import { raiseRetryExhaustionEscalation } from "@/lib/dev-hq/escalation-service";
-import { hasCapabilities, listAgents } from "@/lib/dev-hq/agent-registry";
+import {
+  raiseQueueStallEscalation,
+  raiseRetryExhaustionEscalation,
+} from "@/lib/dev-hq/escalation-service";
+import {
+  hasCapabilities,
+  listDispatchableAgents,
+} from "@/lib/dev-hq/agent-registry";
 import {
   AGENT_CAPABILITIES,
   DEFAULT_REVIEW_POLICY,
   EXECUTION_CLAIM_DEADLINE_MS,
   EXECUTION_EVENT_TYPE,
+  EXECUTION_QUEUE_STALL_DEADLINE_MS,
   MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/dev-hq/constants";
 import { nextId, nowIso } from "@/lib/dev-hq/id";
@@ -752,7 +759,14 @@ function assertCapabilitiesSatisfiable(required: string[]): void {
     );
   }
 
-  if (!listAgents().some((agent) => hasCapabilities(agent, required))) {
+  // Dispatchable agents only. This check and `selectAgent` must answer the same
+  // question or the gap between them is the stranding defect again: an agent
+  // selection refuses would otherwise make a set look satisfiable, the dispatch
+  // would be accepted, and the execution would sit queued with no agent, no
+  // consumed attempt, and no escalation. The executive orchestrator holds no
+  // capabilities today, so this changes no current answer — it is what keeps the
+  // two in step if a system actor is ever given one.
+  if (!listDispatchableAgents().some((agent) => hasCapabilities(agent, required))) {
     throw new UndispatchableRequestError(
       `No registered agent holds every capability in [${required.join(", ")}] at once, so this dispatch could never be assigned. Narrow the requirement or dispatch the work as separate tasks.`,
     );
@@ -1263,6 +1277,87 @@ async function reconcileUnescalatedFailures(): Promise<void> {
 }
 
 /**
+ * When this execution last had anything happen to it — the instant from which a
+ * queue stall is measured (P0-5).
+ *
+ * Not `createdAt`. An execution that ran, failed, and was requeued without an
+ * agent was created long before it started waiting, and measuring from creation
+ * would escalate a legitimately-retrying execution the moment it was requeued.
+ * The latest of its own creation and every timestamp its assignments carry is
+ * the last moment it demonstrably was not stranded.
+ *
+ * Derived rather than stored on the execution, so this deadline costs no change
+ * to the `Execution` domain type. The trade is real and worth naming: a stored
+ * `queuedSince` would be one fact to keep true, where this reconstructs it from
+ * three timestamps across two record types, and stays correct only while an
+ * assignment is released for reasons that genuinely mean "not stranded". That is
+ * true of both release sites today (`releaseExecution`, and
+ * `releaseAssignmentForReassignment`, which releases precisely because the
+ * assignment became unusable).
+ *
+ * ISO-8601 UTC strings from `toISOString()` compare lexicographically in
+ * chronological order, which is the same property `compareByIdleThenId` relies
+ * on for `lastActiveAt`.
+ */
+function queuedSince(execution: Execution): string {
+  let since = execution.createdAt;
+  for (const assignment of getDevHqStore().agentAssignments.values()) {
+    if (assignment.executionId !== execution.id) continue;
+    for (const stamp of [assignment.createdAt, assignment.releasedAt]) {
+      if (stamp && stamp > since) since = stamp;
+    }
+  }
+  return since;
+}
+
+/**
+ * True when an execution has been queued past the stall deadline with no agent
+ * (P0-5) — the shape that neither completes nor fails.
+ *
+ * Requires **no agent and no assignment**, which is what makes this deadline
+ * disjoint from the two that already exist rather than a third opinion about the
+ * same executions: a running attempt is reclaim's (it holds a lease), and a
+ * dispatched-but-unclaimed assignment is the claim deadline's. What is left is
+ * an execution nothing is looking at.
+ *
+ * `routing` restricts this to agent-backed work. Founder-request executions
+ * carry none, are never assigned an agent by design (ADR-0001 D2), and would
+ * otherwise all look permanently stalled.
+ */
+function isQueueStalled(execution: Execution, now: string): boolean {
+  if (execution.status !== "queued") return false;
+  if (execution.agentId || execution.assignmentId) return false;
+  if (!execution.routing) return false;
+  const attempt = execution.attempt ?? 0;
+  // An authorized attempt is within the retry budget — the same bound
+  // `reconcileQueuedDispatches` uses to decide what it is willing to re-place.
+  if (attempt < 1 || attempt > MAX_EXECUTION_ATTEMPTS) return false;
+  return (
+    new Date(now).getTime() - new Date(queuedSince(execution)).getTime() >
+    EXECUTION_QUEUE_STALL_DEADLINE_MS
+  );
+}
+
+/**
+ * Escalate queued executions that have been stranded past the stall deadline
+ * (P0-5).
+ *
+ * **Runs last in the sweep, and the ordering is load-bearing.**
+ * `reconcileQueuedDispatches` has already had its chance to place every queued
+ * execution this cycle, so anything still unassigned here is unassignable *now*,
+ * not merely unassigned *yet*. Running this first would escalate work that
+ * capacity was available for — replacing silent stranding with spurious
+ * escalation, which is not an improvement.
+ */
+async function reconcileStalledQueuedExecutions(now?: string): Promise<void> {
+  const at = now ?? nowIso();
+  for (const execution of [...getDevHqStore().executions.values()]) {
+    if (!isQueueStalled(execution, at)) continue;
+    await raiseQueueStallEscalation(execution, queuedSince(execution), at);
+  }
+}
+
+/**
  * Append-only log evidence for a lease-expiry reclaim (Task 1E-3, consistency
  * with the Task 1E-1 evidence pattern). Attributed to the reclaimed execution and
  * recorded as a system action; purely descriptive — it never drives control flow.
@@ -1356,9 +1451,13 @@ export async function handleExecutionReclaim(
   //   queued, unassigned/undispatched-> reconcileQueuedDispatches
   //   records lost after transition  -> reconcileAttemptRecords
   //   terminal failed w/o escalation -> reconcileUnescalatedFailures
+  //   queued past the stall deadline -> reconcileStalledQueuedExecutions
   await reconcileQueuedDispatches(now);
   await reconcileAttemptRecords();
   await reconcileUnescalatedFailures();
+  // Last, and only after reconcileQueuedDispatches has had its chance to place
+  // every queued execution: see the note on that function.
+  await reconcileStalledQueuedExecutions(now);
 
   return { reclaimed: reclaimed.length };
 }

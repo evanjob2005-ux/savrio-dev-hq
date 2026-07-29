@@ -7,7 +7,10 @@
 
 import type { AgentSelectionPolicy } from "@/types/contracts";
 import type { Agent, AgentHealth, IsoTimestamp } from "@/types/domain";
-import { AGENT_HEALTH_STALE_AFTER_MS } from "@/lib/dev-hq/constants";
+import {
+  AGENT_HEALTH_STALE_AFTER_MS,
+  SYSTEM_ACTOR_AGENT_IDS,
+} from "@/lib/dev-hq/constants";
 import { getDevHqStore } from "@/lib/dev-hq/store";
 
 export function listAgents(): Agent[] {
@@ -26,6 +29,34 @@ export function hasCapabilities(agent: Agent, required: string[]): boolean {
 /** Phase 1 capacity is one execution per agent, so only `available` is eligible. */
 export function isAvailable(agent: Agent): boolean {
   return agent.availability === "available";
+}
+
+/**
+ * True for an actor that exists to be *referenced* by records rather than to
+ * perform work (P0-4). A system actor is never eligible for selection, whatever
+ * its capabilities, availability or health say.
+ *
+ * This is the structural half of the guarantee that commit e5aac96 tried to get
+ * from data alone. Seeding the executive orchestrator with no capabilities made
+ * it unselectable only while every dispatch named its capabilities, because
+ * `hasCapabilities` is `required.every(...)` and `[].every(...)` is `true` — so
+ * a dispatch requiring nothing matched the one agent that must never match. The
+ * roster's real workers being busy is then all it takes for selection to reach
+ * it. Identity, not capability, decides eligibility, so nobody can re-open the
+ * hole by giving this actor a capability later.
+ */
+export function isSystemActor(agent: Agent): boolean {
+  return SYSTEM_ACTOR_AGENT_IDS.includes(agent.id);
+}
+
+/**
+ * Agents that may be given work at all, ignoring availability and capability.
+ * The permanent half of eligibility: `findEligibleAgents` applies it before the
+ * transient filters, and satisfiability checks ask it whether a capability set
+ * has any possible answer.
+ */
+export function listDispatchableAgents(): Agent[] {
+  return listAgents().filter((agent) => !isSystemActor(agent));
 }
 
 /**
@@ -63,11 +94,17 @@ export function evaluateAgentHealth(
  * policy pins one, its required provider. The provider pin is a hard filter
  * applied before ordering, so a same-provider agent is still found when it is not
  * the most idle candidate overall.
+ *
+ * System actors are excluded first and unconditionally (P0-4). Every other
+ * filter here is a statement about the *work* — the wrong capabilities, the
+ * wrong provider, no free capacity right now — and each of them can be satisfied
+ * by some request. "Must never be dispatched" is a statement about the *actor*,
+ * so it cannot be left to the request to enforce.
  */
 export function findEligibleAgents(policy?: AgentSelectionPolicy): Agent[] {
   const required = policy?.requiredCapabilities ?? [];
   const provider = policy?.requiredProvider;
-  return listAgents().filter(
+  return listDispatchableAgents().filter(
     (agent) =>
       isAvailable(agent) &&
       hasCapabilities(agent, required) &&
