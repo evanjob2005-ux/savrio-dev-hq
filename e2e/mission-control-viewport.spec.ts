@@ -8,28 +8,9 @@ import { expect, test } from "@playwright/test";
 // real weight only because the config runs every spec at both a desktop and a
 // mobile project.
 //
-// Not covered here: approval, blocker, and escalation panel behaviour. Those
-// belong in the gate suite as Sprint 1F lands them.
-
-// KNOWN HARNESS LIMITATION, deliberately asserted rather than ignored.
-//
-// playwright.config.ts serves a production build, and proxy.ts fails the entire
-// /api/dev-hq/* surface closed in production because nothing authenticates the
-// caller yet. So Mission Control loads its shell here but never its data: every
-// Dev HQ request returns 403 by design.
-//
-// This means the Phase 1 Mission Control exit gate CANNOT be fully proved by
-// this harness as configured. Shell, layout, and viewport behaviour are proved;
-// live progress, approvals, and blockers are not, because the API that feeds
-// them is switched off in the environment under test. Closing that gap requires
-// either a real authentication boundary (which is what proxy.ts is waiting for)
-// or an e2e environment that is not NODE_ENV=production. Until then, treat the
-// Mission Control gate as partially evidenced.
-//
-// The test below is written so that the deliberate 403s pass and anything else
-// fails, rather than blanket-ignoring console errors — which would also hide a
-// genuine runtime error on this page.
-test("produces no runtime errors beyond the deliberate production API block", async ({
+// Populated approval and blocker behaviour is exercised separately in
+// mission-control-live.spec.ts against this same production build and store.
+test("produces no runtime or HTTP errors", async ({
   page,
 }) => {
   const pageErrors: string[] = [];
@@ -65,51 +46,30 @@ test("produces no runtime errors beyond the deliberate production API block", as
 
   await page.goto("/");
 
-  // Web-first assertion instead of waitForLoadState("networkidle"). Playwright
-  // discourages networkidle, and Mission Control polls every 3 seconds, so
-  // "the network went quiet" is a property this page never durably has. It
-  // passed only because the blocked API returns 403 instantly. Waiting on a
-  // rendered landmark waits for the thing actually being asserted.
+  // Web-first assertions instead of waitForLoadState("networkidle").
+  // Mission Control polls every 3 seconds, so "the network went quiet" is not a
+  // durable property. The blocked task proves the state request completed and
+  // the populated view rendered before the error collectors are inspected.
   await expect(page.getByRole("banner")).toBeVisible();
+  await expect(
+    page
+      .locator('section[aria-label="Blocked tasks"]')
+      .getByText("E2E blocked task", { exact: true }),
+  ).toBeVisible();
 
   // An uncaught exception is never expected, regardless of API availability.
   expect(pageErrors, `uncaught page errors:\n${pageErrors.join("\n")}`).toEqual(
     [],
   );
 
-  // The single tolerated failure class is the 403 that proxy.ts deliberately
-  // returns for the whole Dev HQ surface in production. Everything else fails,
-  // including a 5xx from a Dev HQ route -- the API being switched off must not
-  // become cover for the API being broken.
-  const blockedDevHq = failedResponses.filter((entry) =>
-    entry.startsWith("403 /api/dev-hq/"),
-  );
-  const unexpected = failedResponses.filter(
-    (entry) => !entry.startsWith("403 /api/dev-hq/"),
-  );
   expect(
-    unexpected,
-    `HTTP failures outside the deliberately blocked Dev HQ surface:\n${unexpected.join("\n")}`,
+    failedResponses,
+    `HTTP failures:\n${failedResponses.join("\n")}`,
   ).toEqual([]);
 
-  // Tolerating the 403 is not the same as requiring it. Without this line the
-  // assertion above is satisfied just as well by a boundary that has vanished:
-  // a reviewer stubbed proxy.ts to allow everything and this spec still passed.
-  // At least one Dev HQ request must have been refused for the run to mean
-  // anything about the boundary.
   expect(
-    blockedDevHq.length,
-    "no /api/dev-hq/ request was refused with 403 -- either the page stopped calling the Dev HQ API, or proxy.ts stopped blocking it",
-  ).toBeGreaterThan(0);
-
-  // Console errors that merely restate a tolerated 403 are expected; anything
-  // else is the application reporting a genuine problem.
-  const appConsoleErrors = consoleErrors.filter(
-    (text) => !/Failed to load resource/i.test(text),
-  );
-  expect(
-    appConsoleErrors,
-    `application console errors:\n${appConsoleErrors.join("\n")}`,
+    consoleErrors,
+    `application console errors:\n${consoleErrors.join("\n")}`,
   ).toEqual([]);
 });
 
@@ -118,10 +78,14 @@ test("does not scroll horizontally at this viewport", async ({ page }) => {
   await expect(page.getByRole("banner")).toBeVisible();
 
   // Runs at both projects. A Founder-facing operational view that scrolls
-  // sideways on a phone does not satisfy the Mission Control gate. Scope: under
-  // this build proxy.ts 403s the whole Dev HQ surface and
-  // MissionControlOverview.tsx:94 returns the loading placeholder, so what this
-  // measures is the shell, not the populated view. See OBL-11.
+  // sideways on a phone does not satisfy the Mission Control gate. Wait for the
+  // exact process-start fixture first so this cannot pass against a loading or
+  // empty shell merely because another spec happened not to populate the store.
+  await expect(
+    page
+      .locator('section[aria-label="Blocked tasks"]')
+      .getByText("E2E blocked task", { exact: true }),
+  ).toBeVisible();
   const overflowsHorizontally = await page.evaluate(() => {
     const root = document.documentElement;
     // One pixel of tolerance absorbs sub-pixel layout rounding, which varies

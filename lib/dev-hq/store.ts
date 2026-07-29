@@ -4,6 +4,7 @@
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
 import {
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  FOUNDER_USER_ID,
   FOUNDER_REQUEST_WORKFLOW_ID,
 } from "@/lib/dev-hq/constants";
 import type {
@@ -30,6 +31,54 @@ import type {
 } from "@/types/domain";
 
 const STORE_KEY = Symbol.for("savrio.dev-hq.store");
+export const DEV_HQ_E2E_BLOCKED_SCENARIO = "mission-control-blocked-task";
+export const DEV_HQ_E2E_BLOCKED_TASK_ID = "task-e2e-blocked";
+
+/**
+ * Process-start fixture for the optimized-build Mission Control E2E only.
+ *
+ * This is deliberately not callable over HTTP. Both values are exact, default
+ * off, and server-only; a public deployment with an absent, misspelled, or
+ * prefixed value receives the normal empty store.
+ */
+function seedE2EBlockedTask(store: DevHqStoreData): void {
+  if (
+    process.env.DEV_HQ_DEPLOYMENT_MODE !== "local" ||
+    process.env.DEV_HQ_E2E_SCENARIO !== DEV_HQ_E2E_BLOCKED_SCENARIO
+  ) {
+    return;
+  }
+
+  const timestamp = nowIso();
+  const project: Project = {
+    id: "proj-e2e-blocked",
+    name: "E2E Blocked Project",
+    slug: "e2e-blocked-project",
+    description: "Process-start fixture for Mission Control browser evidence.",
+    repository: "local/e2e-only",
+    defaultBranch: "main",
+    status: "active",
+    ownerId: FOUNDER_USER_ID,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  const task: Task = {
+    id: DEV_HQ_E2E_BLOCKED_TASK_ID,
+    projectId: project.id,
+    workflowId: null,
+    title: "E2E blocked task",
+    description: "Deterministic blocked-lane browser fixture.",
+    status: "blocked",
+    priority: "High",
+    assigneeAgentId: null,
+    claimedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    dueAt: null,
+  };
+  store.projects.set(project.id, project);
+  store.tasks.set(task.id, task);
+}
 
 function createSeedWorkflow(): Workflow {
   const createdAt = nowIso();
@@ -154,7 +203,7 @@ function createProcessStartMarker(): ProcessStartMarker {
 function createEmptyStore(): DevHqStoreData {
   const workflows = new Map<string, Workflow>();
   workflows.set(FOUNDER_REQUEST_WORKFLOW_ID, createSeedWorkflow());
-  return {
+  const store: DevHqStoreData = {
     projects: new Map(),
     tasks: new Map(),
     approvals: new Map(),
@@ -173,6 +222,8 @@ function createEmptyStore(): DevHqStoreData {
     eventKeys: new Map(),
     processStart: createProcessStartMarker(),
   };
+  seedE2EBlockedTask(store);
+  return store;
 }
 
 /** Centralized in-memory development store (single Next.js process, non-durable). */
