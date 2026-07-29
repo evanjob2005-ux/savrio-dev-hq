@@ -204,7 +204,52 @@ describe("MissionControlOverview decision endpoints", () => {
  * Measured rather than asserted: the button is focused first (which is the state
  * a keyboard user is necessarily in when they activate it), and
  * `document.activeElement` is read back after the request settles.
+ *
+ * THE JSDOM GAP, AND WHY THE FIXTURE DRIVES THE BLUR ITSELF
+ *
+ * The defect is only reachable because focus is LOST first. Pressing Approve
+ * puts the button into its busy state; a disabled button is not a focusable
+ * area, and HTML's focus fixup rule requires a user agent whose focused area
+ * stops being focusable to move focus off it — in practice to the body.
+ * The fix in `MissionControlOverview` exists to put the founder back, and its
+ * own comment says as much: without it "the user would be left wherever the
+ * blur dropped them".
+ *
+ * That rule is an external fact about browsers, not something this file can
+ * prove; what it can do is stop pretending the property is being observed when
+ * it is not. Only an e2e in a real engine verifies the drop itself.
+ *
+ * jsdom does not implement that step. Focus therefore never leaves the button,
+ * `document.activeElement` reads back as the button whatever the component
+ * does, and an activeElement assertion on its own is satisfied by a component
+ * with no focus handling at all. That was measured, not assumed: deleting the
+ * restore line and running this file left all five tests green.
+ *
+ * So the fixture performs the unfocus explicitly, at the exact moment the
+ * browser would — after the press, once the button is confirmed disabled. The
+ * assertions then measure the property a founder actually experiences (where
+ * focus ends up) rather than a proxy for it (that some function was called),
+ * and both preconditions are asserted so the simulation cannot silently stop
+ * reproducing the browser and quietly hollow the test out again.
  */
+/**
+ * Reproduce the step of the focusing model jsdom does not implement: a browser
+ * unfocuses an element at the moment it becomes disabled.
+ *
+ * jsdom omits the same step twice over. It never drops focus on disable, and
+ * `HTMLElement.blur()` returns early unless the element is still a focusable
+ * area — which a disabled button is not — so once React has committed the
+ * `disabled` attribute there is no public API left that can move focus off it.
+ * The attribute is therefore lifted for the duration of the single `blur()`
+ * call and put straight back, with no commit in between, so the DOM React owns
+ * is byte-identical before and after and only the focus position changes.
+ */
+function dropFocusAsBrowserWouldOnDisable(el: HTMLElement): void {
+  el.removeAttribute("disabled");
+  el.blur();
+  el.setAttribute("disabled", "");
+}
+
 describe("P2-35 · a failed decision leaves focus on the control that can retry", () => {
   const failingFetch = () =>
     vi.fn(async () => ({
@@ -214,7 +259,8 @@ describe("P2-35 · a failed decision leaves focus on the control that can retry"
     }));
 
   /**
-   * Renders, puts focus on Approve, and presses it. Identical in both arms.
+   * Renders, puts focus on Approve, presses it, and reproduces the browser's
+   * unfocus-on-disable. Identical in both arms.
    *
    * Also counts every time the approvals wrapper takes focus, because "focus
    * ends on the button" is satisfied by a handler that moves focus to the
@@ -239,6 +285,28 @@ describe("P2-35 · a failed decision leaves focus on the control that can retry"
       approve,
     );
     fireEvent.click(approve);
+
+    // The browser's unfocus-on-disable, which jsdom omits. The precondition is
+    // asserted rather than assumed: if the press ever stops disabling the
+    // button, or the request has already settled by this point, the drop would
+    // be simulated at the wrong moment and every assertion downstream would be
+    // measuring nothing. That must fail loudly here instead.
+    expect(
+      approve.hasAttribute("disabled"),
+      "the pressed button is not disabled at this point, so the fixture is no " +
+        "longer reproducing the browser's focus drop at the moment it happens",
+    ).toBe(true);
+    dropFocusAsBrowserWouldOnDisable(approve);
+    expect(
+      document.activeElement,
+      "the simulated focus drop did not take, so focus never left the button " +
+        "and the assertions below cannot observe whether it is restored",
+    ).not.toBe(approve);
+    expect(
+      approve.hasAttribute("disabled"),
+      "the fixture left the button in a state React did not put it in",
+    ).toBe(true);
+
     return { approve, regionFocuses: () => regionFocusCount };
   };
 
@@ -260,9 +328,12 @@ describe("P2-35 · a failed decision leaves focus on the control that can retry"
 
     expect(
       document.activeElement,
-      `focus was moved to <${(document.activeElement as HTMLElement | null)?.tagName.toLowerCase()} ` +
+      `focus ended on <${(document.activeElement as HTMLElement | null)?.tagName.toLowerCase()} ` +
         `aria-label="${document.activeElement?.getAttribute("aria-label") ?? ""}">, ` +
-        "away from the still-actionable Approve button the founder needs to retry",
+        "not on the still-actionable Approve button the founder needs to retry. " +
+        "Pressing the button disabled it, which drops focus in every browser; " +
+        "nothing decided, so the button is still there and still the only thing " +
+        "the founder can do, and they have been left wherever the drop put them",
     ).toBe(approve);
     expect(
       regionFocuses(),
@@ -272,10 +343,11 @@ describe("P2-35 · a failed decision leaves focus on the control that can retry"
   });
 
   it("NULL ARM: on success, focus does move to the approvals region", async () => {
-    // Identical starting state and identical keystroke; only the response
-    // differs. Without this, "focus stays on the button" would also be satisfied
-    // by deleting the focus handling altogether, which would drop the founder to
-    // the document start on every successful decision.
+    // Identical starting state, identical keystroke and identical simulated
+    // focus drop; only the response differs. Without this, "focus is back on the
+    // button" would also be satisfied by restoring it unconditionally — which
+    // after a decision that landed would put the founder on a button that is
+    // about to be removed, or on a stale "Retry approval" for work already done.
     const { approve, regionFocuses } = pressApproveWithFocus();
 
     await waitFor(() =>
@@ -285,7 +357,7 @@ describe("P2-35 · a failed decision leaves focus on the control that can retry"
     );
     expect(
       document.activeElement,
-      "focus never left the button after a decision that landed",
+      "focus was returned to the pressed button after a decision that landed",
     ).not.toBe(approve);
     expect(regionFocuses()).toBe(1);
   });

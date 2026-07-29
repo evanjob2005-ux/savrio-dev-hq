@@ -117,6 +117,11 @@ describe("P2-39 · the agent status rail declares its provenance", () => {
     // Composed the way MissionControl composes them. The badge is a real claim
     // about the Dev HQ state feed and stays; what must not happen is the rail
     // sitting under it with no claim of its own.
+    //
+    // This is a statement about the pairing, not about MissionControl: the
+    // provenance is written here, so it holds whatever MissionControl passes.
+    // That MissionControl passes `"simulated"` is pinned in
+    // `MissionControl.test.tsx`, which renders MissionControl itself.
     const { container } = render(
       <>
         <TopBar runningId={null} paused={false} runningTitle={null} />
