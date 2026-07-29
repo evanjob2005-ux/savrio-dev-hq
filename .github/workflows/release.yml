@@ -158,6 +158,14 @@ jobs:
               print(f"::error::{message}")
               sys.exit(1)
 
+          def cannot_evaluate(message):
+              # STD-CTRL-001 rule 5: a control that could not perform its
+              # comparison must exit distinctly from one that performed it and
+              # found a violation, and must say what it could not do. Exit 2 is
+              # reserved for that throughout this workflow.
+              print(f"::error::{message}")
+              sys.exit(2)
+
           def git(*args):
               return subprocess.run(
                   ["git", *args], capture_output=True, text=True)
@@ -225,18 +233,54 @@ jobs:
           # every rerun dies here. Publish now rolls the tag back on failure,
           # so this path is the backstop for a rollback that itself failed.
           tag_local = git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode == 0
-          tag_remote = git(
-              "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}"
-          ).returncode == 0
+          # `--exit-code` makes "no matching ref" exit 2 specifically. Every
+          # OTHER non-zero status is a transport, DNS, or auth failure, which is
+          # not evidence that the tag is absent. Collapsing the two would let an
+          # unreachable remote license pushing a tag over one that exists.
+          remote = git("ls-remote", "--exit-code", "--tags", "origin",
+                       f"refs/tags/{tag}")
+          if remote.returncode == 0:
+              tag_remote = True
+          elif remote.returncode == 2:
+              tag_remote = False
+          else:
+              cannot_evaluate(
+                  f"Could not determine whether tag '{tag}' exists on the "
+                  f"remote: git ls-remote exited {remote.returncode} "
+                  f"({remote.stderr.strip() or 'no diagnostic output'}), which "
+                  "is a failure to reach the remote, not an absent tag.")
+
+          # `gh release view` exits non-zero for BOTH "no such release" and
+          # "could not reach the API", so its exit code alone is not evidence of
+          # absence. CLI CONTRACT: gh prints `release not found` when the
+          # repository was reached and the release genuinely does not exist.
+          # That string is the only accepted evidence of absence at all three
+          # `gh release view` call sites in this workflow.
+          # scripts/test-release-controls.py pins the string and shows every
+          # site failing closed if a future gh rewords it.
+          def release_attached(name):
+              proc = subprocess.run(["gh", "release", "view", name],
+                                    capture_output=True, text=True)
+              if proc.returncode == 0:
+                  return True
+              detail = (proc.stderr + proc.stdout).strip()
+              if "release not found" in detail.lower():
+                  return False
+              cannot_evaluate(
+                  f"Tag '{name}' already exists, and whether a release is "
+                  f"attached to it could not be determined: gh release view "
+                  f"exited {proc.returncode} "
+                  f"({detail or 'no diagnostic output'}). Adopting the tag as a "
+                  "resumable partial release would republish over a release "
+                  "that may already exist, so this run refuses to guess.")
+
           resume = False
           if tag_local or tag_remote:
               if not tag_local:
                   git("fetch", "--force", "origin", f"refs/tags/{tag}:refs/tags/{tag}")
               obj = git("cat-file", "-t", f"refs/tags/{tag}").stdout.strip()
               peeled = git("rev-list", "-n", "1", f"refs/tags/{tag}").stdout.strip()
-              release_present = subprocess.run(
-                  ["gh", "release", "view", tag],
-                  capture_output=True, text=True).returncode == 0
+              release_present = release_attached(tag)
               if obj == "tag" and peeled == target_sha and not release_present:
                   resume = True
                   print(f"::warning::Tag {tag} already exists, is annotated, and "
@@ -918,9 +962,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          # `gh release view` exits non-zero for BOTH "no such release" and
+          # "could not reach the API". Reading that exit code as absence lets an
+          # unreachable API license the resume path below -- whose warning then
+          # positively asserts the tag has NO RELEASE ATTACHED, which this step
+          # would never have verified. Only the explicit not-found is absence
+          # (same CLI contract as validate and as the rollback in the next
+          # step); anything else is could-not-evaluate and exits 2 per
+          # STD-CTRL-001 rule 5.
+          view_rc=0
+          view_out="$(gh release view "$TAG" 2>&1)" || view_rc=$?
+          if [[ "$view_rc" -eq 0 ]]; then
             echo "::error::Release '${TAG}' now exists; aborting to avoid a duplicate."
             exit 1
+          fi
+          if ! grep -qi "release not found" <<<"$view_out"; then
+            echo "::error::Whether a release for '${TAG}' already exists could not be determined (gh release view exited ${view_rc}: ${view_out}). Refusing to publish on an unverified absence: proceeding would either create a duplicate release or resume on top of a live one."
+            exit 2
           fi
 
           resume=false

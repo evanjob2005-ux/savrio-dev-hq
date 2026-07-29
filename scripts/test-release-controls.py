@@ -66,6 +66,9 @@ def run_python(source, env, cwd=None):
 
 
 def run_bash(source, env, cwd):
+    # Extracted steps run real git against their cwd. Nothing may run against
+    # the Savrio Dev HQ working tree, which other agents edit concurrently.
+    assert_sandbox(cwd)
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False,
                                      encoding="utf-8", newline="\n") as handle:
         handle.write(source)
@@ -236,10 +239,15 @@ def verifier_case(src, label, response, expect_code, needle=None,
 SANDBOX_ROOT = os.path.realpath(tempfile.gettempdir())
 
 
-def git_sandbox(args, cwd):
+def assert_sandbox(cwd):
     real = os.path.realpath(cwd)
     if not real.startswith(SANDBOX_ROOT) or os.path.realpath(REPO) in real:
         raise SystemExit(f"refusing to run git outside the sandbox: {cwd}")
+    return real
+
+
+def git_sandbox(args, cwd):
+    assert_sandbox(cwd)
     env = dict(os.environ)
     env.update({
         "GIT_CEILING_DIRECTORIES": SANDBOX_ROOT,
@@ -256,6 +264,14 @@ def git_sandbox(args, cwd):
     return proc
 
 
+# The one string this workflow accepts as proof that a release is ABSENT
+# rather than unreachable. It is a contract with the `gh` CLI, not an
+# implementation detail of the workflow, so it is pinned in exactly one place
+# here: the stub emits it, and gh_cli_contract_cases() asserts that every
+# classification site in release.yml still greps for this same literal, and
+# that each site fails CLOSED when the wording changes.
+GH_NOT_FOUND = "release not found"
+
 GH_STUB = """#!/usr/bin/env bash
 echo "gh $*" >> "$GH_STUB_LOG"
 if [[ "$1 $2" == "release view" ]]; then
@@ -264,7 +280,7 @@ if [[ "$1 $2" == "release view" ]]; then
     exit 1
   fi
   [[ -f "$GH_STUB_DIR/release-$3" ]] && exit 0
-  echo "release not found" >&2
+  echo "${GH_STUB_VIEW_NOT_FOUND:-__GH_NOT_FOUND__}" >&2
   exit 1
 fi
 if [[ "$1 $2" == "release create" ]]; then
@@ -277,7 +293,27 @@ if [[ "$1 $2" == "release create" ]]; then
   exit 0
 fi
 exit 0
-"""
+""".replace("__GH_NOT_FOUND__", GH_NOT_FOUND)
+
+
+# Imported by the child interpreter that runs the extracted validate step.
+GH_PYTHON_SHIM = '''\
+import os
+import subprocess
+
+_STUB = os.environ["GH_STUB_SCRIPT"]
+_init = subprocess.Popen.__init__
+
+
+def _shimmed(self, args, *rest, **kwargs):
+    if (isinstance(args, (list, tuple)) and args
+            and os.path.basename(str(args[0])) in ("gh", "gh.exe")):
+        args = ["bash", _STUB, *[str(a) for a in args[1:]]]
+    _init(self, args, *rest, **kwargs)
+
+
+subprocess.Popen.__init__ = _shimmed
+'''
 
 
 def sandbox(tmp):
@@ -303,6 +339,21 @@ def sandbox(tmp):
         h.write(GH_STUB)
     os.chmod(os.path.join(bindir, "gh"), 0o755)
 
+    # PATH interception is enough for the bash steps: bash runs the
+    # extensionless stub directly. It is NOT enough for the validate step,
+    # which calls `subprocess.run(["gh", ...])` from Python -- Windows
+    # CreateProcess appends only `.exe`, so PATH would resolve straight past
+    # the stub to an installed gh.exe and the case would silently measure the
+    # developer's real GitHub account instead of the fixture. sitecustomize is
+    # the supported hook into the child interpreter; it rewrites only where the
+    # executable is found, never the arguments, output, or exit code that the
+    # step under test classifies. stub_saw() asserts it actually served.
+    shimdir = os.path.join(tmp, "pyshim")
+    os.makedirs(shimdir)
+    with open(os.path.join(shimdir, "sitecustomize.py"), "w",
+              encoding="utf-8") as h:
+        h.write(GH_PYTHON_SHIM)
+
     stubdir = os.path.join(tmp, "ghstate")
     os.makedirs(stubdir)
     runner_temp = os.path.join(tmp, "runnertemp")
@@ -310,6 +361,8 @@ def sandbox(tmp):
 
     env = {
         "PATH": bindir + os.pathsep + os.environ["PATH"],
+        "PYTHONPATH": shimdir,
+        "GH_STUB_SCRIPT": os.path.join(bindir, "gh"),
         "GH_STUB_DIR": stubdir,
         "GH_STUB_LOG": os.path.join(tmp, "gh.log"),
         "GH_TOKEN": "stub",
@@ -325,6 +378,18 @@ def remote_tags(origin, work):
     out = git_sandbox(["ls-remote", "--tags", "origin", "refs/tags/v*"], work)
     return sorted({line.split("refs/tags/")[1].replace("^{}", "")
                    for line in out.stdout.splitlines() if "refs/tags/" in line})
+
+
+def stub_saw(env, needle):
+    """True when the sandbox gh stub -- and not the installed gh -- served the
+    call. Without this a PATH resolution failure turns a case into a test of
+    the developer's real GitHub account, which fails for its own reasons and
+    reads as a pass."""
+    path = env["GH_STUB_LOG"]
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as h:
+        return needle in h.read()
 
 
 def step_outputs(env):
@@ -525,9 +590,311 @@ def tag_lifecycle_cases(doc, old_doc):
           f"only reruns of the same version")
 
 
+# --------------------------------------------------------------------------
+# MAJOR-3 / NBF-5: `gh release view` and `git ls-remote` are each ambiguous
+# between "the thing is absent" and "I could not ask". Both must fail CLOSED,
+# and must be distinguishable from a property violation (STD-CTRL-001 rule 5).
+#
+# release.yml calls `gh release view` at THREE sites: validate's resume
+# decision, publish's duplicate guard, and publish's rollback. All three are
+# exercised below, under the reachable arm and the unreachable arm, from
+# identical starting states.
+# --------------------------------------------------------------------------
+
+# Reported at the end so a probe that could not run is never silent.
+NOT_EVALUATED = []
+
+
+def gh_view_sites(text):
+    """The `gh release view` call sites and absence classifications in a
+    release.yml, read from the raw YAML text rather than from the parsed doc so
+    a site in any job or shell is seen."""
+    return {
+        "calls_bash": re.findall(r'gh release view "\$TAG"', text),
+        "calls_python": re.findall(r'\["gh", "release", "view", \w+\]', text),
+        "classify_bash": re.findall(r'grep -qi "([^"]+)" <<<"\$view_out"', text),
+        "classify_python": re.findall(r'if "([^"]+)" in detail\.lower\(\):',
+                                      text),
+        "bare_exit_code": re.findall(r'if gh release view ', text),
+    }
+
+
+def gh_cli_contract_cases(text, probe):
+    section("CLI CONTRACT  the string that means ABSENT is a contract with the "
+            "`gh` CLI, and every call site must depend on it identically")
+
+    sites = gh_view_sites(text)
+    n_calls = len(sites["calls_bash"]) + len(sites["calls_python"])
+    ok = n_calls == 3
+    RESULTS.append(ok)
+    print(f"  [{'ok  ' if ok else 'FAIL'}] release.yml calls `gh release view` "
+          f"at exactly {n_calls} site(s) (wanted 3: validate resume, publish "
+          f"duplicate guard, publish rollback) -- a fourth would be unproven")
+
+    classified = sites["classify_bash"] + sites["classify_python"]
+    ok = (len(classified) == 3
+          and all(c.lower() == GH_NOT_FOUND for c in classified))
+    RESULTS.append(ok)
+    print(f"  [{'ok  ' if ok else 'FAIL'}] all 3 sites classify absence on the "
+          f"same literal {GH_NOT_FOUND!r}; found {classified}")
+
+    ok = not sites["bare_exit_code"]
+    RESULTS.append(ok)
+    print(f"  [{'ok  ' if ok else 'FAIL'}] no site reads the bare exit code of "
+          f"`gh release view` as absence (found "
+          f"{len(sites['bare_exit_code'])} such site(s))")
+
+    # The three cases above pin the workflow to GH_NOT_FOUND, and GH_NOT_FOUND
+    # is what the stub emits -- so on its own that is a closed loop that would
+    # survive `gh` changing its wording. The loop is opened two ways: the drift
+    # cases below prove each site fails CLOSED if the wording changes, and this
+    # probe asks the installed CLI what it actually prints.
+    if not probe:
+        NOT_EVALUATED.append(
+            "live `gh` CLI contract probe: does the installed gh still print "
+            f"{GH_NOT_FOUND!r} for an absent release? (re-run with --gh-probe; "
+            "needs network and an authenticated gh)")
+        print(f"  [skip] live gh contract probe NOT RUN (hermetic by default; "
+              f"pass --gh-probe)")
+        return
+
+    absent = "v0.0.0-harness-probe-does-not-exist"
+    try:
+        proc = subprocess.run(["gh", "release", "view", absent], cwd=REPO,
+                              capture_output=True, text=True, timeout=60)
+        blob = (proc.stderr + proc.stdout).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        proc, blob = None, f"{type(exc).__name__}: {exc}"
+    if proc is not None and proc.returncode != 0 and GH_NOT_FOUND in blob.lower():
+        RESULTS.append(True)
+        print(f"  [ok  ] the installed gh still prints {GH_NOT_FOUND!r} for an "
+              f"absent release -> exit {proc.returncode}: "
+              f"{blob.splitlines()[0]}")
+    else:
+        NOT_EVALUATED.append(
+            f"live `gh` CLI contract probe did NOT confirm {GH_NOT_FOUND!r} "
+            f"(exit {getattr(proc, 'returncode', 'n/a')}: {blob[:200]}) -- this "
+            "is either an unauthenticated/offline gh or real contract drift; "
+            "check by hand")
+        print(f"  [????] live gh contract NOT CONFIRMED (exit "
+              f"{getattr(proc, 'returncode', 'n/a')}): {blob[:200]}")
+
+
+def gh_ambiguity_cases(doc, pre_doc):
+    """`gh release view` / `git ls-remote` ambiguity at every call site."""
+    validate_src = heredoc(step(doc, "validate",
+                                "Validate version, evidence, and target")["run"])
+    tagstate_src = step(doc, "publish", "Re-verify tag and release state")["run"]
+    create_src = step(doc, "publish",
+                      "Create annotated tag and GitHub release")["run"]
+    pre_validate_src = heredoc(step(pre_doc, "validate",
+                                    "Validate version, evidence, and target")["run"])
+    pre_tagstate_src = step(pre_doc, "publish",
+                            "Re-verify tag and release state")["run"]
+
+    def release_env(sha, tag="v1.2.0"):
+        return {"TAG": tag, "TITLE": f"Savrio Dev HQ {tag}", "VERSION": "1.2.0",
+                "TARGET_SHA": sha, "PRERELEASE": "false", "DRAFT": "false",
+                "CHANGELOG": "Fixed things.", "ROLLBACK": "Revert the tag."}
+
+    def validate_env(sha):
+        return {"VERSION": "1.2.0", "PRERELEASE_INPUT": "false", "TARGET": "",
+                "TITLE_INPUT": "", "CHANGELOG": "Fixed things.",
+                "ROLLBACK": "Revert the tag.", "ALLOW_NO_NEW_COMMITS": "false",
+                "HEAD_SHA": sha}
+
+    def run_validate(src, env, cwd):
+        # Same guarantee as run_bash: the extracted step runs real git, so its
+        # cwd is asserted to be a throwaway sandbox first.
+        assert_sandbox(cwd)
+        return run_python(src, env, cwd=cwd)
+
+    def resume_of(env):
+        return step_outputs(env).get("resume")
+
+    def expect_stub(env, label):
+        ok = stub_saw(env, "release view v1.2.0")
+        RESULTS.append(ok)
+        print(f"  [{'ok  ' if ok else 'FAIL'}] {label}: the case was served by "
+              f"the sandbox gh stub, not by an installed gh")
+
+    # ------------------------------------------------------------ MAJOR-3
+    section("MAJOR-3  an unreachable API must not be read as 'no release is "
+            "attached' -- publish duplicate guard and validate resume decision")
+
+    # publish duplicate guard / tag-state. Starting state for both arms: an
+    # orphaned annotated tag at the target, no release attached.
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_bash(tagstate_src, {**env, **release_env(sha)}, cwd=work)
+        ok = proc.returncode == 0 and resume_of(env) == "true"
+        RESULTS.append(ok)
+        print(f"  [{'ok  ' if ok else 'FAIL'}] null arm (tagstate): gh "
+              f"REACHABLE, release genuinely absent -> exit "
+              f"{proc.returncode}, resume={resume_of(env)}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_bash(tagstate_src,
+                        {**env, **release_env(sha), "GH_STUB_VIEW_ERRORS": "1"},
+                        cwd=work)
+        expect("KNOWN-BAD (tagstate): gh CANNOT REACH the API -> must not "
+               "proceed, and must not assert 'no release attached'",
+               proc, 2, "could not be determined")
+        leaked = "NO RELEASE ATTACHED" in (proc.stdout + proc.stderr).upper()
+        RESULTS.append(not leaked)
+        print(f"  [{'ok  ' if not leaked else 'FAIL'}] KNOWN-BAD (tagstate): "
+              f"no unverified 'no release attached' claim was emitted")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_bash(pre_tagstate_src,
+                        {**env, **release_env(sha), "GH_STUB_VIEW_ERRORS": "1"},
+                        cwd=work)
+        adopted = proc.returncode == 0 and resume_of(env) == "true"
+        RESULTS.append(adopted)
+        print(f"  [{'ok  ' if adopted else 'FAIL'}] BASELINE 65bdf2a "
+              f"(tagstate): the same unreachable API PASSED the guard -> exit "
+              f"{proc.returncode}, resume={resume_of(env)} "
+              f"(expected: defect confirmed real)")
+        for line in (proc.stdout + proc.stderr).splitlines():
+            if line.startswith("::"):
+                print(f"         | {line}")
+
+    # validate resume decision, same two arms, same starting state.
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_validate(validate_src, {**env, **validate_env(sha)}, work)
+        ok = proc.returncode == 0 and resume_of(env) == "true"
+        RESULTS.append(ok)
+        print(f"  [{'ok  ' if ok else 'FAIL'}] null arm (validate): gh "
+              f"REACHABLE, release genuinely absent -> exit "
+              f"{proc.returncode}, resume={resume_of(env)}")
+        expect_stub(env, "null arm (validate)")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_validate(validate_src,
+                            {**env, **validate_env(sha),
+                             "GH_STUB_VIEW_ERRORS": "1"}, work)
+        expect("KNOWN-BAD (validate): gh CANNOT REACH the API -> the tag must "
+               "not be adopted as a resumable partial release",
+               proc, 2, "whether a release is attached to it could not be "
+               "determined")
+        expect_stub(env, "KNOWN-BAD (validate)")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_validate(pre_validate_src,
+                            {**env, **validate_env(sha),
+                             "GH_STUB_VIEW_ERRORS": "1"}, work)
+        adopted = proc.returncode == 0 and resume_of(env) == "true"
+        RESULTS.append(adopted)
+        print(f"  [{'ok  ' if adopted else 'FAIL'}] BASELINE 65bdf2a "
+              f"(validate): the same unreachable API adopted the tag -> exit "
+              f"{proc.returncode}, resume={resume_of(env)} "
+              f"(expected: defect confirmed real)")
+        expect_stub(env, "BASELINE 65bdf2a (validate)")
+
+    # ------------------------------------------------- MINOR-2 contract drift
+    section("CLI CONTRACT DRIFT  if a future `gh` rewords its not-found "
+            "message, every site must fail CLOSED rather than fail open")
+
+    drift = {"GH_STUB_VIEW_NOT_FOUND": "no release could be found for that tag"}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_bash(tagstate_src, {**env, **release_env(sha), **drift},
+                        cwd=work)
+        expect("KNOWN-BAD (tagstate): gh reworded not-found -> could not "
+               "evaluate, not 'absent'", proc, 2, "could not be determined")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        push_annotated(work, "v1.2.0", sha)
+        proc = run_validate(validate_src,
+                            {**env, **validate_env(sha), **drift}, work)
+        expect("KNOWN-BAD (validate): gh reworded not-found -> could not "
+               "evaluate, not 'absent'", proc, 2,
+               "whether a release is attached to it could not be determined")
+        expect_stub(env, "KNOWN-BAD drift (validate)")
+
+    # The rollback site is deliberately asymmetric: ambiguity keeps the tag.
+    # Drift therefore shows up as a withheld rollback, not as an exit code.
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        e = {**env, **release_env(sha), "RESUME": "false",
+             "GH_STUB_CREATE_FAILS": "1"}
+        proc = run_bash(create_src, e, cwd=work)
+        tags = remote_tags(origin, work)
+        ok = proc.returncode != 0 and tags == []
+        RESULTS.append(ok)
+        print(f"  [{'ok  ' if ok else 'FAIL'}] null arm (rollback): current "
+              f"not-found wording -> tag rolled back, remote tags {tags}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        e = {**env, **release_env(sha), "RESUME": "false",
+             "GH_STUB_CREATE_FAILS": "1", **drift}
+        proc = run_bash(create_src, e, cwd=work)
+        tags = remote_tags(origin, work)
+        ok = proc.returncode != 0 and tags == ["v1.2.0"]
+        RESULTS.append(ok)
+        print(f"  [{'ok  ' if ok else 'FAIL'}] KNOWN-BAD (rollback): gh "
+              f"reworded not-found -> rollback WITHHELD, tag kept {tags} "
+              f"(ambiguity must never delete a tag)")
+
+    # -------------------------------------------------------------- NBF-5
+    section("NBF-5  `git ls-remote` failing to reach the remote must not read "
+            "as 'the tag does not exist there'")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        proc = run_validate(validate_src, {**env, **validate_env(sha)}, work)
+        ok = proc.returncode == 0 and resume_of(env) == "false"
+        RESULTS.append(ok)
+        print(f"  [{'ok  ' if ok else 'FAIL'}] null arm: remote REACHABLE and "
+              f"the tag genuinely absent there -> exit {proc.returncode}, "
+              f"resume={resume_of(env)}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        git_sandbox(["remote", "set-url", "origin",
+                     os.path.join(tmp, "gone.git")], work)
+        proc = run_validate(validate_src, {**env, **validate_env(sha)}, work)
+        expect("KNOWN-BAD: remote UNREACHABLE -> could not evaluate, not "
+               "'tag absent'", proc, 2, "exists on the remote")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, work, stub, env, sha = sandbox(tmp)
+        git_sandbox(["remote", "set-url", "origin",
+                     os.path.join(tmp, "gone.git")], work)
+        proc = run_validate(pre_validate_src, {**env, **validate_env(sha)},
+                            work)
+        fell_open = proc.returncode == 0 and resume_of(env) == "false"
+        RESULTS.append(fell_open)
+        print(f"  [{'ok  ' if fell_open else 'FAIL'}] BASELINE 65bdf2a: the "
+              f"unreachable remote read as 'no such tag' and validation "
+              f"PASSED -> exit {proc.returncode} "
+              f"(expected: defect confirmed real)")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", default="e318491")
+    parser.add_argument("--gh-baseline", default="65bdf2a",
+                        help="the commit that landed the release controls "
+                             "MAJOR-3 and NBF-5 were found against")
+    parser.add_argument("--gh-probe", action="store_true",
+                        help="additionally ask the installed `gh` what it "
+                             "really prints for an absent release (network)")
     args = parser.parse_args()
 
     doc, verify_src, publish_src, verify_env, publish_env = release_pieces()
@@ -838,9 +1205,22 @@ def main():
 
     tag_lifecycle_cases(doc, old_doc)
 
+    with open(RELEASE, encoding="utf-8") as handle:
+        release_text = handle.read()
+    gh_cli_contract_cases(release_text, args.gh_probe)
+
+    gh_blob = subprocess.run(
+        ["git", "show", f"{args.gh_baseline}:.github/workflows/release.yml"],
+        capture_output=True, text=True, cwd=REPO)
+    if gh_blob.returncode != 0:
+        raise SystemExit(f"could not read the {args.gh_baseline} blob")
+    gh_ambiguity_cases(doc, load(RELEASE, gh_blob.stdout))
+
     section("RESULT")
     bad = RESULTS.count(False)
     print(f"  {len(RESULTS) - bad}/{len(RESULTS)} expectations met")
+    for note in NOT_EVALUATED:
+        print(f"  NOT EVALUATED: {note}")
     return 1 if bad else 0
 
 
