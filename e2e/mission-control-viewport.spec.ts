@@ -81,6 +81,9 @@ test("produces no runtime errors beyond the deliberate production API block", as
   // returns for the whole Dev HQ surface in production. Everything else fails,
   // including a 5xx from a Dev HQ route -- the API being switched off must not
   // become cover for the API being broken.
+  const blockedDevHq = failedResponses.filter((entry) =>
+    entry.startsWith("403 /api/dev-hq/"),
+  );
   const unexpected = failedResponses.filter(
     (entry) => !entry.startsWith("403 /api/dev-hq/"),
   );
@@ -88,6 +91,16 @@ test("produces no runtime errors beyond the deliberate production API block", as
     unexpected,
     `HTTP failures outside the deliberately blocked Dev HQ surface:\n${unexpected.join("\n")}`,
   ).toEqual([]);
+
+  // Tolerating the 403 is not the same as requiring it. Without this line the
+  // assertion above is satisfied just as well by a boundary that has vanished:
+  // a reviewer stubbed proxy.ts to allow everything and this spec still passed.
+  // At least one Dev HQ request must have been refused for the run to mean
+  // anything about the boundary.
+  expect(
+    blockedDevHq.length,
+    "no /api/dev-hq/ request was refused with 403 -- either the page stopped calling the Dev HQ API, or proxy.ts stopped blocking it",
+  ).toBeGreaterThan(0);
 
   // Console errors that merely restate a tolerated 403 are expected; anything
   // else is the application reporting a genuine problem.
