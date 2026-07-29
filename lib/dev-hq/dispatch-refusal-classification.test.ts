@@ -72,6 +72,7 @@ describe("dispatch refusal classification (NBF-1)", () => {
   const originalToken = process.env.DEV_HQ_INTERNAL_TOKEN;
 
   beforeEach(() => {
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     resetDevHqStore();
     triggerMock.mockReset();
     triggerMock.mockResolvedValue({ id: "run-1" });
@@ -79,6 +80,7 @@ describe("dispatch refusal classification (NBF-1)", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (originalToken === undefined) {
       delete process.env.DEV_HQ_INTERNAL_TOKEN;
     } else {

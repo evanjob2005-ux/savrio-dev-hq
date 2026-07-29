@@ -13,6 +13,7 @@ import {
   UndispatchableRequestError,
   type DispatchAgentExecutionResult,
 } from "@/lib/dev-hq/agent-execution-service";
+import { getDevHqDeploymentMode } from "@/lib/dev-hq/deployment-mode";
 
 /**
  * A dispatch outcome the browser can act on.
@@ -40,14 +41,15 @@ export async function dispatchAgentExecutionAction(input: {
    */
   idempotencyKey?: string;
 }): Promise<DispatchActionResult> {
-  // Simulated agents are a development-only capability (ADR-0001 D4/D7), matching
-  // the prod-disabled internal dispatch route.
-  if (process.env.NODE_ENV === "production") {
+  // Phase 1 agents are deterministic simulations (ADR-0001 D4). ADR-0004 alone
+  // makes explicit local deployment mode the boundary: optimized local builds
+  // remain testable, while unset and unknown modes fail closed.
+  if (getDevHqDeploymentMode() !== "local") {
     // Rejected before any state could exist: definitively nothing to recover.
     return {
       ok: false,
       resolved: true,
-      error: "Agent dispatch is disabled in production.",
+      error: "Agent dispatch is disabled for this deployment.",
       executionId: null,
     };
   }

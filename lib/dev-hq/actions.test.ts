@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { triggerMock } = vi.hoisted(() => ({ triggerMock: vi.fn() }));
 
@@ -34,12 +34,104 @@ function seedTask(): Task {
   });
 }
 
+function agentAvailabilitySnapshot(): Array<[string, string]> {
+  return [...getDevHqStore().agents.values()]
+    .map((agent) => [agent.id, agent.availability] as [string, string])
+    .sort(([left], [right]) => left.localeCompare(right));
+}
+
 describe("dispatchAgentExecutionAction", () => {
   beforeEach(() => {
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     resetDevHqStore();
     triggerMock.mockReset();
     triggerMock.mockResolvedValue({ id: "run-1" });
   });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("allows dispatch in explicit local mode even in an optimized build", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const task = seedTask();
+
+    const outcome = await dispatchAgentExecutionAction({
+      taskId: task.id,
+      requiredCapabilities: ["validation"],
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(triggerMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["disabled", "disabled"],
+    ["production-like", "production"],
+    ["unknown", "internet"],
+    ["local-prefixed", "local-public"],
+    ["case-invalid", "LOCAL"],
+  ])(
+    "denies dispatch when deployment mode is %s before creating state",
+    async (_label, mode) => {
+      if (mode === undefined) {
+        delete process.env.DEV_HQ_DEPLOYMENT_MODE;
+      } else {
+        vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", mode);
+      }
+      const task = seedTask();
+      const eventsBefore = getDevHqStore().events.length;
+      const availabilityBefore = agentAvailabilitySnapshot();
+
+      const outcome = await dispatchAgentExecutionAction({
+        taskId: task.id,
+        requiredCapabilities: ["validation"],
+      });
+
+      expect(outcome).toEqual({
+        ok: false,
+        resolved: true,
+        error: "Agent dispatch is disabled for this deployment.",
+        executionId: null,
+      });
+      expect(triggerMock).not.toHaveBeenCalled();
+      expect(getDevHqStore().executions.size).toBe(0);
+      expect(getDevHqStore().agentAssignments.size).toBe(0);
+      expect(getDevHqStore().events.length).toBe(eventsBefore);
+      expect(agentAvailabilitySnapshot()).toEqual(availabilityBefore);
+    },
+  );
+
+  it.each([
+    ["unset", undefined],
+    ["disabled", "disabled"],
+  ])(
+    "applies %s deployment denial before empty-input validation",
+    async (_label, mode) => {
+      if (mode === undefined) {
+        delete process.env.DEV_HQ_DEPLOYMENT_MODE;
+      } else {
+        vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", mode);
+      }
+      const eventsBefore = getDevHqStore().events.length;
+      const availabilityBefore = agentAvailabilitySnapshot();
+
+      const outcome = await dispatchAgentExecutionAction({ taskId: "" });
+
+      expect(outcome).toEqual({
+        ok: false,
+        resolved: true,
+        error: "Agent dispatch is disabled for this deployment.",
+        executionId: null,
+      });
+      expect(triggerMock).not.toHaveBeenCalled();
+      expect(getDevHqStore().executions.size).toBe(0);
+      expect(getDevHqStore().agentAssignments.size).toBe(0);
+      expect(getDevHqStore().events.length).toBe(eventsBefore);
+      expect(agentAvailabilitySnapshot()).toEqual(availabilityBefore);
+    },
+  );
 
   it("dispatches and returns a success result", async () => {
     const task = seedTask();
