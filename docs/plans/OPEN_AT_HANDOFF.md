@@ -28,32 +28,29 @@ Twenty commits landed this session, `0d83525..86df84d`. Test count 417 → 771.
 
 ---
 
-## 0. UNCOMMITTED WORK IN THE TREE — read this first
+## 0. STATUS — all three third-round blockers are CLOSED
 
-`.github/workflows/security.yml` has **479 uncommitted insertions** from an agent
-working MAJOR-3 (the `looks_like_version_range` regression) and MAJOR-2 (the
-fourth `has_sensitive_name` bypass). The session ended before it reported.
+Superseded. This section previously flagged uncommitted scanner work; it landed
+and verified after that was written.
 
-**It is deliberately NOT committed.** No mutation marker is visible in the diff,
-but the agent never confirmed its own probes were reverted and never ran the
-control against the real tree. An unverified security control is exactly what
-this branch has spent twenty-three commits proving is worse than no change.
+| finding | closed by |
+|---|---|
+| MAJOR-1 · third path to two live executions | `2872d21` |
+| MAJOR-5 · focus test that passed without its fix | `5e1cc1e` |
+| MAJOR-2 / MAJOR-3 / MAJOR-4 · scanner regression, fourth bypass, unverified roots | `9326534` |
 
-Before doing anything with it:
-1. `git diff .github/workflows/security.yml` and read it in full.
-2. Extract the auditors with PyYAML and run them verbatim (the pattern used
-   throughout this branch — `unset SEMGREP_IN_DOCKER` first, or the scan
-   retargets to `/src` and the control measures nothing).
-3. Confirm the four MAJOR-3 rows below are all CAUGHT and the `js-tokens`
-   lockfile line is still clean.
-4. Re-run the reviewer's mutations from §2 MAJOR-4 and confirm each now FAILS.
+Sections 1 and 2 below are kept as the original finding text, because the
+finding is worth reading next to what was done about it. **Everything in them is
+now closed.** Section 3 — the Founder decisions — is what is actually left.
 
-If it does not verify, `git checkout -- .github/workflows/security.yml` and start
-from the finding text below. HEAD is clean and correct without it.
+One thing §1 got wrong is worth keeping visible: the MAJOR-3 evidence table in
+this document originally spelled literal secret-shaped assignments, which turned
+the credential scanner red on the document describing the scanner. It is now
+written as shapes rather than literals.
 
 ---
 
-## 1. BLOCKING before merge — found by third-round review, NOT fixed
+## 1. Third-round blockers — CLOSED, original finding text retained
 
 Three agents were mid-work on these when the session ended. No partial work
 survives; the tree is byte-identical to `86df84d`.
