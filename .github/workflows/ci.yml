@@ -234,6 +234,16 @@ jobs:
       - name: Install PyYAML
         run: python -m pip install --disable-pip-version-check "pyyaml==6.0.2"
 
+      # The Master Roadmap's registration record attests to a SHA-256 of the
+      # roadmap body. That hash is the record's entire authority, and nothing
+      # otherwise prevents it going stale: edit the body, forget the hash, and
+      # the record silently attests to a document that no longer exists.
+      #
+      # Exits 2 rather than 1 when the file cannot be parsed, so a structural
+      # failure is never reported as a passing check.
+      - name: Verify the roadmap matches its registered hash
+        run: python scripts/roadmap-conversion/verify-registered-hash.py
+
       - name: Validate YAML and JSON syntax
         run: |
           set -euo pipefail

@@ -64,7 +64,13 @@ test("produces no runtime errors beyond the deliberate production API block", as
   });
 
   await page.goto("/");
-  await page.waitForLoadState("networkidle");
+
+  // Web-first assertion instead of waitForLoadState("networkidle"). Playwright
+  // discourages networkidle, and Mission Control polls every 3 seconds, so
+  // "the network went quiet" is a property this page never durably has. It
+  // passed only because the blocked API returns 403 instantly. Waiting on a
+  // rendered landmark waits for the thing actually being asserted.
+  await expect(page.getByRole("banner")).toBeVisible();
 
   // An uncaught exception is never expected, regardless of API availability.
   expect(pageErrors, `uncaught page errors:\n${pageErrors.join("\n")}`).toEqual(
@@ -96,7 +102,7 @@ test("produces no runtime errors beyond the deliberate production API block", as
 
 test("does not scroll horizontally at this viewport", async ({ page }) => {
   await page.goto("/");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("banner")).toBeVisible();
 
   // Runs at both projects. A Founder-facing operational view that scrolls
   // sideways on a phone does not satisfy the Mission Control gate, and this is

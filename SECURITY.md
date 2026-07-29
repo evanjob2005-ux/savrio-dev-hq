@@ -61,6 +61,44 @@ Never commit:
 
 Sensitive information belongs in secure secret management systems.
 
+## Automated credential scanning
+
+The `Credential and Artifact Audit` job in `.github/workflows/security.yml`
+scans every tracked file on each push and pull request. It runs high-confidence
+rules for private key blocks and AWS, Google, Slack and GitHub token shapes, plus
+a generic rule that flags any 16-or-more character quoted value assigned to a
+name containing `secret`, `token`, `password`, `passwd`, or `api_key`. A separate
+rule covers unquoted `.env`-style assignments and credentials embedded in URLs.
+
+The generic rule judges the **value**, not the file. Test files are scanned like
+everything else, because a real staging password pasted into a spec file is a
+real leak. A value is exempt only if it announces itself as a fixture — a
+`test-`, `fake_`, `example.`, `mock-` or similar prefix **and** a shape that
+looks synthetic: lowercase, no unusual symbols, no long opaque segment, no
+hex-like blob. `test-internal-token` is exempt; `test-account-Xy9$kL2mQp` is not.
+
+## Suppressing a false positive
+
+When the scanner flags a value that is genuinely not a credential, **suppress
+that line — do not edit the scanner.** Add the pragma on the flagged line or the
+line directly above it:
+
+```ts
+// scanner:allow-secret documented fixture for the token-rotation test
+const TOKEN = "aaaaaaaaaaaaaaaaaaaa";
+```
+
+The reason is not optional. This exists because the alternative — widening a
+regex to clear one false positive — has already caused a real defect here: an
+earlier change disabled the generic rule for all test files to silence two
+fixtures, and independent review demonstrated four real credentials that then
+passed undetected. A pragma keeps every suppression a reviewable line in a diff
+with an author attached; a regex edit silently weakens the rule for everyone.
+
+If you find yourself adding several pragmas to the same file, that is a signal
+the values belong in a fixture module or an environment variable, not that the
+rule is wrong.
+
 ---
 
 # Environment Variables

@@ -112,7 +112,9 @@ jobs:
           # STRIPE_SK are common and were not matched by the shorter alternation.
           ENV_ASSIGNMENT = re.compile(
               r"(?im)^[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD|PASS|DSN"
-              r"|CRED|AUTH|SK)[A-Z0-9_]*\s*=\s*(\S{16,})\s*$")
+              r"|CRED|AUTH|SK|SIGNING|WEBHOOK|BEARER|SESSION|SALT"
+              r"|PRIVATE|ACCESS|REFRESH|APIKEY|PWD)[A-Z0-9_]*"
+              r"\s*=\s*(\S{16,})\s*$")
 
           # URL-shaped variables are not name-matched, because most are public
           # endpoints. What matters is an embedded credential, so match the

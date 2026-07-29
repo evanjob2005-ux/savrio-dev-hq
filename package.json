@@ -80,6 +80,7 @@
     },
     "eslint-plugin-react": {
       "minimatch": "^10.2.6"
-    }
+    },
+    "@opentelemetry/core": "^2.8.0"
   }
 }
