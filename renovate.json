@@ -33,7 +33,7 @@
     "schedule": [
       "at any time"
     ],
-    "prPriority": 10
+    "description": "Security advisories bypass the weekly schedule. prPriority was removed: Renovate accepts it only in packageRules, and placing it here produced a config warning on every run while having no effect."
   },
   "packageRules": [
     {
@@ -119,15 +119,14 @@
       "minimumReleaseAge": "3 days"
     },
     {
-      "description": "Surface any override update distinctly. Renovate raises override floors automatically but never proposes removing an entry, so overrides accumulate by default. A labelled pull request is the prompt to check whether the entry is still needed at all -- see the removal rule in package.json's //overrides note.",
+      "description": "Label override updates so their accumulation stays visible. This rule deliberately sets NO groupName. packageRules are applied in order and later rules win, so a groupName here overrode the parent groups defined above and split postcss, sharp and tar into a standalone pull request -- the exact separation those parent groups exist to prevent. Grouping belongs to the parent rules; this rule only labels.",
       "matchDepTypes": [
         "overrides"
       ],
       "labels": [
         "dependencies",
         "override"
-      ],
-      "groupName": "dependency overrides"
+      ]
     }
   ]
 }
