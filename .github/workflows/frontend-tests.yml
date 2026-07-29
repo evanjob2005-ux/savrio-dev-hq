@@ -68,7 +68,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version: "24"
           # The only cache in this workflow. The action keys it on the
           # lockfile, and npm ci still validates against that lockfile, so a
           # stale cache cannot survive into an install.
@@ -207,7 +207,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Pin npm to the version that generated the lockfile
