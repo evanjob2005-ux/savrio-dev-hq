@@ -76,9 +76,61 @@ jobs:
           # its shape. Filtering by file kind was tried and was wrong: risk is a
           # property of the value, not of the file it sits in, and *.spec.ts is
           # exactly where a real staging credential gets pasted.
+          #
+          # The NAME is captured whole and judged in Python rather than being
+          # spelled as one alternation. The previous pattern placed the keyword
+          # immediately before the assignment operator, which silently required
+          # the name to END with it: SECRET_KEY, STRIPE_SECRET_KEY and
+          # SUPABASE_SERVICE_ROLE_KEY all passed while API_SECRET was caught,
+          # for the same values. Both examples SECURITY.md itself gives were
+          # undetected. Matching a bare "key" as a substring instead is not an
+          # option either -- it hits `monkey` and `keyboard` -- so the name is
+          # split into words and each word is checked exactly.
           GENERIC_SECRET = re.compile(
-              r"(?i)(?:secret|password|passwd|api[_-]?key|token)"
-              r"\s*[:=]\s*['\"]([^'\"\s]{16,})['\"]")
+              r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]{0,63})"
+              r"\s*[:=]\s*['\"](?P<value>[^'\"\s]{16,})['\"]")
+
+          ALWAYS_SENSITIVE = {
+              "secret", "secrets", "password", "passwords", "passwd", "pwd",
+              "token", "tokens", "apikey", "apikeys",
+              "credential", "credentials",
+          }
+
+          # "key" on its own is NOT treated as sensitive. It is one of the most
+          # common words in this codebase in entirely innocent roles -- React's
+          # `key` prop, `idempotencyKey`, PENDING_DISPATCH_STORAGE_KEY -- and a
+          # rule that flags all of them is a rule that gets muted, which is the
+          # failure mode this repository has already been burned by. It counts
+          # only when the name also carries a word that makes it a credential
+          # rather than a lookup key, which is what distinguishes
+          # SUPABASE_SERVICE_ROLE_KEY and API_KEY from idempotencyKey.
+          KEY_WORDS = {"key", "keys"}
+          KEY_QUALIFIERS = {
+              "api", "private", "signing", "sign", "encryption", "encrypt",
+              "access", "auth", "service", "role", "master", "session",
+              "refresh", "bearer", "webhook", "publishable",
+          }
+
+          # A name saying it holds a HEADER holds a header name, not a value.
+          # DEV_HQ_INTERNAL_TOKEN_HEADER is "x-dev-hq-internal-token": the
+          # wire name of the header the real token travels in.
+          NAME_ONLY_WORDS = {"header", "headers"}
+
+          def _identifier_words(name):
+              """Split an identifier into lowercase words on _, -, ., $ and
+              camelCase boundaries, so API_KEY, apiKey and serviceRoleKey all
+              yield a standalone "key" while monkey and keyboard do not."""
+              spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+              return [word.lower() for word in re.split(r"[_$.\-]+", spaced)
+                      if word]
+
+          def has_sensitive_name(name):
+              words = set(_identifier_words(name))
+              if words & NAME_ONLY_WORDS:
+                  return False
+              if words & ALWAYS_SENSITIVE:
+                  return True
+              return bool(words & KEY_WORDS) and bool(words & KEY_QUALIFIERS)
 
           # A value is treated as a fixture only if it announces itself as one.
           # Anything that does not is reported, in every file, including tests.
@@ -137,13 +189,16 @@ jobs:
                   previous = lines[line_no - 1] if line_no > 0 else ""
                   if ALLOW_PRAGMA in line or ALLOW_PRAGMA in previous:
                       continue
-                  out.append(match.group(1))
+                  # GENERIC_SECRET names its groups; the env patterns still put
+                  # the value in group 1.
+                  out.append(match.groupdict().get("value") or match.group(1))
               return out
 
           def generic_secret_hits(text):
               return _unsuppressed(text, [
                   m for m in GENERIC_SECRET.finditer(text)
-                  if not looks_synthetic(m.group(1))])
+                  if has_sensitive_name(m.group("name"))
+                  and not looks_synthetic(m.group("value"))])
 
           def env_secret_hits(text):
               matches = [m for m in ENV_ASSIGNMENT.finditer(text)
@@ -158,6 +213,13 @@ jobs:
               ("Google API key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
               ("Slack token", re.compile(r"xox[baprs]-[0-9A-Za-z-]{10,}")),
               ("GitHub token", re.compile(r"gh[pousr]_[0-9A-Za-z]{36,}")),
+              # Stripe live keys had no rule at all, so a live key was
+              # undetected end to end: the high-confidence rules did not know
+              # the shape, and the generic rule could not see STRIPE_SECRET_KEY
+              # because of the name-must-end-with-keyword defect above. Live
+              # only -- test keys are not credentials.
+              ("Stripe live secret key",
+               re.compile(r"(?:s|r)" + r"k_live_" + r"[0-9A-Za-z]{16,}")),
           ]
 
           # A template suffix is recognised wherever it appears at the end of the
@@ -286,12 +348,35 @@ jobs:
           # action reference, so every external action -- first-party actions
           # included -- must be pinned to a 40-character SHA.
           SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-          # Contexts an attacker can influence via a pull request. Interpolating
-          # them directly into a run script (rather than passing through env)
-          # enables command injection.
+          # Contexts an attacker can influence, taken from GitHub's documented
+          # list of untrusted input. Interpolating any of these directly into a
+          # run script or an action input -- rather than binding it to an env
+          # var and referencing that var -- enables command injection.
+          #
+          # head_commit.message is the push-trigger vector and matters most
+          # here: five of this repository's seven workflows trigger on push.
+          # The previous pattern covered pull-request contexts only, so the
+          # single most reachable vector in this repository was the one it
+          # could not see.
+          UNTRUSTED_CONTEXTS = (
+              r"head_ref",
+              r"event\.head_commit\.message",
+              r"event\.head_commit\.author\.(?:name|email)",
+              r"event\.commits\[[^\]]*\]\.message",
+              r"event\.commits\[[^\]]*\]\.author\.(?:name|email)",
+              r"event\.pull_request\.(?:title|body)",
+              r"event\.pull_request\.head\.(?:ref|label)",
+              r"event\.pull_request\.head\.repo\.(?:description|homepage)",
+              r"event\.issue\.(?:title|body)",
+              r"event\.discussion\.(?:title|body)",
+              r"event\.comment\.body",
+              r"event\.review\.body",
+              r"event\.review_comment\.body",
+              r"event\.workflow_run\.(?:head_branch|display_title)",
+              r"event\.inputs\.[A-Za-z0-9_-]+",
+          )
           INJECTABLE = re.compile(
-              r"\$\{\{\s*github\.(event\.(pull_request\.(title|body)"
-              r"|issue\.(title|body)|comment\.body|review\.body)|head_ref)")
+              r"\$\{\{\s*github\.(?:" + "|".join(UNTRUSTED_CONTEXTS) + r")")
 
           def iter_uses(document):
               """Yield every action reference: step-level and job-level
@@ -309,16 +394,38 @@ jobs:
                       if isinstance(step, dict) and isinstance(step.get("uses"), str):
                           yield step["uses"]
 
-          def iter_run(document):
+          def iter_injectable_sites(document):
+              """Yield (location, text) for every place a workflow interpolates
+              a context into something that executes: `run:` scripts and `with:`
+              inputs.
+
+              `with:` is included because actions/github-script evaluates its
+              `script` input directly, and many actions pass their inputs
+              straight into a shell. Scanning `run:` alone left that entire
+              class unguarded.
+
+              Step `env:` is deliberately NOT scanned. That is the safe sink
+              this control exists to steer people towards, and flagging it
+              would punish the correct pattern."""
               jobs = document.get("jobs") or {}
               if not isinstance(jobs, dict):
                   return
-              for job in jobs.values():
+              for job_id, job in jobs.items():
                   if not isinstance(job, dict):
                       continue
-                  for step in job.get("steps") or []:
-                      if isinstance(step, dict) and isinstance(step.get("run"), str):
-                          yield step["run"]
+                  for index, step in enumerate(job.get("steps") or []):
+                      if not isinstance(step, dict):
+                          continue
+                      label = step.get("name") or f"step {index + 1}"
+                      if isinstance(step.get("run"), str):
+                          yield f"job '{job_id}' / {label} / run", step["run"]
+                      with_inputs = step.get("with")
+                      if isinstance(with_inputs, dict):
+                          for key, value in with_inputs.items():
+                              if isinstance(value, str):
+                                  yield (
+                                      f"job '{job_id}' / {label} / with.{key}",
+                                      value)
 
           errors = []
           warnings = []
@@ -345,9 +452,26 @@ jobs:
 
               perms = data.get("permissions")
               if perms == "write-all":
-                  errors.append(f"{path}: grants permissions: write-all.")
+                  errors.append(
+                      f"{path}: grants permissions: write-all at the workflow level.")
               if perms is None:
                   warnings.append(f"{path}: no top-level permissions declared.")
+
+              # A job-level permissions block REPLACES the workflow-level one
+              # rather than intersecting with it, so a single job can escalate
+              # past a read-only top level. Auditing the workflow level alone
+              # left that escalation entirely invisible -- and a job-level block
+              # is the more plausible way for one to reach review unnoticed,
+              # because the reassuring `contents: read` stays right at the top
+              # of the file where a reader looks for it.
+              workflow_jobs = data.get("jobs") or {}
+              if isinstance(workflow_jobs, dict):
+                  for job_id, job in workflow_jobs.items():
+                      if not isinstance(job, dict):
+                          continue
+                      if job.get("permissions") == "write-all":
+                          errors.append(
+                              f"{path}: job '{job_id}' grants permissions: write-all.")
 
               # Structural scan avoids matching pattern strings that appear
               # inside run scripts (such as this auditor itself).
@@ -363,11 +487,13 @@ jobs:
                           f"{path}: action '{ref}' must be pinned to a full 40-character "
                           "commit SHA (the only immutable GitHub action reference).")
 
-              for run in iter_run(data):
-                  match = INJECTABLE.search(run)
+              for location, text in iter_injectable_sites(data):
+                  match = INJECTABLE.search(text)
                   if match:
                       errors.append(
-                          f"{path}: untrusted context used directly in a run script: {match.group(0)}")
+                          f"{path}: {location}: untrusted context interpolated "
+                          f"directly: {match.group(0)}. Bind it to an env var and "
+                          "reference that var instead.")
 
           for message in warnings:
               print(f"::warning::{message}")
@@ -428,12 +554,25 @@ jobs:
           set -euo pipefail
           control="$(mktemp -d)"
           internal="$control/app/api/dev-hq/internal"
-          mkdir -p "$internal/discarded" "$internal/arrow" "$internal/sync" "$control/lib/dev-hq"
+          mkdir -p "$internal/discarded" "$internal/arrow" "$internal/sync" \
+                   "$internal/nextrequest" "$internal/twoparam" \
+                   "$internal/guardafter" "$internal/compliant" \
+                   "$control/lib/dev-hq"
 
           cp .semgrep/fixtures/route-guard-result-discarded.ts "$internal/discarded/route.ts"
           cp .semgrep/fixtures/route-arrow-no-guard.ts         "$internal/arrow/route.ts"
           cp .semgrep/fixtures/route-sync-no-guard.ts          "$internal/sync/route.ts"
+          cp .semgrep/fixtures/route-nextrequest-no-guard.ts   "$internal/nextrequest/route.ts"
+          cp .semgrep/fixtures/route-two-param-no-guard.ts     "$internal/twoparam/route.ts"
+          cp .semgrep/fixtures/route-guard-after-write.ts      "$internal/guardafter/route.ts"
           cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
+          cp .semgrep/fixtures/token-renamed.ts                "$control/lib/dev-hq/token-renamed.ts"
+          cp .semgrep/fixtures/token-env-aliased.ts            "$control/lib/dev-hq/token-env-aliased.ts"
+
+          # NULL ARM. These two are correct and must produce no finding.
+          cp .semgrep/fixtures/compliant-route.ts              "$internal/compliant/route.ts"
+          cp .semgrep/fixtures/compliant-env-reader.ts         "$control/lib/dev-hq/compliant-env-reader.ts"
+
           cp -r .semgrep "$control/.semgrep"
 
           cd "$control"
@@ -447,35 +586,81 @@ jobs:
           import json
           import sys
 
+          GUARD = "dev-hq-internal-route-missing-guard"
+          TOKEN = "dev-hq-internal-token-verified-outside-guard"
+
           EXPECTED = {
-              ("app/api/dev-hq/internal/discarded/route.ts",
-               "dev-hq-internal-route-missing-guard"),
-              ("app/api/dev-hq/internal/arrow/route.ts",
-               "dev-hq-internal-route-missing-guard"),
-              ("app/api/dev-hq/internal/sync/route.ts",
-               "dev-hq-internal-route-missing-guard"),
-              ("lib/dev-hq/token-destructured.ts",
-               "dev-hq-internal-token-verified-outside-guard"),
+              ("app/api/dev-hq/internal/discarded/route.ts", GUARD),
+              ("app/api/dev-hq/internal/arrow/route.ts", GUARD),
+              ("app/api/dev-hq/internal/sync/route.ts", GUARD),
+              ("app/api/dev-hq/internal/nextrequest/route.ts", GUARD),
+              ("app/api/dev-hq/internal/twoparam/route.ts", GUARD),
+              ("app/api/dev-hq/internal/guardafter/route.ts", GUARD),
+              ("lib/dev-hq/token-destructured.ts", TOKEN),
+              ("lib/dev-hq/token-renamed.ts", TOKEN),
+              ("lib/dev-hq/token-env-aliased.ts", TOKEN),
+          }
+
+          # NULL ARM. These files are correct, sit in the same scanned tree as
+          # the known-bad ones, and must produce NO finding.
+          #
+          # Without this, the control asserted only "the rules still fire on
+          # bad input" -- which a rule mutated to fire on EVERYTHING also
+          # satisfies. The known-bad set alone cannot distinguish a working rule
+          # from one that has been widened into noise, and a rule that flags
+          # every handler gets muted, which is how a gate stops gating.
+          CLEAN = {
+              "app/api/dev-hq/internal/compliant/route.ts",
+              "lib/dev-hq/compliant-env-reader.ts",
           }
 
           results = json.load(open("findings.json"))["results"]
           actual = {(r["path"].lstrip("./"), r["check_id"].split(".")[-1])
                     for r in results}
 
+          failed = False
+
           missing = EXPECTED - actual
           for path, rule in sorted(missing):
               print(f"::error::Rule '{rule}' no longer detects {path}")
           if missing:
+              failed = True
               print(f"Positive control FAILED: {len(missing)} of "
                     f"{len(EXPECTED)} known-bad fixtures undetected.")
               print("A defect class these rules are supposed to catch is now invisible.")
+
+          # Any finding at all against a compliant fixture is a false positive,
+          # and any finding against a path in neither set means the control's
+          # model of the tree has drifted from the tree.
+          spurious = {(p, r) for p, r in actual if p in CLEAN}
+          for path, rule in sorted(spurious):
+              print(f"::error::Rule '{rule}' fires on COMPLIANT fixture {path}")
+          if spurious:
+              failed = True
+              print("Null arm FAILED: a rule matches correct code. A rule that "
+                    "flags compliant handlers gets muted, and a muted rule "
+                    "enforces nothing.")
+
+          unaccounted = actual - EXPECTED - spurious
+          for path, rule in sorted(unaccounted):
+              print(f"::error::Unexpected finding '{rule}' at {path}")
+          if unaccounted:
+              failed = True
+              print("Positive control FAILED: findings outside both the "
+                    "known-bad and the compliant set. Update this control to "
+                    "match the fixtures rather than ignoring the difference.")
+
+          if failed:
               print(f"Actually detected: {sorted(actual)}")
               sys.exit(1)
 
-          print(f"Positive control passed: all {len(EXPECTED)} fixture/rule "
-                f"pairs detected.")
+          print(f"Positive control passed: all {len(EXPECTED)} known-bad "
+                f"fixture/rule pairs detected, and all {len(CLEAN)} compliant "
+                f"fixtures clean.")
           for path, rule in sorted(EXPECTED):
-              print(f"  {rule} -> {path}")
+              print(f"  RED   {rule} -> {path}")
+          for path in sorted(CLEAN):
+              print(f"  GREEN no finding -> {path}")
           CONTROL
 
       - name: Scan with Dev HQ boundary rules

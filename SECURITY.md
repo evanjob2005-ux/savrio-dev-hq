@@ -65,10 +65,34 @@ Sensitive information belongs in secure secret management systems.
 
 The `Credential and Artifact Audit` job in `.github/workflows/security.yml`
 scans every tracked file on each push and pull request. It runs high-confidence
-rules for private key blocks and AWS, Google, Slack and GitHub token shapes, plus
-a generic rule that flags any 16-or-more character quoted value assigned to a
-name containing `secret`, `token`, `password`, `passwd`, or `api_key`. A separate
-rule covers unquoted `.env`-style assignments and credentials embedded in URLs.
+rules for private key blocks and AWS, Google, Slack, GitHub and Stripe live-key
+shapes, plus the generic rule described below. A separate rule covers unquoted
+`.env`-style assignments and credentials embedded in URLs.
+
+### What the generic rule matches
+
+It flags any 16-or-more character quoted value assigned to a **sensitive name**.
+The name is split into words on `_`, `-`, `.` and camelCase boundaries, and is
+sensitive when:
+
+- any word is `secret`, `token`, `password`, `passwd`, `pwd`, `apikey` or
+  `credential` (plurals included); or
+- any word is `key` **and** another word qualifies it as a credential rather
+  than a lookup key: `api`, `private`, `signing`, `access`, `auth`, `service`,
+  `role`, `master`, `session`, `refresh`, `bearer`, `webhook`, `encryption`,
+  `publishable`.
+
+Matching is by whole word, not substring, so `monkey` and `keyboard` do not
+count as `key`. `API_KEY`, `STRIPE_SECRET_KEY` and `SUPABASE_SERVICE_ROLE_KEY`
+are all matched.
+
+`key` deliberately does **not** count on its own. React's `key` prop,
+`idempotencyKey` and `PENDING_DISPATCH_STORAGE_KEY` are ordinary identifiers,
+and a rule that flagged every one of them would be muted rather than obeyed.
+
+A name whose words include `header` is exempt, because it holds a header name
+rather than a value: `DEV_HQ_INTERNAL_TOKEN_HEADER` is the wire header name
+`x-dev-hq-internal-token`, not a token.
 
 The generic rule judges the **value**, not the file. Test files are scanned like
 everything else, because a real staging password pasted into a spec file is a
