@@ -12,7 +12,7 @@
 // GET /api/dev-hq/state.
 
 import { useEffect, useMemo, useState } from "react";
-import { Panel, StatusDot } from "@/components/ui/primitives";
+import { Panel, ScrollRegion, StatusDot } from "@/components/ui/primitives";
 import { DataSourceBadge } from "@/components/mission-control/DataSourceBadge";
 import {
   AVAILABILITY_STATUS,
@@ -236,9 +236,10 @@ export function DispatchAgentPanel() {
           {/*
             ADR-0001 O3's frozen Phase 1 capability vocabulary, mirrored here
             because importing lib/dev-hq/constants would pull next/server into the
-            client bundle. `dispatch-capabilities.test.ts` asserts this list stays
-            identical to AGENT_CAPABILITIES, so the UI can never offer a capability
-            no seeded agent can satisfy.
+            client bundle. `dispatch-capabilities.test.tsx` renders this panel and
+            reads the offered values back out of the DOM through the input's
+            `list` binding, so the UI can never offer a capability no seeded agent
+            can satisfy — and never lose the binding while keeping the literal.
           */}
           <datalist id="dispatch-capabilities">
             {["routing", "sequencing", "escalation", "implementation", "review", "corrections", "qa", "accessibility", "gates", "validation"].map(
@@ -382,21 +383,28 @@ export function DispatchAgentPanel() {
               run reports back.
             </p>
           ) : (
-            <ul className="savrio-scroll mt-1.5 flex max-h-[220px] flex-col gap-1.5 overflow-y-auto" role="list">
-              {dispatchedEvidence.map((evidence) => (
-                <li
-                  key={evidence.id}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2"
-                >
-                  <span className="block text-[11.5px] font-medium text-[var(--text)]">
-                    {evidence.label}
-                  </span>
-                  <p className="mt-0.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-[var(--text-dim)]">
-                    {evidence.summary}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <ScrollRegion
+              label={`Evidence for execution ${dispatchedExecution.id}, ${
+                dispatchedEvidence.length
+              } item${dispatchedEvidence.length === 1 ? "" : "s"}`}
+              className="mt-1.5 max-h-[220px] overflow-y-auto"
+            >
+              <ul className="flex flex-col gap-1.5" role="list">
+                {dispatchedEvidence.map((evidence) => (
+                  <li
+                    key={evidence.id}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2"
+                  >
+                    <span className="block text-[11.5px] font-medium text-[var(--text)]">
+                      {evidence.label}
+                    </span>
+                    <p className="mt-0.5 whitespace-pre-wrap break-words text-[10.5px] leading-snug text-[var(--text-dim)]">
+                      {evidence.summary}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </ScrollRegion>
           )}
         </div>
       ) : null}

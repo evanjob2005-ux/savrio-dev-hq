@@ -1,7 +1,7 @@
 import type { AgentId } from "@/types/workflow";
 import { AGENT_ORDER, AGENTS } from "@/lib/workflow/config";
 import type { AgentRuntimeStatus } from "@/lib/workflow/machine";
-import { Avatar, StatusDot } from "@/components/ui/primitives";
+import { Avatar, ScrollRegion, StatusDot } from "@/components/ui/primitives";
 import { COLORS } from "@/lib/theme";
 
 const TONE_COLOR: Record<AgentRuntimeStatus["tone"], string> = {
@@ -21,7 +21,10 @@ export function AgentStatusRail({
       className="border-b border-[var(--border)] bg-[var(--surface-1)]/40"
       aria-label="Agent status"
     >
-      <div className="savrio-scroll flex gap-2 overflow-x-auto px-5 py-3">
+      <ScrollRegion
+        label="Agent status cards, scroll horizontally"
+        className="flex gap-2 overflow-x-auto px-5 py-3"
+      >
         {AGENT_ORDER.map((id) => {
           const agent = AGENTS[id];
           const status = statuses[id];
@@ -51,7 +54,7 @@ export function AgentStatusRail({
             </div>
           );
         })}
-      </div>
+      </ScrollRegion>
     </section>
   );
 }

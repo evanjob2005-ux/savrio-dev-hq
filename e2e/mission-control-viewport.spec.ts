@@ -118,9 +118,10 @@ test("does not scroll horizontally at this viewport", async ({ page }) => {
   await expect(page.getByRole("banner")).toBeVisible();
 
   // Runs at both projects. A Founder-facing operational view that scrolls
-  // sideways on a phone does not satisfy the Mission Control gate, and this is
-  // the assertion that distinguishes "renders on mobile" from "usable on
-  // mobile".
+  // sideways on a phone does not satisfy the Mission Control gate. Scope: under
+  // this build proxy.ts 403s the whole Dev HQ surface and
+  // MissionControlOverview.tsx:94 returns the loading placeholder, so what this
+  // measures is the shell, not the populated view. See OBL-11.
   const overflowsHorizontally = await page.evaluate(() => {
     const root = document.documentElement;
     // One pixel of tolerance absorbs sub-pixel layout rounding, which varies

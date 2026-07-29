@@ -44,6 +44,48 @@ export function Panel({
   );
 }
 
+/**
+ * A region that scrolls its own overflow, made operable without a pointer.
+ *
+ * WCAG 2.1 SC 2.1.1 (Keyboard, Level A): a scroll container holding no
+ * focusable descendant cannot be reached or scrolled by keyboard at all, so
+ * everything past its first screenful is simply unavailable — in the audit
+ * trail's case, every run record past 520px.
+ *
+ * `tabIndex` alone would fix the scrolling and create a second problem: an
+ * unlabelled, roleless stop in the tab order that a screen reader announces as
+ * nothing. Hence the required `label` and the explicit role.
+ *
+ * `role="group"` rather than `role="region"` is deliberate. `region` is a
+ * landmark; five landmarks named after scroll containers would bury the page's
+ * actual landmarks in the rotor. `group` carries an accessible name just the
+ * same and is not a landmark.
+ *
+ * The wrapper exists so list semantics survive: putting the role on the `<ul>`
+ * itself would replace `role="list"` and cost screen-reader users the item
+ * count.
+ */
+export function ScrollRegion({
+  label,
+  className = "",
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      tabIndex={0}
+      role="group"
+      aria-label={label}
+      className={`savrio-scroll outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function StatusDot({
   color,
   pulse = false,
