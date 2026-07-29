@@ -37,8 +37,8 @@ Markdown tables, and bold/italic runs became `**`/`_`.
   *Founder-supplied insertion* below.
 - Word's rendering of typographic quotes and dashes is preserved as authored.
 - Current SHA-256 (roadmap body only, excluding this registration record), including the
-  kernel preamble insertion and amendments A-1 through A-5:
-  `983337aa05675f838c01f5b14afe0688b707206e20887092f1466dfa18110a18`
+  kernel preamble insertion and amendments A-1 through A-7:
+  `1a9ae310590eda46cae3a9c9280304e53939f835acdfaa628f0d589b151b63dc`
 - SHA-256 after the kernel preamble insertion, before the amendments:
   `d7893199946724d07c58d3b66343d37808890cc595093afde0143bfd32b0bf41`
 - SHA-256 of the body **as mechanically converted**, before any change:
@@ -66,7 +66,7 @@ They were inserted verbatim. After insertion, Section 23 matches the Founder-sup
 
 The Founder directed that the roadmap be edited to flow more cleanly toward the intended end
 state, on the explicit basis that **the roadmap's timing was a guess** and that **models will
-converge in capability, so roles must go to whichever performs best.** Five amendments were
+converge in capability, so roles must go to whichever performs best.** Seven amendments were
 made. Each is an edit to Founder-supplied text and is listed here in full so the delta from the
 `.docx` is never in doubt.
 
@@ -77,6 +77,15 @@ made. Each is an edit to Founder-supplied text and is listed here in full so the
 | A-3 | §9 Phase 1 Exit Gates | Added a lead-in defining how a gate is passed, and a **Proof** line to each of the six gates naming an executable check. A document asserting a gate was met is explicitly not a proof. |
 | A-4 | §19 Agent Organization | Added *Role Assignment and Model Promotion*: roles are capability contracts, any model may hold any role it can pass, promotion is by measured evidence on a versioned evaluation set, and independence is a property of instance and context rather than vendor. |
 | A-5 | §19 role table, §Agent status template | Renamed the `claude-design` role to `design-engineer`. A role named after a vendor is a role assigned to that vendor by default, which is exactly the binding A-4 exists to remove. Renamed repository-wide alongside `v0-engineer` → `ui-prototyping-engineer`. Historical evidence records still carry the former names and were deliberately left unedited. |
+| A-6 | §9 Phase 1 Exit Gates | Added three requirements to *How a gate is passed*: a proof must be demonstrated capable of failing; a proof asserting that something causes failure requires a null arm; and controls are tested from the baseline they will run against, not the builder's working state. |
+| A-7 | §8 Review, Verification, and Autonomous Revision Loops | Added *Reviewing Work That Enforces*: review of a control requires re-derivation rather than re-reading, the author does not write its only negative controls, acceptance evidence is the failing transcript, and a green result is more suspect when the thing under test is itself a check. |
+
+A-6 and A-7 were added after three separate controls built in a single day were each found
+hollow by independent review: an audit exception list keyed on package rather than advisory,
+a workflow verifier that reported success when it had compared nothing, and the mutation
+harness written to prevent exactly that, whose cases passed for free because they ran against
+an already-modified tree. Each was caught by a reviewer re-deriving and missed by every check
+the author ran. The amendments record the mechanism rather than the incidents.
 
 A-2 edits text the Founder supplied verbatim earlier the same day. It was made deliberately:
 the kernel is read before every response, so a vendor name inside it would harden into a fixed
@@ -85,9 +94,9 @@ implementation from independent review is preserved exactly; only the binding of
 named products is removed.
 
 **Consequence for provenance:** the repository file and the source `.docx` now differ by the
-kernel preamble insertion and amendments A-1 through A-5, and by nothing else. Until the
+kernel preamble insertion and amendments A-1 through A-7, and by nothing else. Until the
 Founder re-saves the `.docx`, the general rule below — that the `.docx` governs — is suspended
-for those six deltas, where this file governs. Everything else in this document remains a
+for those eight deltas, where this file governs. Everything else in this document remains a
 verbatim conversion of the source.
 
 ### Conversion verification — performed for this registration
@@ -688,6 +697,35 @@ Quality is a workflow property. Reviews are tied to a named stable candidate and
 - Documentation, ADRs, runbooks, migration guidance, and Current Progress Update are correct.
 - The correct commit, merge, deployment, and durable completion record exist.
 
+## Reviewing Work That Enforces
+
+Review of a control — a gate, a scanner, a rule, a verifier, anything whose purpose is to fail
+when something is wrong — carries a requirement ordinary review does not.
+
+**The reviewer re-derives; the reviewer does not re-read.** Reading a control and finding its
+logic sound establishes almost nothing, because the defect in a hollow control is never visible
+in its logic. It is in what the logic is applied to, what it silently skips, and what it treats
+as absence of evidence. The reviewer must construct inputs the control claims to catch and run
+them: write mutations, inject a finding, delete the reference the check compares against, and
+observe what the control actually reports.
+
+Every control this organization has found hollow was approved by a reader and exposed by a
+re-deriver. That is a property of the failure mode, not of any individual reviewer's care.
+
+**The author of a control does not write its only negative controls.** An author's mutations
+test the failure modes the author already imagined, which are by construction the ones the
+control already handles. This is the single most load-bearing rule here, because it is the only
+one that still works when the author is confident and wrong.
+
+**Acceptance evidence for a control is the failing transcript, not the passing one.** Ask to see
+it go red on a known-bad input before accepting that it goes green on a good one. A control that
+cannot be shown failing has not been shown to work.
+
+**Treat a green result with more suspicion when the thing under test is itself a check.** For
+ordinary code, green means the code did what was asked. For a control, green is also exactly
+what a control that does nothing produces. The two are indistinguishable without the evidence
+above.
+
 # 9. Phase 1 Autonomous-Readiness and Exit Gates
 
 **How a gate is passed.** Every gate below carries a **Proof** line. A gate is passed when its
@@ -696,6 +734,25 @@ query can return. A gate is **not** passed by a document asserting that it was m
 reports may summarise a proof, cite it, and record its result, but they are never the proof
 itself, because a document cannot fail when the system behind it regresses. If a gate has no
 executable proof, the gate is not ready to be claimed; define the proof first.
+
+**A proof must be demonstrated capable of failing.** An executable check that cannot go red is
+indistinguishable from no check, and looks identical to a working one, because both report
+success. So a green result is not evidence that a proof works — it is evidence only that the
+proof ran. Before a proof is accepted, it must be shown failing on a known-bad input, and that
+failing transcript is part of the gate's evidence alongside the passing one.
+
+**Where a proof asserts that something causes failure, it requires a null arm.** A suite that
+claims "this fails when X is present" must also assert "this passes when X is absent," from an
+identical starting state. Without that control, a failure attributed to X may have been caused
+by the starting state, and the suite will report success while measuring nothing. Every
+control this organization has built and later found hollow failed exactly here — the check was
+run, it was green or red as expected, and nothing established that the expected result was
+caused by the thing under test.
+
+**Controls are tested from the baseline they will run against**, not from the working state of
+whoever is building them. A check that will run against the default branch in continuous
+integration is verified against the default branch. Measuring from a state that already
+differs is how a null result and a real result become impossible to tell apart.
 
 ### Engineering execution gate
 

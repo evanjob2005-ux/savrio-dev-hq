@@ -55,14 +55,49 @@ def die(reason):
     sys.exit(2)
 
 
+# Keys that decide whether a job runs at all, and under what authority. These
+# are NOT step fields, and omitting them was a real hole: `if: false` on a job
+# disables every step inside it while step and guard counts stay identical.
+JOB_FIELDS = ("if", "runs-on", "needs", "permissions", "strategy", "environment",
+              "container", "services", "timeout-minutes", "defaults", "concurrency")
+
+# Workflow-level keys. Removing a `pull_request:` trigger stops a gate running
+# on the event it exists for; widening `permissions:` is a security regression.
+# Neither touches a single step.
+WORKFLOW_FIELDS = ("on", True, "permissions", "concurrency", "env", "defaults")
+
+
+def shape_of(doc, source):
+    """Every field that decides what a workflow does, flattened for comparison."""
+    if not isinstance(doc, dict):
+        die(f"{source} did not parse as a mapping")
+
+    rows = []
+    # PyYAML parses the bare key `on:` as boolean True, so both are collected.
+    for field in WORKFLOW_FIELDS:
+        label = "on" if field is True else field
+        rows.append(("<workflow>", -1, f"workflow:{label}", doc.get(field)))
+
+    for job_name, job in (doc.get("jobs") or {}).items():
+        job = job or {}
+        for field in JOB_FIELDS:
+            rows.append((job_name, -1, f"job:{field}", job.get(field)))
+        for index, step in enumerate(job.get("steps", []) or []):
+            step = step or {}
+            for field in STEP_FIELDS:
+                rows.append((job_name, index, f"step:{field}", step.get(field)))
+    return rows
+
+
 def steps_of(doc, source):
+    """Step records only — used for the step and guard counts in the summary."""
     if not isinstance(doc, dict):
         die(f"{source} did not parse as a mapping")
     rows = []
     for job_name, job in (doc.get("jobs") or {}).items():
-        for index, step in enumerate(job.get("steps", []) or []):
+        for index, step in enumerate((job or {}).get("steps", []) or []):
             rows.append((job_name, index,
-                         {f: step.get(f) for f in STEP_FIELDS}))
+                         {f: (step or {}).get(f) for f in STEP_FIELDS}))
     return rows
 
 
@@ -103,20 +138,25 @@ def main():
 
         gb = sum(1 for _, _, s in before if s["if"])
         ga = sum(1 for _, _, s in after if s["if"])
-        same_shape = len(before) == len(after) and gb == ga
+
+        # Compared as keyed sets rather than by position, so inserting one step
+        # reports one change instead of misaligning every step after it.
+        shape_before = dict(((j, i, f), v)
+                            for j, i, f, v in shape_of(yaml.safe_load(raw), name))
+        with open(f"{WORKFLOW_DIR}/{name}", encoding="utf-8") as handle:
+            shape_after = dict(((j, i, f), v)
+                               for j, i, f, v in shape_of(yaml.safe_load(handle), name))
 
         details = []
-        for (bj, bi, bs), (aj, ai, as_) in zip(before, after):
-            if bj != aj:
-                details.append(f"    step {bi}: job {bj!r} -> {aj!r} (reordered or renamed)")
+        for key in sorted(set(shape_before) | set(shape_after), key=str):
+            job, index, field = key
+            was, now = shape_before.get(key, "<absent>"), shape_after.get(key, "<absent>")
+            if was == now:
                 continue
-            for field in STEP_FIELDS:
-                if bs[field] != as_[field]:
-                    details.append(
-                        f"    {bj} step[{bi}] {bs['name']!r}: {field} "
-                        f"{bs[field]!r} -> {as_[field]!r}")
+            where = f"{job} step[{index}]" if index >= 0 else job
+            details.append(f"    {where} {field}: {was!r} -> {now!r}")
 
-        ok = same_shape and not details
+        ok = not details and len(before) == len(after) and gb == ga
         problems += 0 if ok else max(1, len(details))
         print(f"{name:26s} {len(before):>4d}->{len(after):<5d} {gb:>4d}->{ga:<5d}   "
               f"{'ok' if ok else '*** CHANGED ***'}")

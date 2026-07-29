@@ -27,12 +27,36 @@ def run_in(root, *args):
 
 
 def scratch(tmp):
-    """A worktree-free copy: .git plus the files the verifier reads."""
+    """A copy whose workflows are RESTORED TO BASE before any mutation.
+
+    This restore is the whole reason the harness is worth running. The previous
+    version copied the working tree, which on any branch that touches a workflow
+    already differs from base -- so the verifier exited non-zero before a single
+    mutation was applied, and every case asserting failure passed for free.
+    Replacing all ten mutations with `pass` still produced eight passes.
+
+    Starting from base makes each case measure its own mutation. See
+    standards/CONTROL_VERIFICATION_STANDARD.md rules 2 and 3.
+    """
     dest = pathlib.Path(tmp) / "repo"
     dest.mkdir()
     shutil.copytree(".git", dest / ".git", symlinks=True)
     shutil.copytree(".github/workflows", dest / ".github/workflows")
     shutil.copytree("scripts", dest / "scripts")
+
+    listing = subprocess.run(
+        ["git", "ls-tree", "--name-only", f"{BASE}:.github/workflows"],
+        cwd=dest, capture_output=True)
+    names = [n for n in listing.stdout.decode("utf-8").split("\n") if n.strip()]
+    if not names:
+        raise SystemExit(f"FATAL: cannot list workflows at {BASE}; harness would be vacuous")
+    for name in names:
+        blob = subprocess.run(["git", "show", f"{BASE}:.github/workflows/{name}"],
+                              cwd=dest, capture_output=True)
+        (dest / ".github/workflows" / name).write_bytes(blob.stdout)
+    for extra in (dest / ".github/workflows").glob("*.y*ml"):
+        if extra.name not in names:
+            extra.unlink()
     return dest
 
 
@@ -53,23 +77,12 @@ def case(label, expect):
     return wrap
 
 
-@case("baseline: workflows restored to base (must PASS)", 0)
+@case("NULL ARM: no mutation applied (must PASS)", 0)
 def _(root):
-    # Deliberately restore the base workflows rather than using the working
-    # tree as-is. This verifier is a tripwire asserting "nothing changed since
-    # base", so on a branch that legitimately changes a workflow the working
-    # tree SHOULD fail -- that is the tool working, not a defect. The baseline
-    # case has to establish that it reports success when there is genuinely
-    # nothing to report, which requires an unmodified tree to compare.
-    listing = subprocess.run(
-        ["git", "ls-tree", "--name-only", f"{BASE}:.github/workflows"],
-        cwd=root, capture_output=True)
-    for name in listing.stdout.decode("utf-8").split("\n"):
-        if not name.strip():
-            continue
-        blob = subprocess.run(["git", "show", f"{BASE}:.github/workflows/{name}"],
-                              cwd=root, capture_output=True)
-        (root / ".github/workflows" / name).write_bytes(blob.stdout)
+    # Rule 2. Without this case, every "must FAIL" case below could be passing
+    # because of the starting state rather than because of its mutation. This
+    # arm is what makes the others mean anything.
+    pass
 
 
 @case("delete an `if:` guard (the original defect)", 1)
@@ -82,8 +95,7 @@ def _(root):
 
 @case("alter a `run:` command", 1)
 def _(root):
-    edit(root, "ci.yml", "npm install --global npm@11.16.0",
-         "npm install --global npm@10.0.0")
+    edit(root, "ci.yml", "run: npm ci", "run: npm install")
 
 
 @case("change a pinned action SHA", 1)
@@ -94,7 +106,7 @@ def _(root):
 
 @case("change a `with:` input (node-version)", 1)
 def _(root):
-    edit(root, "ci.yml", 'node-version: "24"', 'node-version: "18"')
+    edit(root, "ci.yml", 'node-version: "22"', 'node-version: "18"')
 
 
 @case("rename a step", 1)
@@ -128,6 +140,53 @@ def _(root):
 @case("workflow file deleted", 1)
 def _(root):
     (root / ".github/workflows/lint.yml").unlink()
+
+
+@case("RESTORED: reorder two steps", 1)
+def _(root):
+    # Dropped from the previous matrix. The old verifier MISSED this, because
+    # two swapped steps with identical `if` values look identical to a
+    # positional comparison of `if` alone.
+    p = root / ".github/workflows/ci.yml"
+    s = p.read_text(encoding="utf-8")
+    a = "      - name: Detect unresolved merge conflict markers\n"
+    b = "      - name: Detect trailing whitespace\n"
+    assert a in s and b in s
+    s = s.replace(a, "@@SWAP@@").replace(b, a).replace("@@SWAP@@", b)
+    p.write_text(s, encoding="utf-8", newline="")
+
+
+@case("RESTORED: rename a job", 1)
+def _(root):
+    edit(root, "ci.yml", "  application-validation:", "  application-validation-renamed:")
+
+
+@case("job-level `if: false` disables a whole job", 1)
+def _(root):
+    # Strictly worse than the original guard-deletion defect: one line disables
+    # lint, type-check, build and the npm pin together, and both step count and
+    # guard count stay identical.
+    edit(root, "ci.yml",
+         "  application-validation:\n",
+         "  application-validation:\n    if: false\n")
+
+
+@case("remove the pull_request trigger", 1)
+def _(root):
+    edit(root, "ci.yml",
+         "  pull_request:\n    branches:\n      - main\n",
+         "  pull_request_DISABLED:\n    branches:\n      - main\n")
+
+
+@case("escalate workflow permissions", 1)
+def _(root):
+    edit(root, "ci.yml", "permissions:\n  contents: read",
+         "permissions:\n  contents: write")
+
+
+@case("change runs-on to a self-hosted runner", 1)
+def _(root):
+    edit(root, "ci.yml", "runs-on: ubuntu-latest", "runs-on: self-hosted", count=1)
 
 
 def main():

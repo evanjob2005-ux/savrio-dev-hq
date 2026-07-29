@@ -173,6 +173,32 @@ Testing should reflect the risk level of the change.
 
 ---
 
+# Reviewing Controls
+
+A **control** is anything whose purpose is to fail when something is wrong: a gate, a scanner,
+a lint rule, a structural verifier, a policy check.
+
+Controls require a different review than ordinary code, because a control that cannot fail is
+indistinguishable from a working one — both report success. A green result proves the control
+ran, not that it works.
+
+When reviewing a control:
+
+- **Ask to see it fail.** The acceptance evidence is a failing transcript on a known-bad input.
+  A passing run is secondary and cannot substitute.
+- **Re-derive rather than re-read.** Construct inputs the control claims to catch and run them.
+  The defect in a hollow control is never visible in its logic — it is in what the logic is
+  applied to and what it silently skips.
+- **Check for a null arm.** A suite claiming "this fails when X" must also prove "this passes
+  when not-X" from an identical starting state, or the failure may be caused by the starting
+  state rather than by X.
+- **Do not accept the author's negative controls as sufficient.** They test the failure modes
+  the author already imagined, which are the ones the control already handles.
+
+Full requirements: `standards/CONTROL_VERIFICATION_STANDARD.md`.
+
+---
+
 # Documentation Review
 
 Verify documentation updates for:
