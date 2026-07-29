@@ -3,7 +3,6 @@
 
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
 import {
-  EVENT_BUFFER_SIZE,
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_REQUEST_WORKFLOW_ID,
 } from "@/lib/dev-hq/constants";
@@ -298,7 +297,6 @@ export function appendEvent(event: Event, dedupeKey?: string): Event {
     store.eventKeys.set(dedupeKey, event);
   }
   store.events.unshift(event);
-  store.events = store.events.slice(0, EVENT_BUFFER_SIZE);
   return event;
 }
 

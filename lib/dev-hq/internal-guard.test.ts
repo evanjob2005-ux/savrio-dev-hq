@@ -29,8 +29,9 @@ afterEach(() => {
 });
 
 describe("rejectInternalDevRequest", () => {
-  it("blocks production outright, before any token is considered", async () => {
+  it("blocks an optimized deployment not explicitly marked local", async () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "disabled");
     // Deliberately supply a *correct* token. Production must not be reachable
     // by holding the right credential -- the route is off, not protected.
     vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "correct-horse-battery-staple");
@@ -45,8 +46,40 @@ describe("rejectInternalDevRequest", () => {
     expect(response?.status).toBe(403);
   });
 
+  it.each(["", "internet"])(
+    "blocks development with an absent or invalid deployment mode (%j), even with the correct token",
+    (mode) => {
+      vi.stubEnv("NODE_ENV", "development");
+      vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", mode);
+      vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "expected-token");
+
+      const response = rejectInternalDevRequest(
+        withRequest({
+          [DEV_HQ_INTERNAL_TOKEN_HEADER]: "expected-token",
+        }),
+      );
+
+      expect(response?.status).toBe(403);
+    },
+  );
+
+  it("allows an optimized local deployment with the correct token", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
+    vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "expected-token");
+
+    expect(
+      rejectInternalDevRequest(
+        withRequest({
+          [DEV_HQ_INTERNAL_TOKEN_HEADER]: "expected-token",
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("fails closed when the token is not configured", async () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "");
 
     const response = rejectInternalDevRequest(withRequest());
@@ -61,6 +94,7 @@ describe("rejectInternalDevRequest", () => {
 
   it("rejects a mismatched token", async () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "expected-token");
 
     const response = rejectInternalDevRequest(
@@ -73,6 +107,7 @@ describe("rejectInternalDevRequest", () => {
 
   it("rejects a missing token header even when one is configured", async () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "expected-token");
 
     const response = rejectInternalDevRequest(withRequest());
@@ -83,6 +118,7 @@ describe("rejectInternalDevRequest", () => {
 
   it("allows exactly one case: development, configured, and matching", () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "expected-token");
 
     const response = rejectInternalDevRequest(
@@ -94,6 +130,7 @@ describe("rejectInternalDevRequest", () => {
 
   it("does not accept a token that merely shares a prefix", () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
     vi.stubEnv("DEV_HQ_INTERNAL_TOKEN", "expected-token");
 
     // Guards against a future rewrite to startsWith/includes comparison, which

@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
+import { getDevHqDeploymentMode } from "@/lib/dev-hq/deployment-mode";
 
 export const DEV_HQ_INTERNAL_TOKEN_HEADER = "x-dev-hq-internal-token";
 
 /**
  * Guards Trigger.dev worker callbacks into /api/dev-hq/internal/*.
- * Blocked in production. Requires DEV_HQ_INTERNAL_TOKEN, and fails closed when
- * it is not configured so the callbacks are never unauthenticated by default.
+ * Optimized builds require an explicit local deployment mode. Every mode
+ * requires DEV_HQ_INTERNAL_TOKEN and fails closed when it is not configured.
  */
 export function rejectInternalDevRequest(
   request: Request,
 ): NextResponse | null {
-  if (process.env.NODE_ENV === "production") {
+  if (getDevHqDeploymentMode() !== "local") {
     return NextResponse.json(
-      { error: "Internal Dev HQ routes are disabled in production." },
+      { error: "Internal Dev HQ routes are disabled for this deployment." },
       { status: 403 },
     );
   }

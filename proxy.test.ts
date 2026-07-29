@@ -20,6 +20,7 @@ afterEach(() => {
 describe("proxy", () => {
   it("blocks the Dev HQ surface in production", () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "");
 
     const response = proxy();
 
@@ -28,12 +29,27 @@ describe("proxy", () => {
 
   it("allows the Dev HQ surface outside production", () => {
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
 
     const response = proxy();
 
     // NextResponse.next() is signalled by the internal rewrite header rather
     // than by status alone, so assert the status is not the block.
     expect(response.status).not.toBe(403);
+  });
+
+  it("allows an optimized local build when the deployment mode says local", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "local");
+
+    expect(proxy().status).not.toBe(403);
+  });
+
+  it("fails closed outside an optimized build when the mode is absent or invalid", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DEV_HQ_DEPLOYMENT_MODE", "internet");
+
+    expect(proxy().status).toBe(403);
   });
 
   it("covers every Dev HQ route, not merely the ones that exist today", () => {

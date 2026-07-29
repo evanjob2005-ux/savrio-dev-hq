@@ -866,6 +866,14 @@ Recorded so that a later reader does not mistake omission for oversight.
   them”** for the eight decisions in `OPEN_AT_HANDOFF.md` section 3 and ADR-0003
   recorded the superseding decision. This closure update changes no other
   register item.
+- **ADR-number collision recorded 2026-07-29:** central planning reserved
+  ADR-0003 for deployment/persistence/transport/auth on 2026-07-26. The
+  lifecycle ADR approved on 2026-07-29 later used that already-reserved number
+  by mistake. The error is recorded, not hidden; because the lifecycle ADR is
+  now an approved immutable record, it cannot be retroactively renumbered to
+  make the chronology look clean. The later Founder-authorized, partial
+  runtime-boundary decision therefore uses the next unused identifier,
+  ADR-0004.
 - **Contradictions resolved: 1 (X-29).** **X-24 is an exception in kind
   and not in status:** its *factual* question is settled by command output under §1.4, but the
   entry is **not closed** — under register rule 4 the Director of Operations must record the

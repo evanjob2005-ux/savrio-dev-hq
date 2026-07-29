@@ -1175,7 +1175,7 @@ describe("agent execution service", () => {
       });
     }
 
-    it("does not recreate a terminal event evicted from the buffer", async () => {
+    it("does not recreate a terminal event after more than 200 later events", async () => {
       const task = seedTask();
       const dispatched = await dispatchAgentExecution({
         taskId: task.id,
@@ -1198,18 +1198,17 @@ describe("agent execution service", () => {
         ),
       ).toHaveLength(1);
 
-      // The original entries age out of the ring entirely.
       await floodEventRing();
-      expect(await executionEvents(executionId)).toHaveLength(0);
+      const retained = await executionEvents(executionId);
+      expect(retained.length).toBeGreaterThan(0);
 
       await handleExecutionReclaim();
       await handleExecutionReclaim();
 
-      // Reconciliation must not resurrect a transition it can no longer see.
-      expect(await executionEvents(executionId)).toHaveLength(0);
+      expect(await executionEvents(executionId)).toEqual(retained);
     });
 
-    it("does not recreate retry events evicted from the buffer", async () => {
+    it("does not recreate retry events after more than 200 later events", async () => {
       const task = seedTask();
       const dispatched = await dispatchAgentExecution({
         taskId: task.id,
@@ -1235,10 +1234,11 @@ describe("agent execution service", () => {
       ).toHaveLength(2);
 
       await floodEventRing();
+      const retained = await executionEvents(executionId);
       await handleExecutionReclaim();
       await handleExecutionReclaim();
 
-      expect(await executionEvents(executionId)).toHaveLength(0);
+      expect(await executionEvents(executionId)).toEqual(retained);
     });
 
     it("still records each transition once when nothing has been evicted", async () => {

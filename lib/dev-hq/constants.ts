@@ -199,10 +199,8 @@ export const REVIEW_EVENT_TYPE = {
 } as const;
 
 /**
- * How many events the in-memory timeline retains. The feed cannot serve more
- * than this, which is why it is also the upper bound the events endpoint
- * accepts: a caller asking for more is asking for something the store can never
- * answer, and answering it anyway would under-deliver silently.
+ * Maximum page size accepted by the event feed. This bounds one response; it
+ * does not bound the append-only audit timeline itself.
  */
 export const EVENT_BUFFER_SIZE = 200;
 

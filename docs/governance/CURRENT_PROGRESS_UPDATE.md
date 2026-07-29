@@ -464,7 +464,7 @@ records that work appeared against an unsettled specification.
 
 | Blocker | State |
 |---|---|
-| **D-2 / Q-1** — deployment, persistence, transport, auth ADR (ADR-0003) | **OPEN — not authored.** Blocks all Track B phases B–E |
+| **D-2 / Q-1** — deployment, persistence, transport, auth decision (ADR-0004) | **PARTIAL — authored but intentionally incomplete.** Explicit local-only deployment mode and append-only audit retention are decided. Persistence, transport, and Founder authentication remain undecided and continue to block production Track B phases. The earlier central assignment of ADR-0003 collided with the already-approved lifecycle ADR-0003; ADR immutability forbids retroactive renumbering, so the current Founder-authorized runtime record uses the next unused number. |
 | **D-6** — new dependencies (auth, web-push, jsdom) | **OPEN** |
 | **D-7** — HTTPS hosting | **OPEN** |
 | **D-8** — missing handbooks and standards | **OPEN.** A gate cannot certify against a standard that does not exist |
@@ -564,7 +564,7 @@ CPU-001 exists to make visible rather than to smooth over.
 
 ## 8.2 Blocking Track B
 
-D-2/Q-1 (ADR-0003), D-6, D-7, D-8, D-9, and absent frontend test infrastructure — §5.2.
+D-2/Q-1 (partial ADR-0004), D-6, D-7, D-8, D-9, and absent frontend test infrastructure — §5.2.
 
 ## 8.3 Blocking the governance baseline
 
@@ -639,7 +639,7 @@ answered from the record rather than from memory.
 
 ## 9.3 Blocking Track B
 
-D-2/Q-1 (ADR-0003), D-6, D-7, D-8, D-9, plus Q-3, Q-4, Q-6, Q-7, Q-8 in the Mission Control
+D-2/Q-1 (partial ADR-0004), D-6, D-7, D-8, D-9, plus Q-3, Q-4, Q-6, Q-7, Q-8 in the Mission Control
 Lite plan.
 
 ## 9.4 Founder decisions already recorded
@@ -650,7 +650,7 @@ Lite plan.
 | **Permanent review order** | ICR → Architecture Review → Founder Approval → Protected Baseline | `PHASE_2_PROGRAM_PLAN.md:120-124`, dated 2026-07-26 |
 | **ICR verdict vocabulary** | `PASS · PASS WITH NON-BLOCKING FINDINGS · FAIL` | `PHASE_2_PROGRAM_PLAN.md:140-149`, dated 2026-07-26 |
 | **Shared severity ladder** | `BLOCKER · MAJOR · MINOR · OBSERVATION` | `PHASE_2_PROGRAM_PLAN.md:151-163`, dated 2026-07-26 |
-| **ADR-0003 numbering** | Assigned centrally to deployment/persistence/transport/auth | `PHASE_2_PROGRAM_PLAN.md` §0.6 context; Entry Package §6 |
+| **ADR-0003 numbering** | Historically assigned centrally to deployment/persistence/transport/auth, but that assignment collided with an already-approved immutable lifecycle ADR-0003. The collision is recorded rather than “fixed” by renumbering the approved ADR; the later partial runtime decision is ADR-0004. | `PHASE_2_PROGRAM_PLAN.md` §0.6 context; Entry Package §6; ADR-0003; ADR-0004 |
 | **Phase 2 excluded from Sprint 1F** | Standing direction | Entry Package §3 |
 | **RAT-5 record-only** | Founder direction; **contested by the plan** — see F-A2 | Entry Package §19 Conflict 4 |
 | **Governance authorities must not be permanently waived** | This packaging pass | Founder direction, 2026-07-26 |

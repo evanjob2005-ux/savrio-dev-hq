@@ -192,7 +192,7 @@ disposition.
 | **OBL-30** | Wiring `verify-workflow-structure.py` into CI. Still runs nowhere. |
 | **OBL-37** | **RATIFIED / CLOSED IN BATCH 1.** `claimTask` is removed from `TaskRepository` and the development adapter; ADR-0003 requires any future replacement to use coordinated lifecycle preconditions. |
 | **OBL-38** | **RATIFIED / CLOSED IN BATCH 1.** `reviewPolicy: none` completes on success; `basic`/`full` complete only after a passed review; changes-requested/escalated and stale older results do not complete. |
-| **§6** | ARCH-10, `proxy.ts` NODE_ENV, ARCH-03, ARCH-06, ARCH-07, SVC-05, SVC-06 — all verified untouched by both architecture reviews. |
+| **§6** | **PARTIAL.** ADR-0004 closes the `proxy.ts` `NODE_ENV` conflation with an explicit default-deny local mode and corrects ARCH-07's 200-event audit loss. ARCH-10, ARCH-03, ARCH-06, SVC-05, and SVC-06 remain open: no coordinated durable backend or Founder authentication system is selected/provisioned, and retaining every event increases unbounded memory plus repeated O(n log n) reads. |
 
 ---
 

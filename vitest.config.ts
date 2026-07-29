@@ -24,6 +24,7 @@ export default defineConfig({
           // on the .spec.ts suffix alone, so an E2E file named .test.ts is
           // collected by neither runner instead of by both.
           exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
+          setupFiles: ["./test/setup-node.ts"],
           clearMocks: true,
           restoreMocks: true,
         },
