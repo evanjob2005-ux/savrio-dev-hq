@@ -17,12 +17,18 @@ rules:
     languages: [typescript]
     severity: ERROR
     message: >-
-      This internal Dev HQ route handler does not call rejectInternalDevRequest().
+      This internal Dev HQ route handler does not ENFORCE rejectInternalDevRequest().
       Routes under app/api/dev-hq/internal/ are Trigger.dev worker callbacks: they
       must be blocked in production and token-authenticated in development. A
       handler without the guard is an unauthenticated write path into the
-      execution pipeline. Call rejectInternalDevRequest(request) as the first
-      statement and return its result when non-null.
+      execution pipeline. Bind rejectInternalDevRequest(request) as the FIRST
+      statement of the body, and return its result on the VERY NEXT statement:
+
+        const rejected = rejectInternalDevRequest(request);
+        if (rejected) return rejected;
+
+      Anything between those two lines runs before the request has been
+      authenticated, so calling the guard there is not enforcing it.
     paths:
       include:
         # Anchored per Semgrepignore v2 / gitignore semantics. Unanchored
@@ -34,64 +40,87 @@ rules:
       # accepts all four shapes; matching only `export async function` left
       # three ways to write an unguarded handler that this rule could not see.
       #
-      # The request type is a metavariable, not the literal `Request`, because
-      # `NextRequest` is the idiomatic Next.js annotation and a rule that only
-      # knew `Request` could not see a handler written the recommended way.
+      # The request parameter is matched as a BARE metavariable, with no type
+      # annotation required. Requiring `Request` or `NextRequest` meant
+      # `export async function POST(request) { ... }` was not a route handler as
+      # far as this rule was concerned -- so deleting one type annotation was a
+      # complete, one-token bypass of the guard requirement, and the resulting
+      # unguarded handler was invisible rather than merely unflagged. A bare
+      # $REQ matches annotated and unannotated parameters alike, which makes the
+      # annotation irrelevant to coverage instead of load-bearing for it.
+      #
+      # $REQ is still BOUND rather than absorbed into `...`, because it is what
+      # ties the guard call below to the handler's own request: a handler that
+      # guards some other request object is not guarded.
       #
       # The trailing `...` in the parameter list matches the second argument of
       # a dynamic route -- `(request, { params })`. This repository already
       # writes handlers that way (app/api/dev-hq/approvals/[id]/approve/
       # route.ts), so a one-parameter-only rule was blind to a shape already in
       # use here.
+      #
+      # The zero-parameter branches are not redundant: a handler that accepts no
+      # request has nothing to hand the guard, so it cannot be guarded at all.
+      # Without these branches it would be exempt for want of a $REQ to bind --
+      # unreachable by the rule precisely because it is unguardable.
       - pattern-either:
-          - pattern: "export async function $METHOD($REQ: $REQTYPE, ...) { ... }"
-          - pattern: "export function $METHOD($REQ: $REQTYPE, ...) { ... }"
-          - pattern: "export const $METHOD = async ($REQ: $REQTYPE, ...) => { ... }"
-          - pattern: "export const $METHOD = ($REQ: $REQTYPE, ...) => { ... }"
+          - pattern: "export async function $METHOD($REQ, ...) { ... }"
+          - pattern: "export async function $METHOD() { ... }"
+          - pattern: "export function $METHOD($REQ, ...) { ... }"
+          - pattern: "export function $METHOD() { ... }"
+          - pattern: "export const $METHOD = async ($REQ, ...) => { ... }"
+          - pattern: "export const $METHOD = async () => { ... }"
+          - pattern: "export const $METHOD = ($REQ, ...) => { ... }"
+          - pattern: "export const $METHOD = () => { ... }"
       - metavariable-regex:
           metavariable: $METHOD
           regex: ^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$
-      - metavariable-regex:
-          metavariable: $REQTYPE
-          regex: ^(Request|NextRequest)$
-      # Two independent requirements, and the ORDER of them is the point:
+      # Three independent requirements, and the ORDER of them is the point:
       #
-      #   1. the guard's result is bound and returned -- checking only that the
-      #      identifier appears lets `rejectInternalDevRequest(request);` pass
-      #      with the rejection discarded;
-      #   2. the binding is the FIRST statement in the body.
+      #   1. the guard's result is BOUND -- checking only that the identifier
+      #      appears lets `rejectInternalDevRequest(request);` pass with the
+      #      rejection discarded;
+      #   2. the binding is the FIRST statement in the body;
+      #   3. the binding is ACTED ON by the VERY NEXT statement.
       #
-      # These pattern-nots deliberately do NOT open with `...`. A leading `...`
-      # matches any number of preceding statements, so a guard placed after a
-      # database write still satisfied the rule while the message claimed
-      # "first statement". A guard that runs after the side effect it is meant
-      # to gate is not a guard.
+      # These pattern-nots deliberately do NOT open with `...`, which is what
+      # requirement 2 rests on: a leading `...` matches any number of preceding
+      # statements, so a guard placed after a database write still satisfied the
+      # rule while the message claimed "first statement".
+      #
+      # Requirement 3 is the one a `...` BETWEEN the binding and the return gave
+      # away. This passed, and should not have:
+      #
+      #     const rejected = rejectInternalDevRequest(request);
+      #     await deleteExecution(body.executionId);   // unauthenticated write
+      #     if (rejected) return rejected;             // too late
+      #
+      # The guard is first, its result is bound, and its result is returned --
+      # every earlier requirement is met, and the write still went through
+      # unauthenticated. Calling a guard is not enforcing it; a rejection
+      # returned after the side effect it was meant to prevent has already lost.
       - pattern-not: |
-          export async function $METHOD($REQ: $REQTYPE, ...) {
+          export async function $METHOD($REQ, ...) {
             $RES = rejectInternalDevRequest($REQ)
-            ...
-            return $RES
+            if ($RES) return $RES
             ...
           }
       - pattern-not: |
-          export function $METHOD($REQ: $REQTYPE, ...) {
+          export function $METHOD($REQ, ...) {
             $RES = rejectInternalDevRequest($REQ)
-            ...
-            return $RES
+            if ($RES) return $RES
             ...
           }
       - pattern-not: |
-          export const $METHOD = async ($REQ: $REQTYPE, ...) => {
+          export const $METHOD = async ($REQ, ...) => {
             $RES = rejectInternalDevRequest($REQ)
-            ...
-            return $RES
+            if ($RES) return $RES
             ...
           }
       - pattern-not: |
-          export const $METHOD = ($REQ: $REQTYPE, ...) => {
+          export const $METHOD = ($REQ, ...) => {
             $RES = rejectInternalDevRequest($REQ)
-            ...
-            return $RES
+            if ($RES) return $RES
             ...
           }
 

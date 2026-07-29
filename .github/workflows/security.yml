@@ -86,9 +86,64 @@ jobs:
           # undetected. Matching a bare "key" as a substring instead is not an
           # option either -- it hits `monkey` and `keyboard` -- so the name is
           # split into words and each word is checked exactly.
+          #
+          # Four shapes of this assignment were invisible and are now covered:
+          #
+          #   * TEMPLATE LITERALS. Only ' and " were accepted, so changing one
+          #     pair of quotes to backticks hid the value. The quote character
+          #     is now captured and back-referenced so the three kinds cannot be
+          #     mixed to escape the closing delimiter.
+          #   * VALUES CONTAINING WHITESPACE. `[^'"\s]` ended the value at the
+          #     first space, so a passphrase -- the one credential form a human
+          #     is most likely to type by hand -- never reached 16 characters.
+          #   * UNQUOTED VALUES, handled by UNQUOTED_SECRET below.
+          #   * LONG IDENTIFIERS. The name was bounded at 64 characters, and
+          #     because the pattern is unanchored the engine simply started
+          #     matching further along the identifier, dropping the leading
+          #     words. A sensitive word early in a long name was therefore
+          #     outside the window that got judged. The bound is gone.
+          #
+          # A value containing "${" is skipped: that is an interpolated
+          # expression evaluated at runtime, not a committed literal, and
+          # `Bearer ${token}` is a correct construction rather than a leak.
           GENERIC_SECRET = re.compile(
-              r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]{0,63})"
-              r"\s*[:=]\s*['\"](?P<value>[^'\"\s]{16,})['\"]")
+              r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]*)"
+              r"\s*[:=]\s*(?P<quote>['\"`])(?P<value>[^'\"`\n]{16,})(?P=quote)")
+
+          # Unquoted assignments outside .env files: YAML, TOML, INI, shell.
+          # `api_token: 9aQXZ1mLpR44TvBnKd` in a committed config file is the
+          # same leak as the quoted form, and nothing looked at it -- the
+          # unquoted rule below existed but ran only on files named .env*.
+          # The value must be the entire remainder of the line, so this cannot
+          # match prose, and a `#` rules out a trailing comment being read as a
+          # value.
+          UNQUOTED_SECRET = re.compile(
+              r"(?m)^[^\S\n]*(?:export[^\S\n]+)?"
+              r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]*)"
+              r"[^\S\n]*[:=][^\S\n]*"
+              r"(?P<value>[^\s'\"`#<>{}\[\]]{16,})[^\S\n]*$")
+
+          # An unquoted value in TypeScript or JSON is an EXPRESSION, never a
+          # literal, and `callbackToken: body.callbackToken,` is a property
+          # being passed along rather than a secret being written down. Five
+          # such lines in this repository matched the rule above on its first
+          # real-tree run.
+          #
+          # Excluding them costs no coverage: a YAML, TOML, INI or shell value
+          # does not end in statement punctuation and does not dereference
+          # anything. The dotted-path arm requires at least one dot and caps
+          # each segment at 24 characters, so `body.callbackToken` is exempt
+          # while a dot-separated JWT -- whose segments are far longer -- is
+          # not. A bare identifier is deliberately NOT exempt: an unbroken run
+          # of alphanumerics is precisely the shape of a real token.
+          IDENTIFIER_PATH = re.compile(
+              r"^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$")
+
+          def looks_like_code_expression(value):
+              if value[-1] in ",;!()[]{}":
+                  return True
+              return bool(IDENTIFIER_PATH.match(value)) and all(
+                  len(segment) <= 24 for segment in value.split("."))
 
           ALWAYS_SENSITIVE = {
               "secret", "secrets", "password", "passwords", "passwd", "pwd",
@@ -111,10 +166,19 @@ jobs:
               "refresh", "bearer", "webhook", "publishable",
           }
 
-          # A name saying it holds a HEADER holds a header name, not a value.
-          # DEV_HQ_INTERNAL_TOKEN_HEADER is "x-dev-hq-internal-token": the
-          # wire name of the header the real token travels in.
-          NAME_ONLY_WORDS = {"header", "headers"}
+          # A name saying it holds a HEADER may hold a header name rather than a
+          # value. DEV_HQ_INTERNAL_TOKEN_HEADER is "x-dev-hq-internal-token":
+          # the wire name of the header the real token travels in.
+          #
+          # That exemption is now decided on the VALUE, and is never reachable
+          # from the name alone. Deciding it on the name -- and deciding it
+          # BEFORE the unambiguously sensitive words were consulted -- exempted
+          # SECRET_HEADER, API_KEY_HEADER and AUTH_HEADER_PASSWORD
+          # unconditionally. Appending one word to any identifier switched the
+          # entire generic rule off for that line, which is a bypass of the
+          # scanner rather than a gap in it. A word that makes something a
+          # credential must not be cancellable by a word sitting next to it.
+          HEADER_WORDS = {"header", "headers"}
 
           def _identifier_words(name):
               """Split an identifier into lowercase words on _, -, ., $ and
@@ -126,8 +190,6 @@ jobs:
 
           def has_sensitive_name(name):
               words = set(_identifier_words(name))
-              if words & NAME_ONLY_WORDS:
-                  return False
               if words & ALWAYS_SENSITIVE:
                   return True
               return bool(words & KEY_WORDS) and bool(words & KEY_QUALIFIERS)
@@ -158,6 +220,35 @@ jobs:
                       return False
               return True
 
+          # An HTTP header NAME: lowercase, hyphen-separated, at least one
+          # hyphen, and no segment long or opaque enough to be carrying entropy.
+          # "x-dev-hq-internal-token" qualifies. A token does not, and neither
+          # does a UUID -- its segments are hex.
+          HEADER_NAME = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$")
+
+          def looks_like_header_name(value):
+              if not HEADER_NAME.match(value):
+                  return False
+              return all(len(segment) <= 12 and not HEXISH.match(segment)
+                         for segment in value.split("-"))
+
+          def is_sensitive_assignment(name, value):
+              """Whether this name/value pair is a credential.
+
+              The header exemption is applied here, LAST, and only where its
+              justification actually holds: a name that mentions a header AND a
+              value that is genuinely shaped like a header name. A constant
+              called SECRET_HEADER holding "Zx91QpLm44TvBnRw02" is a secret; the
+              word "header" describes what the previous check believed, not what
+              the value is.
+              """
+              if not has_sensitive_name(name):
+                  return False
+              words = set(_identifier_words(name))
+              if words & HEADER_WORDS and looks_like_header_name(value):
+                  return False
+              return True
+
           # .env-format files assign unquoted, so GENERIC_SECRET cannot see them.
           # Template files are allowed to exist but must not carry a real value.
           # PASS/DSN/CRED/AUTH/SK are included because SMTP_PASS, SENTRY_DSN and
@@ -180,6 +271,27 @@ jobs:
           # exception an attributable line in a diff instead.
           ALLOW_PRAGMA = "scanner:allow-secret"
 
+          # SECURITY.md has always said the reason is not optional. The scanner
+          # accepted a bare pragma, so in practice it was: the one property that
+          # made a suppression reviewable -- a stated reason, attributable to an
+          # author in a diff -- could be omitted, leaving a silent mute that
+          # reads like an approved exception. A bare pragma now suppresses
+          # nothing AND is reported in its own right, so removing the reason
+          # cannot quietly turn the rule off for a line.
+          RATIONALE_MIN_WORDS = 3
+
+          def _has_rationale(line):
+              index = line.find(ALLOW_PRAGMA)
+              if index < 0:
+                  return False
+              tail = line[index + len(ALLOW_PRAGMA):]
+              return len(re.findall(r"[A-Za-z]{2,}", tail)) >= RATIONALE_MIN_WORDS
+
+          def bare_pragma_lines(text):
+              return [number
+                      for number, line in enumerate(text.split("\n"), start=1)
+                      if ALLOW_PRAGMA in line and not _has_rationale(line)]
+
           def _unsuppressed(text, matches):
               lines = text.split("\n")
               out = []
@@ -187,7 +299,7 @@ jobs:
                   line_no = text[:match.start()].count("\n")
                   line = lines[line_no] if line_no < len(lines) else ""
                   previous = lines[line_no - 1] if line_no > 0 else ""
-                  if ALLOW_PRAGMA in line or ALLOW_PRAGMA in previous:
+                  if _has_rationale(line) or _has_rationale(previous):
                       continue
                   # GENERIC_SECRET names its groups; the env patterns still put
                   # the value in group 1.
@@ -197,7 +309,13 @@ jobs:
           def generic_secret_hits(text):
               return _unsuppressed(text, [
                   m for m in GENERIC_SECRET.finditer(text)
-                  if has_sensitive_name(m.group("name"))
+                  if is_sensitive_assignment(m.group("name"), m.group("value"))
+                  and "${" not in m.group("value")
+                  and not looks_synthetic(m.group("value"))] + [
+                  m for m in UNQUOTED_SECRET.finditer(text)
+                  if is_sensitive_assignment(m.group("name"), m.group("value"))
+                  and "${" not in m.group("value")
+                  and not looks_like_code_expression(m.group("value"))
                   and not looks_synthetic(m.group("value"))])
 
           def env_secret_hits(text):
@@ -277,6 +395,16 @@ jobs:
               # that does not is reported wherever it appears.
               if generic_secret_hits(text):
                   findings.append((name, "Generic secret assignment"))
+
+              # A suppression without a reason is not a suppression. Reported
+              # wherever it appears, whether or not it sits on a flagged line,
+              # so the pragma cannot be pre-planted to disarm a future finding.
+              for number in bare_pragma_lines(text):
+                  findings.append((
+                      name,
+                      f"Unexplained {ALLOW_PRAGMA} pragma on line {number}, "
+                      "which suppresses nothing until the reason it exists is "
+                      "stated on the same line (see SECURITY.md)"))
 
               # Closes the .env gap: template files are exempt from the filename
               # rule, so without this a real unquoted value in a committed
@@ -374,9 +502,31 @@ jobs:
               r"event\.review_comment\.body",
               r"event\.workflow_run\.(?:head_branch|display_title)",
               r"event\.inputs\.[A-Za-z0-9_-]+",
+              # A branch or tag name is attacker-supplied on any repository that
+              # accepts a pull request or a pushed branch, and it is not
+              # validated: a ref may contain characters a shell will act on.
+              # `ref` is listed separately from `ref_name` so the trailing
+              # boundary below keeps github.ref_type -- which is only ever
+              # "branch" or "tag" -- from being flagged.
+              r"ref_name",
+              r"ref",
           )
+
+          # Contexts that are not rooted at `github.`. Workflow-dispatch and
+          # reusable-workflow inputs arrive as `inputs.*`, entirely controlled
+          # by whoever starts the run, and the auditor could not see them at
+          # all: it required a literal `github.` prefix, so the one context in
+          # this repository that a human types by hand at dispatch time was
+          # outside its model. release.yml alone takes eight such inputs.
+          UNTRUSTED_ROOTS = (
+              r"inputs\.[A-Za-z0-9_-]+",
+          )
+
+          # The trailing boundary stops a short context name from matching a
+          # longer one that happens to start with it.
           INJECTABLE = re.compile(
-              r"\$\{\{\s*github\.(?:" + "|".join(UNTRUSTED_CONTEXTS) + r")")
+              r"\$\{\{\s*(?:github\.(?:" + "|".join(UNTRUSTED_CONTEXTS) + r")"
+              r"|(?:" + "|".join(UNTRUSTED_ROOTS) + r"))(?![A-Za-z0-9_-])")
 
           def iter_uses(document):
               """Yield every action reference: step-level and job-level
@@ -427,6 +577,32 @@ jobs:
                                       f"job '{job_id}' / {label} / with.{key}",
                                       value)
 
+          # A mapping-form grant was audited only against the literal string
+          # "write-all", so spelling the same escalation out key by key --
+          # permissions: {contents: write, packages: write, actions: write,
+          # id-token: write} -- passed untouched. One string was the control's
+          # entire model of "too much power", and the longer, more plausible
+          # spelling of it was the one nobody checked.
+          #
+          # Narrow grants are legitimate and must stay green: release.yml gives
+          # its publishing job `contents: write`, which is exactly the scoped,
+          # job-level grant this repository wants people to write. The test is
+          # therefore not "grants write" but "grants write BROADLY":
+          #
+          #   * at the WORKFLOW level, any write applies to every job in the
+          #     file, including the jobs that only read. That is breadth by
+          #     construction, and the remedy is to move the grant to the job.
+          #   * at the JOB level, write across three or more scopes is write-all
+          #     in all but name.
+          MAX_JOB_WRITE_SCOPES = 2
+
+          def write_scopes(perms):
+              """Scopes a mapping-form permissions block grants write."""
+              if not isinstance(perms, dict):
+                  return []
+              return sorted(scope for scope, level in perms.items()
+                            if level == "write")
+
           errors = []
           warnings = []
 
@@ -456,6 +632,13 @@ jobs:
                       f"{path}: grants permissions: write-all at the workflow level.")
               if perms is None:
                   warnings.append(f"{path}: no top-level permissions declared.")
+              workflow_writes = write_scopes(perms)
+              if workflow_writes:
+                  errors.append(
+                      f"{path}: grants write at the workflow level to "
+                      f"{', '.join(workflow_writes)}, which applies to every job "
+                      "in the file, including the ones that only read. Move the "
+                      "grant onto the job that needs it.")
 
               # A job-level permissions block REPLACES the workflow-level one
               # rather than intersecting with it, so a single job can escalate
@@ -472,6 +655,13 @@ jobs:
                       if job.get("permissions") == "write-all":
                           errors.append(
                               f"{path}: job '{job_id}' grants permissions: write-all.")
+                      job_writes = write_scopes(job.get("permissions"))
+                      if len(job_writes) > MAX_JOB_WRITE_SCOPES:
+                          errors.append(
+                              f"{path}: job '{job_id}' grants write to "
+                              f"{len(job_writes)} scopes "
+                              f"({', '.join(job_writes)}), which is write-all in "
+                              "all but name. Grant only the scopes the job uses.")
 
               # Structural scan avoids matching pattern strings that appear
               # inside run scripts (such as this auditor itself).
@@ -556,7 +746,9 @@ jobs:
           internal="$control/app/api/dev-hq/internal"
           mkdir -p "$internal/discarded" "$internal/arrow" "$internal/sync" \
                    "$internal/nextrequest" "$internal/twoparam" \
-                   "$internal/guardafter" "$internal/compliant" \
+                   "$internal/guardafter" "$internal/notenforced" \
+                   "$internal/untyped" "$internal/zeroparam" \
+                   "$internal/compliant" "$internal/compliantbraced" \
                    "$control/lib/dev-hq"
 
           cp .semgrep/fixtures/route-guard-result-discarded.ts "$internal/discarded/route.ts"
@@ -565,12 +757,16 @@ jobs:
           cp .semgrep/fixtures/route-nextrequest-no-guard.ts   "$internal/nextrequest/route.ts"
           cp .semgrep/fixtures/route-two-param-no-guard.ts     "$internal/twoparam/route.ts"
           cp .semgrep/fixtures/route-guard-after-write.ts      "$internal/guardafter/route.ts"
+          cp .semgrep/fixtures/route-guard-not-enforced.ts     "$internal/notenforced/route.ts"
+          cp .semgrep/fixtures/route-untyped-no-guard.ts       "$internal/untyped/route.ts"
+          cp .semgrep/fixtures/route-zero-param-no-guard.ts    "$internal/zeroparam/route.ts"
           cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
           cp .semgrep/fixtures/token-renamed.ts                "$control/lib/dev-hq/token-renamed.ts"
           cp .semgrep/fixtures/token-env-aliased.ts            "$control/lib/dev-hq/token-env-aliased.ts"
 
-          # NULL ARM. These two are correct and must produce no finding.
+          # NULL ARM. These three are correct and must produce no finding.
           cp .semgrep/fixtures/compliant-route.ts              "$internal/compliant/route.ts"
+          cp .semgrep/fixtures/compliant-route-braced.ts       "$internal/compliantbraced/route.ts"
           cp .semgrep/fixtures/compliant-env-reader.ts         "$control/lib/dev-hq/compliant-env-reader.ts"
 
           cp -r .semgrep "$control/.semgrep"
@@ -596,6 +792,13 @@ jobs:
               ("app/api/dev-hq/internal/nextrequest/route.ts", GUARD),
               ("app/api/dev-hq/internal/twoparam/route.ts", GUARD),
               ("app/api/dev-hq/internal/guardafter/route.ts", GUARD),
+              # Guard first, result bound, result returned -- and a write in
+              # between. Every requirement the rule checked before was met.
+              ("app/api/dev-hq/internal/notenforced/route.ts", GUARD),
+              # No type annotation on the request parameter.
+              ("app/api/dev-hq/internal/untyped/route.ts", GUARD),
+              # No request parameter at all, so nothing to guard with.
+              ("app/api/dev-hq/internal/zeroparam/route.ts", GUARD),
               ("lib/dev-hq/token-destructured.ts", TOKEN),
               ("lib/dev-hq/token-renamed.ts", TOKEN),
               ("lib/dev-hq/token-env-aliased.ts", TOKEN),
@@ -611,6 +814,11 @@ jobs:
           # every handler gets muted, which is how a gate stops gating.
           CLEAN = {
               "app/api/dev-hq/internal/compliant/route.ts",
+              # The same enforcement written with a braced if. The rule now
+              # requires the guard's result to be acted on by the very next
+              # statement, and this is the fixture that fails if that
+              # requirement is ever narrowed to one exact spelling.
+              "app/api/dev-hq/internal/compliantbraced/route.ts",
               "lib/dev-hq/compliant-env-reader.ts",
           }
 

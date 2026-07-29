@@ -64,35 +64,66 @@ Sensitive information belongs in secure secret management systems.
 ## Automated credential scanning
 
 The `Credential and Artifact Audit` job in `.github/workflows/security.yml`
-scans every tracked file on each push and pull request. It runs high-confidence
+scans tracked files on each push and pull request. It runs high-confidence
 rules for private key blocks and AWS, Google, Slack, GitHub and Stripe live-key
-shapes, plus the generic rule described below. A separate rule covers unquoted
-`.env`-style assignments and credentials embedded in URLs.
+shapes, plus the generic rule described below.
+
+Three exclusions apply, and are stated here because a scan's coverage is only
+as honest as its stated limits: the workflow file itself is skipped so its
+patterns do not match their own source, files over 2 MB are skipped, and files
+that are not valid UTF-8 text are skipped. Everything else tracked by Git is
+read in full.
+
+Two further rules — unquoted `KEY=value` assignments in the `.env` keyword
+style, and credentials embedded in URLs as `scheme://user:password@host` — run
+**only on files whose name begins with `.env`**. They are not repository-wide.
+Unquoted assignments elsewhere are covered by the generic rule below instead.
 
 ### What the generic rule matches
 
-It flags any 16-or-more character quoted value assigned to a **sensitive name**.
+It flags any 16-or-more character value assigned to a **sensitive name**. The
+value may be quoted with `'`, `"` or a backtick, or left unquoted as in YAML,
+TOML, INI and shell. It may contain spaces, which matters because a passphrase
+is the one credential form a person is likely to type by hand.
+
 The name is split into words on `_`, `-`, `.` and camelCase boundaries, and is
 sensitive when:
 
 - any word is `secret`, `token`, `password`, `passwd`, `pwd`, `apikey` or
   `credential` (plurals included); or
 - any word is `key` **and** another word qualifies it as a credential rather
-  than a lookup key: `api`, `private`, `signing`, `access`, `auth`, `service`,
-  `role`, `master`, `session`, `refresh`, `bearer`, `webhook`, `encryption`,
-  `publishable`.
+  than a lookup key: `api`, `private`, `signing`, `sign`, `encryption`,
+  `encrypt`, `access`, `auth`, `service`, `role`, `master`, `session`,
+  `refresh`, `bearer`, `webhook`, `publishable`.
 
 Matching is by whole word, not substring, so `monkey` and `keyboard` do not
 count as `key`. `API_KEY`, `STRIPE_SECRET_KEY` and `SUPABASE_SERVICE_ROLE_KEY`
-are all matched.
+are all matched. Name length is not bounded: a sensitive word counts wherever
+it appears, including at the start of a very long identifier.
 
 `key` deliberately does **not** count on its own. React's `key` prop,
 `idempotencyKey` and `PENDING_DISPATCH_STORAGE_KEY` are ordinary identifiers,
 and a rule that flagged every one of them would be muted rather than obeyed.
 
-A name whose words include `header` is exempt, because it holds a header name
-rather than a value: `DEV_HQ_INTERNAL_TOKEN_HEADER` is the wire header name
-`x-dev-hq-internal-token`, not a token.
+Two shapes are skipped because they are not literals at all: a value containing
+`${`, which is interpolated at runtime rather than committed, and an unquoted
+value that is program syntax rather than data — `body.callbackToken,` is a
+property being passed along, not a secret being written down.
+
+### The header exemption is decided on the value
+
+`DEV_HQ_INTERNAL_TOKEN_HEADER` holds `x-dev-hq-internal-token`: the wire name of
+the header a token travels in, not the token. So a name mentioning `header` is
+exempt — but **only when its value is genuinely shaped like a header name**:
+lowercase, hyphen-separated, with no segment long or opaque enough to be
+carrying entropy.
+
+The name alone is never enough, and this is not a hypothetical distinction. When
+the exemption was decided on the name — and decided before the sensitive words
+were consulted — `SECRET_HEADER`, `API_KEY_HEADER` and `AUTH_HEADER_PASSWORD`
+were all exempt no matter what they held. Appending one word to any identifier
+switched the entire generic rule off for that line. A word that makes something
+a credential must not be cancellable by a word sitting next to it.
 
 The generic rule judges the **value**, not the file. Test files are scanned like
 everything else, because a real staging password pasted into a spec file is a
@@ -112,7 +143,13 @@ line directly above it:
 const TOKEN = "aaaaaaaaaaaaaaaaaaaa";
 ```
 
-The reason is not optional. This exists because the alternative — widening a
+The reason is not optional, and the scanner enforces that rather than trusting
+it. A pragma with no reason after it suppresses nothing, and is itself reported
+as a finding — wherever it appears, whether or not anything on that line was
+flagged, so one cannot be planted in advance to disarm a future finding. State
+the reason on the same line as the pragma.
+
+This exists because the alternative — widening a
 regex to clear one false positive — has already caused a real defect here: an
 earlier change disabled the generic rule for all test files to silence two
 fixtures, and independent review demonstrated four real credentials that then
