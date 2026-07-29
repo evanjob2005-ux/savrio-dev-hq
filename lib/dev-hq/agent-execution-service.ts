@@ -13,6 +13,7 @@ import type {
   Execution,
   ExecutionRequest,
   ReviewPolicy,
+  Task,
 } from "@/types/domain";
 import {
   ensureAssignment,
@@ -31,7 +32,9 @@ import {
 } from "@/lib/dev-hq/store";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import { raiseRetryExhaustionEscalation } from "@/lib/dev-hq/escalation-service";
+import { hasCapabilities, listAgents } from "@/lib/dev-hq/agent-registry";
 import {
+  AGENT_CAPABILITIES,
   DEFAULT_REVIEW_POLICY,
   EXECUTION_CLAIM_DEADLINE_MS,
   EXECUTION_EVENT_TYPE,
@@ -670,6 +673,92 @@ export function dispatchExecutionIdFor(idempotencyKey: string): string {
   return `exec-dispatch-${idempotencyKey}`;
 }
 
+/**
+ * Thrown when a dispatch names work that no dispatch could ever run: a task that
+ * is not eligible for new work, or a capability set no registered agent can
+ * satisfy. Distinct from `ConflictingDispatchRequestError`, which is about a key
+ * being reused for a *different* request rather than about the request itself.
+ */
+export class UndispatchableRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UndispatchableRequestError";
+  }
+}
+
+/**
+ * Refuse a task that is not eligible to receive new work.
+ *
+ * `active` and unassigned is the system's own definition of dispatchable work —
+ * `listReadyWork` filters on exactly this pair — and dispatch checked neither,
+ * only that the task existed. A draft task could be started before it was
+ * authorized; a completed, rejected or archived task could be silently reopened
+ * by an execution that no longer corresponds to anything the founder approved;
+ * a paused or blocked task could run while it was explicitly stopped; and a task
+ * already owned by an agent could be given a second owner.
+ *
+ * Retries and revisions never come through here — they re-dispatch an existing
+ * assignment via `ensureDispatchForAssignment`, or create their execution
+ * directly through `ensureExecution` — so this gate constrains only the creation
+ * of *new* dispatched work.
+ */
+function assertTaskDispatchable(task: Task): void {
+  if (task.status !== "active") {
+    throw new UndispatchableRequestError(
+      `Task ${task.id} is ${task.status}, not active; only an active task can be dispatched.`,
+    );
+  }
+  if (task.assigneeAgentId) {
+    throw new UndispatchableRequestError(
+      `Task ${task.id} is already assigned to ${task.assigneeAgentId}; refusing to dispatch a second owner for it.`,
+    );
+  }
+}
+
+/**
+ * Refuse a capability set that no *registered* agent could ever satisfy.
+ *
+ * **This is the SVC-01 failure shape arriving through the request instead of
+ * through the seed** (commit e5aac96, "work that neither completes nor fails").
+ * An unsatisfiable set produces a queued execution that no agent can be selected
+ * for. `reconcileQueuedDispatches` retries it on every sweep and declines
+ * identically, no attempt is ever consumed, so the retry budget never exhausts
+ * and no escalation is ever raised. The execution neither completes nor fails.
+ *
+ * Two ways to be unsatisfiable, and **both are checked**, because rejecting only
+ * the first leaves the same limbo reachable from the shipped UI:
+ *
+ *   1. a capability outside the vocabulary ADR-0001 O3 freezes — a typo, or a
+ *      caller inventing one;
+ *   2. a combination whose members are each valid but which no single agent
+ *      holds together. The roster is capability-partitioned (`validation` +
+ *      `gates` on the supervisor, `routing` + `sequencing` + `escalation` on the
+ *      orchestrator, and so on), so `["validation", "routing"]` — two adjacent
+ *      checkboxes in DispatchAgentPanel — is already unsatisfiable today.
+ *
+ * Availability is deliberately **not** consulted. A busy agent is transient and
+ * staying queued is the approved answer for it (ADR-0001 O6); roster membership
+ * is the permanent fact, and only the permanent case is refused here.
+ */
+function assertCapabilitiesSatisfiable(required: string[]): void {
+  if (required.length === 0) return;
+
+  const unknown = required.filter(
+    (capability) => !(AGENT_CAPABILITIES as readonly string[]).includes(capability),
+  );
+  if (unknown.length > 0) {
+    throw new UndispatchableRequestError(
+      `Unknown capabilities: ${unknown.join(", ")}. No agent can ever satisfy them, so this dispatch would stay queued forever. Known capabilities: ${AGENT_CAPABILITIES.join(", ")}.`,
+    );
+  }
+
+  if (!listAgents().some((agent) => hasCapabilities(agent, required))) {
+    throw new UndispatchableRequestError(
+      `No registered agent holds every capability in [${required.join(", ")}] at once, so this dispatch could never be assigned. Narrow the requirement or dispatch the work as separate tasks.`,
+    );
+  }
+}
+
 /** Thrown when a dispatch key is replayed with a different request. */
 export class ConflictingDispatchRequestError extends Error {
   constructor(executionId: string, field: string) {
@@ -691,6 +780,22 @@ function assertRequestMatches(
   input: DispatchAgentExecutionInput,
   incoming: ExecutionRequest,
 ): void {
+  // Checked BEFORE the `stored` guard below, because the review policy is not
+  // part of `ExecutionRequest` — it is persisted on the execution itself — and an
+  // execution without a stored request still has one.
+  //
+  // Leaving it out of the comparison made the key's guarantee narrower than it
+  // reads: the same key replayed as `none` against a stored `basic`/`full` was
+  // accepted, the stored policy silently won, and the caller was told their
+  // dispatch had converged. Whichever policy loses, the caller believes work is
+  // being reviewed to a standard it is not — a replay asking for `full` gets
+  // `basic`, and a replay asking for `none` still runs a review. The policy is
+  // part of what the dispatch *is*, so it is part of the request identity.
+  const storedPolicy = execution.reviewPolicy ?? DEFAULT_REVIEW_POLICY;
+  if (input.reviewPolicy !== undefined && storedPolicy !== input.reviewPolicy) {
+    throw new ConflictingDispatchRequestError(execution.id, "review policy");
+  }
+
   const stored = execution.request;
   if (!stored) return;
 
@@ -756,13 +861,32 @@ export async function dispatchAgentExecution(
     preferredAgentId: input.preferredAgentId ?? null,
   };
 
+  // 0. Refuse work that could never run — but only when this call would CREATE
+  //    it. Eligibility is a property of authorizing new work, not of replaying
+  //    an authorization that already happened: the key's contract is that a
+  //    repeat converges on the execution it already made, and the world moves
+  //    underneath a long-running dispatch (its task legitimately reaches
+  //    `completed`, an agent legitimately leaves the roster). Re-checking on a
+  //    replay would convert every such recovery into a hard conflict and strand
+  //    the caller with an execution they can no longer address.
+  //
+  //    Both checks throw rather than returning a non-assigned result. `assigned:
+  //    false` means "no capacity right now, it stays queued" (ADR-0001 O6) —
+  //    which is precisely the answer these two cases must NOT give, because
+  //    waiting can never help them.
+  const executionId = dispatchExecutionIdFor(idempotencyKey);
+  if (!getDevHqStore().executions.has(executionId)) {
+    assertTaskDispatchable(task);
+    assertCapabilitiesSatisfiable(request.requiredCapabilities);
+  }
+
   // 1. Create-or-get the canonical execution, carrying the intended routing
   //    policy from the moment it exists. A second dispatch under the same key
   //    finds this one rather than creating a parallel canonical execution; a key
   //    already used by another task is rejected by ensureExecution. If step 2
   //    then fails, the persisted policy is what lets the sweep finish the job.
   const execution = await ensureExecution({
-    executionId: dispatchExecutionIdFor(idempotencyKey),
+    executionId,
     taskId: input.taskId,
     policy,
     request,

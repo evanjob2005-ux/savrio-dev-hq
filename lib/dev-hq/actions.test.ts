@@ -7,7 +7,12 @@ vi.mock("@trigger.dev/sdk", () => ({
 }));
 
 import { dispatchAgentExecutionAction } from "@/lib/dev-hq/actions";
-import { getDevHqStore, resetDevHqStore, saveTask } from "@/lib/dev-hq/store";
+import {
+  getDevHqStore,
+  resetDevHqStore,
+  saveAgent,
+  saveTask,
+} from "@/lib/dev-hq/store";
 import type { Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
@@ -131,9 +136,22 @@ describe("dispatchAgentExecutionAction", () => {
 
   it("reports a non-assigned result as ok with assigned=false", async () => {
     const task = seedTask();
+    // Arrange the unavailability itself, rather than requesting a capability
+    // nothing has.
+    //
+    // This test is about how the action REPORTS a capacity decline, and a
+    // capacity decline is the one that legitimately stays queued (ADR-0001 O6):
+    // the agent comes back and reconciliation dispatches it. An unsatisfiable
+    // capability is a different outcome wearing the same shape — nothing can
+    // ever take that work, so the execution neither completes nor fails — and
+    // dispatch now refuses it up front. Borrowing it as the vehicle here made
+    // the assertion depend on that acceptance being the behaviour.
+    for (const agent of getDevHqStore().agents.values()) {
+      saveAgent({ ...agent, availability: "busy" });
+    }
     const outcome = await dispatchAgentExecutionAction({
       taskId: task.id,
-      requiredCapabilities: ["no-such-capability"],
+      requiredCapabilities: ["validation"],
     });
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
