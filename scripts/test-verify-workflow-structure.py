@@ -5,9 +5,20 @@ review-by-mutation: it caught 3 of these 10 and reported success when it had
 compared nothing. So the verifier now ships with the mutations that killed it.
 
 Each case mutates a workflow in a scratch copy of the repository, runs the
-verifier, and asserts the expected exit code. Run from the repository root:
+verifier, and asserts the expected exit code -- and, where the case is about
+the verifier explaining itself, an expected substring of its output.
+
+Run from the repository root:
 
     python scripts/test-verify-workflow-structure.py
+
+That runs two phases:
+
+  1. the mutation matrix -- each case applied, exit code asserted;
+  2. the null audit -- every case re-run with its mutation SKIPPED, which must
+     produce exit 0 for all of them. See `null_audit` for why.
+
+Pass --matrix-only or --null-audit to run just one phase.
 """
 
 import pathlib
@@ -70,9 +81,15 @@ def edit(root, name, old, new, count=1):
 CASES = []
 
 
-def case(label, expect):
+def case(label, expect, expect_text=None):
+    """Register a case. `expect_text` must appear in the verifier's stdout.
+
+    The exit code alone is not enough for the exit-2 cases: rule 5 requires the
+    control to state what it could not do, so those cases assert the message as
+    well as the status.
+    """
     def wrap(fn):
-        CASES.append((label, expect, fn))
+        CASES.append((label, expect, expect_text, fn))
         return fn
     return wrap
 
@@ -127,7 +144,7 @@ def _(root):
          "        id: whitespace\n", "      - name: PLACEHOLDER_REMOVED\n")
 
 
-@case("base ref missing: must NOT report success", 2)
+@case("base ref missing: must NOT report success", 2, "CANNOT COMPARE")
 def _(root):
     subprocess.run(["git", "update-ref", "-d", f"refs/remotes/{BASE.split('/', 1)[1]}"
                     if BASE.startswith("origin/") else BASE],
@@ -189,18 +206,163 @@ def _(root):
     edit(root, "ci.yml", "runs-on: ubuntu-latest", "runs-on: self-hosted", count=1)
 
 
-def main():
+# ---------------------------------------------------------------------------
+# CI-03. Written by an independent reviewer, not by the verifier's author, and
+# every one of these passed the verifier undetected until JOB_FIELDS and
+# WORKFLOW_FIELDS were widened. Rule 4: the author's own mutations only cover
+# the failure modes the author already imagined.
+# ---------------------------------------------------------------------------
+
+
+@case("job-level `continue-on-error: true` (lint/build may fail, job green)", 1)
+def _(root):
+    # The worst of the set. Lint, type-check and build can all fail while the
+    # workflow reports success, and the verifier's two summary numbers do not
+    # move: step count 21->21, guard count 8->8.
+    edit(root, "ci.yml",
+         "  application-validation:\n",
+         "  application-validation:\n    continue-on-error: true\n")
+
+
+@case("job-level `env:` rewrites the environment of every step", 1)
+def _(root):
+    edit(root, "ci.yml",
+         "  application-validation:\n",
+         "  application-validation:\n    env:\n      NODE_ENV: production\n")
+
+
+@case("job-level `uses:` replaces the job with a reusable workflow", 1)
+def _(root):
+    edit(root, "ci.yml",
+         "  structured-data:\n",
+         "  structured-data:\n    uses: attacker/evil/.github/workflows/x.yml@main\n")
+
+
+@case("job-level `outputs:` (downstream `needs.*.outputs` guards read these)", 1)
+def _(root):
+    edit(root, "ci.yml",
+         "  application-validation:\n",
+         "  application-validation:\n    outputs:\n"
+         "      node: ${{ steps.detect.outputs.node }}\n")
+
+
+@case("rename the workflow (breaks required-status-check matching)", 1)
+def _(root):
+    edit(root, "ci.yml", "name: Continuous Integration\n", "name: CI (disabled)\n")
+
+
+# ---------------------------------------------------------------------------
+# CI-10. "Could not evaluate" must be distinguishable from "property violated"
+# and must say what it could not do -- rule 5. Both of these exited 1 with an
+# uncaught traceback before the fix, which is the code reserved for a detected
+# violation.
+# ---------------------------------------------------------------------------
+
+
+@case("unparseable YAML: exit 2, not 1, and say so", 2,
+      "is not parseable YAML")
+def _(root):
+    (root / ".github/workflows/ci.yml").write_text(
+        "name: broken\non: push\njobs:\n  a:\n   - [unclosed\n",
+        encoding="utf-8", newline="")
+
+
+@case("workflow parses but is not a mapping: exit 2, and say so", 2,
+      "did not parse as a mapping")
+def _(root):
+    (root / ".github/workflows/ci.yml").write_text(
+        "- this is a list, not a workflow\n", encoding="utf-8", newline="")
+
+
+@case("workflow present but unreadable: exit 2, not the exit 1 of DELETED", 2,
+      "cannot read .github/workflows/ci.yml")
+def _(root):
+    # A directory where the file should be. The file is NOT missing, so the
+    # DELETED path (exit 1, a real structural change) would be the wrong
+    # answer: nothing was read, so nothing was compared.
+    p = root / ".github/workflows/ci.yml"
+    p.unlink()
+    p.mkdir()
+
+
+@case("PyYAML unimportable: exit 2 before anything is compared", 2,
+      "PyYAML is not importable")
+def _(root):
+    # sys.path[0] is the verifier's own directory, so this shadows the real
+    # PyYAML for the child process only.
+    (root / "scripts/yaml.py").write_text(
+        'raise ImportError("blocked by test-verify-workflow-structure.py")\n',
+        encoding="utf-8", newline="")
+
+
+def null_audit():
+    """Rule 2, applied to every case rather than to one baseline.
+
+    Each case is re-run with its mutation SKIPPED. From a scratch copy that was
+    genuinely restored to base, every one must exit 0. A case that still
+    produces its expected non-zero code without its mutation is measuring the
+    starting state and proves nothing about the verifier.
+
+    This is the third row of the table in
+    standards/CONTROL_VERIFICATION_STANDARD.md, run as a check instead of
+    trusted: the harness this replaced reported ten detections while every case
+    failed before any mutation was applied, and replacing all ten mutations
+    with `pass` still produced eight passes. That is undetectable from the
+    matrix output alone, and it is exactly what this phase would have caught.
+    """
     passed = failed = 0
-    print(f"{'case':58s} {'expect':>6s} {'got':>4s}  result")
-    for label, expect, mutate in CASES:
+    print("\nNULL AUDIT -- every case with its mutation SKIPPED must exit 0")
+    print(f"{'case (mutation not applied)':70s} {'expect':>6s} {'got':>4s}  result")
+    for label, _expect, _text, _mutate in CASES:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = scratch(tmp)
+            # Deliberately no mutate(root) here. That omission is the test.
+            code, _out = run_in(root)
+            ok = code == 0
+            passed += ok
+            failed += not ok
+            print(f"{label:70s} {0:>6d} {code:>4d}  {'PASS' if ok else '*** FAIL ***'}")
+    if failed:
+        print(f"\n{failed} case(s) produce a non-zero verdict WITHOUT their "
+              f"mutation. Those cases measure the starting state, not the "
+              f"mutation, and their matrix results mean nothing.")
+    return passed, failed
+
+
+def matrix():
+    passed = failed = 0
+    print(f"{'case':70s} {'expect':>6s} {'got':>4s}  result")
+    for label, expect, expect_text, mutate in CASES:
         with tempfile.TemporaryDirectory() as tmp:
             root = scratch(tmp)
             mutate(root)
-            code, _out = run_in(root)
+            code, out = run_in(root)
             ok = code == expect
+            note = ""
+            if ok and expect_text and expect_text not in out:
+                ok = False
+                note = f"  (missing from output: {expect_text!r})"
             passed += ok
             failed += not ok
-            print(f"{label:58s} {expect:>6d} {code:>4d}  {'PASS' if ok else '*** FAIL ***'}")
+            print(f"{label:70s} {expect:>6d} {code:>4d}  "
+                  f"{'PASS' if ok else '*** FAIL ***'}{note}")
+    return passed, failed
+
+
+def main():
+    flags = set(sys.argv[1:])
+    unknown = flags - {"--matrix-only", "--null-audit"}
+    if unknown:
+        raise SystemExit(f"unknown argument(s): {' '.join(sorted(unknown))}")
+
+    passed = failed = 0
+    if "--null-audit" not in flags:
+        p, f = matrix()
+        passed, failed = passed + p, failed + f
+    if "--matrix-only" not in flags:
+        p, f = null_audit()
+        passed, failed = passed + p, failed + f
+
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
