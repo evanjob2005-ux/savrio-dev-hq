@@ -364,8 +364,12 @@ jobs:
           # release tags. Publish re-computes the digest after the approval
           # wait and refuses to publish if it moved, so a release cannot be
           # cut against a tag set that no longer exists.
-          digest="$(git ls-remote --tags origin 'refs/tags/v*' \
-                    | sort | sha256sum | cut -d' ' -f1)"
+          remote_tags=""
+          if ! remote_tags="$(git ls-remote --tags origin 'refs/tags/v*')"; then
+            echo "::error::Could not reach origin to snapshot the release-tag set; forward progression was not evaluated."
+            exit 2
+          fi
+          digest="$(printf '%s\n' "$remote_tags" | sort | sha256sum | cut -d' ' -f1)"
           echo "tag_digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "Remote release-tag set digest: ${digest}"
 
@@ -734,8 +738,12 @@ jobs:
             echo "::error::No release-tag digest was recorded at validation time; cannot tell whether the tag set moved during the approval wait."
             exit 2
           fi
-          actual="$(git ls-remote --tags origin 'refs/tags/v*' \
-                    | sort | sha256sum | cut -d' ' -f1)"
+          remote_tags=""
+          if ! remote_tags="$(git ls-remote --tags origin 'refs/tags/v*')"; then
+            echo "::error::Could not reach origin to re-check the release-tag set after approval; tag-set stability was not evaluated."
+            exit 2
+          fi
+          actual="$(printf '%s\n' "$remote_tags" | sort | sha256sum | cut -d' ' -f1)"
           if [[ "$actual" != "$EXPECTED" ]]; then
             echo "::error::The remote release-tag set changed between validation and publish (recorded ${EXPECTED}, found ${actual}). Forward progression was validated against a tag set that no longer exists. Re-run the release so validation is redone against current tags."
             exit 1
@@ -982,8 +990,15 @@ jobs:
           fi
 
           resume=false
+          remote_tag_refs=""
+          if ! remote_tag_refs="$(git ls-remote --tags origin "refs/tags/${TAG}")"; then
+            echo "::error::Could not reach origin to determine whether tag '${TAG}' exists; resume eligibility was not evaluated."
+            exit 2
+          fi
           remote_tag=0
-          remote_tag="$(git ls-remote --tags origin "refs/tags/${TAG}" | wc -l)"
+          if [[ -n "$remote_tag_refs" ]]; then
+            remote_tag="$(printf '%s\n' "$remote_tag_refs" | wc -l)"
+          fi
           local_tag=false
           if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
             local_tag=true

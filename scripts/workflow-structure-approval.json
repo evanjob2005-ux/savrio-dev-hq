@@ -4,7 +4,7 @@
     {
       "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
       "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:3e61e1140b9b996d5e00441b5393bfcdbef0757f2637de8f0817ba6eda46baca",
+      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
       "changed_files": [
         "ci.yml",
         "dependencies.yml",
@@ -13,34 +13,46 @@
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:6f7bdf66acba07ba48ab56a5d5c5123ac0c98c678a7c3d89afe96b577c7a10e6",
-      "rationale": "Founder-authorized remediation candidate: install the reviewed workflow-structure verifier and mutation harness in the read-only lint job, together with all reviewed workflow changes on this branch.",
-      "fingerprint": "sha256:49520a677569e916fe0581fad496f79ef092107ff1d42fc948286b15a6a00f72"
+      "diff_digest": "sha256:7f28a138a49c4242a0dedc583c5f5f9d99196276761e4862137f7bf3d2d3a507",
+      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes.",
+      "fingerprint": "sha256:dd178f3c0990a029c6bad29af0970d0079df0da5ba19029f2126a88e96a39903"
     },
     {
       "base_commit": "7079779f69a9ec0edf6d92a3f4124599ac1b2a2d",
       "base_workflow_tree": "3d59ff7eab4ef53972dc2c5501e98316ab631239",
-      "candidate_workflow_tree": "sha256:3e61e1140b9b996d5e00441b5393bfcdbef0757f2637de8f0817ba6eda46baca",
+      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
       "changed_files": [
         "dependencies.yml",
         "lint.yml",
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:c0a6e1e6728168722fa1bf495e310513279995a2e53ea49ce1f3a005cb31157c",
-      "rationale": "Founder-authorized remediation candidate: install the reviewed workflow-structure verifier and mutation harness in the read-only lint job for the branch push.",
-      "fingerprint": "sha256:98037d91bc6ac07c790c055bd7ef804133c7bb77e159e5faf379d8b992ac02f1"
+      "diff_digest": "sha256:5ca0dd4a05fe9727a9eecbeaa3602014e959ad171cab1088d6fdeda1879cf496",
+      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes.",
+      "fingerprint": "sha256:0ce4531f4477cf9515e37c7d98ebd63d747dcaea772cf89663b7c1a2f59bd01f"
     },
     {
       "base_commit": "a32d04048c4b0127316c65704c7c12e5cf22167d",
       "base_workflow_tree": "a0026081fadafb942f0b607fc8647a77469d50c4",
-      "candidate_workflow_tree": "sha256:3e61e1140b9b996d5e00441b5393bfcdbef0757f2637de8f0817ba6eda46baca",
+      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
       "changed_files": [
-        "lint.yml"
+        "lint.yml",
+        "release.yml"
       ],
-      "diff_digest": "sha256:0a9d96afb9e2a1279b93c49dd8fbc56dd07b6df671b1f616556c03ce10547edb",
-      "rationale": "Founder-authorized remediation candidate: install the reviewed workflow-structure verifier and mutation harness in the read-only lint job for manual dispatch.",
-      "fingerprint": "sha256:8af72dccd19e81f6b94547b60e0b08670bc2aaa9e947c859db583b3a985a616b"
+      "diff_digest": "sha256:4a08832eaa2fa8987d5ed5e85b9035b6162cfd5d3924f90c3a0b9976edd08730",
+      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes.",
+      "fingerprint": "sha256:7d536ed3126a6f40cd28f46b594d511fa9fd2d208cf22ad9fa3591b249d48691"
+    },
+    {
+      "base_commit": "029f8b3886f67c23b156f99528a27f4577ba639c",
+      "base_workflow_tree": "cad9a161b8c4c9c629f812de130d3294d9fdd968",
+      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
+      "changed_files": [
+        "release.yml"
+      ],
+      "diff_digest": "sha256:de3db3a17cd9d07966b638d3008a8dc15c384f3e20b22d8cfa1e0aa3e0906bc0",
+      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes for manual dispatch.",
+      "fingerprint": "sha256:410b48f3d5054050de3c36b11ad5cb3d643d6b118950b46020f4f4abb41e4014"
     }
   ]
 }

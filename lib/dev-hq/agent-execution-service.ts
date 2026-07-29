@@ -698,9 +698,10 @@ export class UndispatchableRequestError extends Error {
 /**
  * Refuse a task that is not eligible to receive new work.
  *
- * `active` and unassigned is the system's own definition of dispatchable work —
- * `listReadyWork` filters on exactly this pair — and dispatch checked neither,
- * only that the task existed. A draft task could be started before it was
+ * Dispatch itself owns the active-and-unassigned precondition. The legacy
+ * `ExecutionRunner.listReadyWork` method is an active-only listing, is not
+ * consulted by this path, and does not claim dispatch eligibility. Dispatch
+ * previously checked neither condition, only that the task existed. A draft task could be started before it was
  * authorized; a completed, rejected or archived task could be silently reopened
  * by an execution that no longer corresponds to anything the founder approved;
  * a paused or blocked task could run while it was explicitly stopped; and a task
@@ -1354,10 +1355,14 @@ async function reconcileUnescalatedFailures(): Promise<void> {
  * to the `Execution` domain type. The trade is real and worth naming: a stored
  * `queuedSince` would be one fact to keep true, where this reconstructs it from
  * three timestamps across two record types, and stays correct only while an
- * assignment is released for reasons that genuinely mean "not stranded". That is
- * true of both release sites today (`releaseExecution`, and
- * `releaseAssignmentForReassignment`, which releases precisely because the
- * assignment became unusable).
+ * assignment is released for reasons that genuinely mean "not stranded".
+ * Four writes release assignments today. Three can remain observable to queued
+ * work and legitimately reset this anchor: `releaseExecution`,
+ * `reclaimStale`, and `releaseAssignmentForReassignment`. `cancelExecution`
+ * also releases, but makes the execution terminal, so stall detection cannot
+ * observe that timestamp. Any future release path that leaves or returns an
+ * execution queued and unassigned must preserve this predicate or replace the
+ * derived anchor with a stored invariant (OBL-35).
  *
  * ISO-8601 UTC strings from `toISOString()` compare lexicographically in
  * chronological order, which is the same property `compareByIdleThenId` relies

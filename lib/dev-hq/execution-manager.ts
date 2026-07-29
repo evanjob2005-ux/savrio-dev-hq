@@ -251,10 +251,14 @@ export function findLiveAgentExecutionForTask(
   return null;
 }
 
-/** Tasks eligible to be dispatched to an agent: active and unassigned. */
+/**
+ * Active work exposed through the legacy ExecutionRunner readiness port.
+ * Ownership is not part of this listing: no current production operation writes
+ * task ownership, and the real dispatch path enforces its own invariants.
+ */
 export async function listReadyWork(): Promise<Task[]> {
   return [...getDevHqStore().tasks.values()].filter(
-    (task) => task.status === "active" && task.assigneeAgentId === null,
+    (task) => task.status === "active",
   );
 }
 

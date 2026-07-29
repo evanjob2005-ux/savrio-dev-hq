@@ -76,7 +76,10 @@ def run_bash(source, env, cwd):
     try:
         full = dict(os.environ)
         full.update({k: str(v) for k, v in env.items()})
-        proc = subprocess.run(["bash", script], capture_output=True, text=True,
+        bash = (r"C:\Program Files\Git\bin\bash.exe"
+                if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe")
+                else "bash")
+        proc = subprocess.run([bash, script], capture_output=True, text=True,
                               env=full, cwd=cwd)
     finally:
         os.unlink(script)
@@ -687,6 +690,9 @@ def gh_ambiguity_cases(doc, pre_doc):
     tagstate_src = step(doc, "publish", "Re-verify tag and release state")["run"]
     create_src = step(doc, "publish",
                       "Create annotated tag and GitHub release")["run"]
+    snapshot_src = step(doc, "validate", "Snapshot the remote release-tag set")["run"]
+    recheck_src = step(doc, "publish",
+                       "Re-check that the remote release-tag set has not moved")["run"]
     pre_validate_src = heredoc(step(pre_doc, "validate",
                                     "Validate version, evidence, and target")["run"])
     pre_tagstate_src = step(pre_doc, "publish",
@@ -852,6 +858,66 @@ def gh_ambiguity_cases(doc, pre_doc):
               f"(ambiguity must never delete a tag)")
 
     # -------------------------------------------------------------- NBF-5
+    section("OBL-40  all three remaining ls-remote sites distinguish an "
+            "absent ref from an unreachable remote")
+
+    for label, src, extra in (
+        ("validation tag-set snapshot", snapshot_src, {}),
+        ("post-approval tag-set recheck", recheck_src,
+         {"EXPECTED": "intentionally-different"}),
+        ("publish resume tag probe", tagstate_src, release_env("unused")),
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            origin, work, stub, env, sha = sandbox(tmp)
+            case_env = {**env, **extra}
+            if label == "publish resume tag probe":
+                case_env.update(release_env(sha))
+            proc = run_bash(src, case_env, cwd=work)
+            # Recheck legitimately exits 1 because EXPECTED is deliberately
+            # different; reaching that policy verdict proves it evaluated the
+            # reachable remote. The genuine stable exit-0 null for this same
+            # step is P0-10's "nothing published during the wait" case.
+            expected = 1 if label == "post-approval tag-set recheck" else 0
+            ok = proc.returncode == expected
+            RESULTS.append(ok)
+            arm = ("reachable-evaluation arm" if
+                   label == "post-approval tag-set recheck" else "null arm")
+            print(f"  [{'ok  ' if ok else 'FAIL'}] {arm} ({label}): "
+                  f"reachable remote -> exit {proc.returncode}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            origin, work, stub, env, sha = sandbox(tmp)
+            git_sandbox(["remote", "set-url", "origin",
+                         os.path.join(tmp, "gone.git")], work)
+            case_env = {**env, **extra}
+            if label == "publish resume tag probe":
+                case_env.update(release_env(sha))
+            proc = run_bash(src, case_env, cwd=work)
+            expect(f"KNOWN-BAD ({label}): unreachable remote is not absence",
+                   proc, 2, "::error::")
+
+            # Mutation arm: remove exactly this production handler's explicit
+            # classification branch while preserving the ls-remote call. The
+            # corresponding unreachable case must stop satisfying exit-2 +
+            # diagnostic, independently for all three sites.
+            mutated = re.sub(
+                r'if ! ([a-z_]+="\$\(git ls-remote[^\n]+\)"); then\n'
+                r'.*?\n\s*fi',
+                r'\1',
+                src,
+                count=1,
+                flags=re.S,
+            )
+            changed = mutated != src
+            proc = run_bash(mutated, case_env, cwd=work)
+            caught = changed and not (
+                proc.returncode == 2 and "::error::" in
+                (proc.stdout + proc.stderr)
+            )
+            RESULTS.append(caught)
+            print(f"  [{'ok  ' if caught else 'FAIL'}] mutation ({label}): "
+                  "removing its failure branch makes this red arm fail")
+
     section("NBF-5  `git ls-remote` failing to reach the remote must not read "
             "as 'the tag does not exist there'")
 

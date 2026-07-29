@@ -82,7 +82,10 @@ export type ClaimDeclinedOutcome = Exclude<
  * Sprint 1D tasks (1D-2/1D-3).
  */
 export interface ExecutionRunner {
-  /** Tasks eligible to be dispatched to an agent (active, unassigned, deps met). */
+  /**
+   * Legacy active-only work listing. This does not assert unassigned state,
+   * dependency readiness, or dispatch eligibility; dispatch owns those checks.
+   */
   listReadyWork(): Promise<Task[]>;
   /** Select an agent and create the execution + assignment lease for a task. */
   assignExecution(

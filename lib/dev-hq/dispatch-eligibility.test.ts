@@ -63,9 +63,10 @@ describe("dispatch eligibility", () => {
   /**
    * P1-14. Dispatch checked only that the task EXISTED. Every other lifecycle
    * state — not yet authorized, explicitly stopped, already finished, refused,
-   * or already owned by an agent — could receive an execution. `listReadyWork`
-   * has always defined dispatchable work as active-and-unassigned; dispatch just
-   * never consulted that definition.
+   * or already owned by an agent — could receive an execution. Dispatch itself
+   * owns and enforces those preconditions. The legacy `listReadyWork` port is an
+   * active-only listing, is not consulted here, and does not assert assignment,
+   * dependency, or dispatch eligibility.
    */
   describe("task lifecycle state (P1-14)", () => {
     it.each<LifecycleStatus>([
