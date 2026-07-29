@@ -45,7 +45,7 @@ import {
   REVIEW_EVENT_TYPE,
   REVIEW_RESPONSE_DEADLINE_MS,
 } from "@/lib/dev-hq/constants";
-import { nextId, nowIso } from "@/lib/dev-hq/id";
+import { nextCapabilityToken, nextId, nowIso } from "@/lib/dev-hq/id";
 
 export const AGENT_REVIEW_TASK_ID = "agent-review";
 
@@ -351,7 +351,7 @@ async function performReviewDispatch(
 
   const callbackToken = await reviewStore.reserveCallbackToken({
     reviewId: review.id,
-    token: nextId("rvt"),
+    token: nextCapabilityToken("rvt"),
   });
 
   const attempt = review.dispatchAttempts + 1;
