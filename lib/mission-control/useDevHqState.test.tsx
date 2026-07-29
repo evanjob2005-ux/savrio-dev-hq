@@ -469,4 +469,126 @@ describe("P1-23 · a stale failure cannot downgrade a newer successful state", (
     ).toBe("degraded");
     expect(feedAt(0).consecutiveFailures).toBe(1);
   });
+
+  // F-6. The same rule, one call site along.
+  //
+  // P1-23 stopped a superseded *failure* from degrading a newer snapshot, but
+  // `applyMutationSnapshot` still carried an already-accumulated failure count
+  // forward, on the ground that it was "earned by evidence that is still the
+  // most recent this feed has". It is not: the mutation snapshot came back over
+  // the same connection and is strictly newer than every failure that preceded
+  // it — which is exactly what the line above it records by advancing
+  // `lastResultSequence`. So the founder pressed Approve, the authoritative
+  // snapshot came straight back, and it was labelled `degraded` beside data that
+  // had just arrived.
+
+  describe("F-6 · a mutation snapshot clears failures it supersedes", () => {
+    it("reports live when the founder's own snapshot arrives after a failure", async () => {
+      await inFlightRequests(1);
+
+      await inFlight[0].fail();
+      expect(
+        feedAt(0).status,
+        "setup did not reach the degraded state this case starts from",
+      ).toBe("degraded");
+      expect(feedAt(0).consecutiveFailures).toBe(1);
+
+      // The founder approves. The decision endpoint answers over the same
+      // connection the poll just failed on, which is what proves the connection
+      // works now.
+      act(() => {
+        feedAt(0).applySnapshot(AFTER_DECISION);
+      });
+
+      expect(
+        feedAt(0).state?.processStart.id,
+        "the founder's own post-decision snapshot was not applied",
+      ).toBe("after-decision");
+      expect(
+        feedAt(0).status,
+        "the snapshot the founder's decision returned is labelled `degraded` " +
+          "on the strength of a poll that failed BEFORE it. That failure was " +
+          "superseded by this very response — the line that advances " +
+          "`lastResultSequence` says so — and the label tells the founder their " +
+          "current data cannot be trusted",
+      ).toBe("live");
+      expect(feedAt(0).consecutiveFailures).toBe(0);
+      expect(feedAt(0).error).toBeNull();
+    });
+
+    it("reports live rather than disconnected after three failures the snapshot supersedes", async () => {
+      await inFlightRequests(3);
+
+      await inFlight[0].fail();
+      await inFlight[1].fail();
+      await inFlight[2].fail();
+      expect(feedAt(0).status).toBe("disconnected");
+
+      act(() => {
+        feedAt(0).applySnapshot(AFTER_DECISION);
+      });
+
+      expect(
+        feedAt(0).status,
+        "the feed claims the connection is LOST while displaying a snapshot " +
+          "that arrived over it moments ago",
+      ).toBe("live");
+      expect(feedAt(0).consecutiveFailures).toBe(0);
+    });
+
+    it("NULL ARM: a failure newer than the mutation snapshot still degrades it", async () => {
+      // Identical starting state — one request in flight, one failure — and the
+      // same applySnapshot. Only the order is swapped, so the failure is the
+      // newer report. Without this, clearing the count unconditionally would
+      // satisfy both cases above by making applySnapshot a permanent mute.
+      await inFlightRequests(1);
+
+      await inFlight[0].fail();
+      act(() => {
+        feedAt(0).applySnapshot(AFTER_DECISION);
+      });
+
+      // A poll that departs after the snapshot, and fails.
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await inFlight[1].fail();
+
+      // Deliberately asserts the verdict and not the count. The count is what
+      // the paired case above changes, so pinning it here would make this arm
+      // fail for the same reason that one does, and it would stop being a
+      // control. What must hold either way is that a genuinely newer failure
+      // still reaches the founder.
+      expect(
+        feedAt(0).status,
+        "a failure that is genuinely newer than the founder's snapshot was " +
+          "swallowed, so the feed no longer reports staleness at all after any " +
+          "mutation",
+      ).toBe("degraded");
+      expect(feedAt(0).consecutiveFailures).toBeGreaterThanOrEqual(1);
+      expect(feedAt(0).error).toContain("503");
+    });
+
+    it("NULL ARM: a late poll success older than a failure still leaves it standing", async () => {
+      // The other control, and the one that pins *why* applySnapshot may clear
+      // and an ordinary success may not. A poll that departed before the failure
+      // carries no evidence that the connection recovered, so its late success
+      // must not clear the count — only a report that supersedes the failure
+      // may. Same store, same single failure.
+      await inFlightRequests(3);
+
+      await inFlight[0].settle(BEFORE_DECISION);
+      await inFlight[2].fail();
+      expect(feedAt(0).status).toBe("degraded");
+
+      await inFlight[1].settle(AFTER_DECISION);
+
+      expect(
+        feedAt(0).status,
+        "clearing failures has leaked from applySnapshot into the ordinary " +
+          "poll path, where a superseded success now hides real staleness",
+      ).toBe("degraded");
+      expect(feedAt(0).consecutiveFailures).toBe(1);
+    });
+  });
 });

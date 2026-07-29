@@ -16,6 +16,7 @@
 
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
 import {
+  cancelExecution,
   ensureAssignment,
   ensureExecution,
   getExecution,
@@ -765,11 +766,21 @@ export async function raiseRetryExhaustionEscalation(
  *         origin is what makes the two independently raisable.
  *
  * The execution is deliberately left `queued` and is not transitioned. Marking
- * it `failed` at attempt 1 would put its status and its attempt counter in
- * disagreement, which `assertRetryExhausted` and `reconcileUnescalatedFailures`
- * both read as exhaustion; and leaving it queued means that if capacity returns
- * before the founder acts, the authorized work still runs — which is exactly the
- * path the dedupe argument above depends on being reachable.
+ * it `failed` at attempt 1 would make it terminal, unescalated and *invisible to
+ * both backstops that exist for exactly that state*: `reconcileUnescalatedFailures`
+ * skips it before anything else, because a stalled execution has neither an
+ * `agentId` nor an `assignmentId`, and would skip it again on the attempt bound;
+ * and `assertRetryExhausted` does not read the disagreement as exhaustion but
+ * throws on it, since it requires `attempt >= MAX_EXECUTION_ATTEMPTS`. So the
+ * outcome would not be a wrong escalation — it would be no escalation at all,
+ * from a record that reads as a finished failure. That is worse than the stall it
+ * replaces. Leaving it queued also means that if capacity returns before the
+ * founder acts, the authorized work still runs — which is exactly the path the
+ * dedupe argument above depends on being reachable.
+ *
+ * What ends this execution is the founder's own decision: `resolveEscalation`
+ * cancels it (SVC-07), which is a terminal transition its attempt counter does
+ * not contradict and which every backstop reads correctly.
  *
  * Idempotent by the same construction as every other raise here: the store
  * dedupes per (execution, origin) and each side effect is re-applied only when
@@ -840,6 +851,83 @@ export async function raiseQueueStallEscalation(
 }
 
 /**
+ * End the execution an escalation is about, once the founder has decided its
+ * fate and it is still live (SVC-07).
+ *
+ * **Why this exists at all.** `queue_stalled` is the first origin whose execution
+ * is NOT terminal when the escalation is raised — deliberately so, per
+ * `raiseQueueStallEscalation`'s third judgement, since leaving it queued is what
+ * lets the authorized work still run if capacity returns before the founder
+ * acts. `retry_exhausted` raises from a `failed` execution and `review_exhausted`
+ * from a `succeeded` one, and both are terminal, so until this origin existed a
+ * resolution never had anything live to clean up. Three consequences followed
+ * from that gap, and all three are the same gap:
+ *
+ *   1. `reconcileQueuedDispatches` filters on status and attempt only, with no
+ *      per-task condition. A stalled execution is `queued`, so once the founder
+ *      abandoned or accepted the task, the very next sweep with capacity
+ *      available assigned and dispatched agent work against a terminal outcome.
+ *   2. That work could then fail three times and raise `retry_exhausted` — a
+ *      *different* origin, so the per-(execution, origin) dedupe did not collapse
+ *      it — whose `ensureEscalatedTaskStatus` moved the task `rejected` ->
+ *      `needs_revision`. Neither `hasOpenEscalationForTask` nor
+ *      `isNewestResolutionForTask` refuses it: both ask about escalation recency,
+ *      and that escalation genuinely is the newest one. The founder's abandon was
+ *      silently reversed.
+ *   3. If capacity never returned, the execution stayed stalled forever *and*
+ *      could never escalate again: `createEscalation` dedupes per (execution,
+ *      origin) regardless of status, so every later sweep handed back the same
+ *      resolved record. Permanently stranded and permanently unable to say so —
+ *      the SVC-01 shape the stall deadline was built to close.
+ *
+ * Cancelling closes all three at once, because each of them needs the execution
+ * to still be `queued`: the sweep skips a terminal execution, no `retry_exhausted`
+ * can arise from one, and `isQueueStalled` requires `status === "queued"` so
+ * nothing is left in the stalled-and-silent shape.
+ *
+ * Applied to every resolution verb, including `revise`. `revise` then authorizes
+ * its fresh execution through `ensureReviseDispatch` at a *different* id, which
+ * is what keeps the founder reachable: if that retry stalls too, it is a new
+ * (execution, origin) pair and raises its own escalation. Reusing the stalled
+ * execution as the revision would satisfy ADR-0002 E2's "fresh 3-attempt budget"
+ * on the counter — it is an untouched attempt 1 — but it would reinstate
+ * consequence 3 on exactly that path, since the retry would carry the resolved
+ * escalation that already dedupes it.
+ *
+ * Idempotent, and safe to run against any execution state: `cancelExecution` is
+ * itself a no-op once terminal, releases a held assignment, and frees the agent
+ * when one was running. Evidence is keyed on the escalation's own uri like every
+ * other record here. The `execution.cancelled` lifecycle event and the attempt
+ * outcome evidence are not emitted here — `reconcileAttemptRecords` already
+ * reconciles every non-running agent-backed execution through
+ * `finalizeTerminalExecution`, whose durable per-(type, execution) key makes that
+ * the one canonical emitter.
+ */
+async function ensureEscalatedExecutionEnded(
+  escalation: Escalation,
+): Promise<void> {
+  const executionId = escalation.executionId;
+  if (!executionId) return;
+  const current = getDevHqStore().executions.get(executionId);
+  if (!current || isTerminalExecution(current.status)) return;
+
+  const observed = current.status;
+  await cancelExecution(executionId);
+  await ensureEscalationEvidence({
+    ref: `escalation:${escalation.id}:execution-cancelled`,
+    taskId: escalation.taskId,
+    executionId,
+    label: "Escalation resolved: live execution cancelled",
+    summary:
+      `Escalation ${escalation.id} resolved ${escalation.resolution ?? "terminally"}, so ` +
+      `execution ${executionId} — still ${observed} at attempt ${current.attempt ?? 1} when the ` +
+      `decision landed — was cancelled. Leaving it live would let a later sweep dispatch it ` +
+      `against a task the founder has already decided.`,
+    createdByAgentId: null,
+  });
+}
+
+/**
  * Founder resolution of an escalation. Idempotent: the transition is applied once
  * and re-resolving is a no-op that re-returns the escalation. Side effects are
  * reconciled idempotently (Fix 3). Throws EscalationNotFoundError for a missing id
@@ -870,6 +958,16 @@ export async function resolveEscalation(
     );
   }
   const appliedResolution = resolved.resolution;
+
+  // SVC-07: end the escalated execution before anything else acts on the
+  // decision. First, so no window exists in which the task carries the founder's
+  // outcome while the execution behind it is still dispatchable — and, for
+  // `revise`, so the fresh execution below is never the second live execution on
+  // this task (the one-live-execution-per-task invariant of 638e45c, which
+  // `ensureReviseDispatch` reaches without passing through `dispatchAgentExecution`).
+  // A no-op for the two terminal origins, which is every escalation except a
+  // queue stall.
+  await ensureEscalatedExecutionEnded(resolved);
 
   // Ordering (Task 1E-5): for revise, the canonical revision is resolved BEFORE
   // the task status is reconciled. A replay of an old revise must not reopen a

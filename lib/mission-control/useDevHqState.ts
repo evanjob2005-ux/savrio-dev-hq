@@ -202,16 +202,30 @@ function applyMutationSnapshot(next: DevHqState): void {
   // Also the freshest *report*: this snapshot came back over the same
   // connection, so every poll that departed earlier and fails later is stale
   // news about it and must not degrade the status the founder is reading
-  // (P1-23). The existing failure count is left alone — it was earned by
-  // evidence that is still the most recent this feed has.
+  // (P1-23).
   lastResultSequence = appliedSequence;
   hasLoaded = true;
+  // And the accumulated failures are stale news for the same reason, one call
+  // site along. They were left standing on the argument that they were "earned
+  // by evidence that is still the most recent this feed has" — but they are not:
+  // this snapshot came back over the same connection and is strictly newer than
+  // every one of them, which is precisely the fact `lastResultSequence` above
+  // records. Keeping the count produced a `degraded` — or after three, a
+  // `disconnected` — label beside a snapshot that had just arrived, the same
+  // untruth P1-23 removed from the poll path. `poll`'s success branch already
+  // clears the count on exactly this reasoning; this branch is a success too,
+  // and one whose supersession is not conditional but guaranteed.
+  //
+  // This suppresses no *future* failure: a poll that departs after this snapshot
+  // takes a higher sequence, so it still supersedes and still degrades.
+  const consecutiveFailures = 0;
   emit({
     ...snapshot,
     state: next,
-    status: statusFor(snapshot.consecutiveFailures, next),
+    status: statusFor(consecutiveFailures, next),
     error: null,
     updatedAt: new Date().toISOString(),
+    consecutiveFailures,
   });
 }
 
