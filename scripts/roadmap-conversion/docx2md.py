@@ -8,7 +8,6 @@ Rules (same as the v8.0 registration record documents):
   typographic quotes and dashes preserved verbatim
 No sentence is rewritten, reordered, summarised, added, or removed.
 """
-import html
 import re
 import sys
 import zipfile
