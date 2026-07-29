@@ -83,15 +83,92 @@ function assertRetryExhausted(execution: Execution): void {
 
 // --- reconciliation helpers (Fix 3): idempotent, re-applied only if missing ---
 
+/**
+ * Whether an unresolved founder escalation currently holds this task (ARCH-02).
+ *
+ * **The coordination predicate between the two orchestrators that write
+ * `Task.status`.** An open escalation means a founder decision is outstanding on
+ * the task, so no other flow may declare that task finished; the escalation
+ * lifecycle owns its status until the founder resolves it. The founder-request
+ * workflow consults this before writing its own outcome, which is the only
+ * reason the two can no longer disagree.
+ *
+ * Read **synchronously**, with no await anywhere in it. That is a requirement,
+ * not a style choice: it is evaluated inside `updateTaskStatusIf`'s
+ * precondition, which the repository runs in the same synchronous step as the
+ * write. An await here would reopen exactly the gap the transition exists to
+ * close, and the check would once again be a decision made from a stale reading.
+ *
+ * A scan rather than an index, matching every other escalation lookup in the
+ * store. Bounded by the escalation count, which is small; SVC-06 tracks the
+ * store's scan costs as a whole and is deliberately not pre-empted here.
+ */
+export function hasOpenEscalationForTask(taskId: string): boolean {
+  for (const escalation of getDevHqStore().escalations.values()) {
+    if (escalation.taskId === taskId && escalation.status === "open") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Move the task to the status an escalation lifecycle transition implies,
+ * committing the decision atomically against the escalation state that
+ * authorizes it (ARCH-02).
+ *
+ * Previously a read, a check and an unguarded `updateTask`, with an await
+ * between the read and the write. Two orchestrators write this field, so that
+ * gap was not theoretical: whichever wrote second overwrote the other's decision
+ * with a status chosen from a reading that had since gone stale — which is how
+ * an escalation could sit open on a task the founder-request flow had already
+ * marked `completed`. The precondition is supplied by the caller because the
+ * authorizing fact differs by transition, and it is evaluated by the repository
+ * in the same synchronous step as the write.
+ */
 async function ensureTaskStatus(
   taskId: string,
   status: Task["status"],
+  precondition: (current: Task) => boolean,
 ): Promise<void> {
   const { taskRepository } = getDevHqAdapters();
-  const task = await taskRepository.getTask(taskId);
-  if (task && task.status !== status) {
-    await taskRepository.updateTask(taskId, { status });
-  }
+  await taskRepository.updateTaskStatusIf(taskId, status, precondition);
+}
+
+/**
+ * Mark the task as needing revision for an escalation that has just been raised.
+ *
+ * The authorizing fact is the escalation itself: the raise wrote it as `open`
+ * immediately before this call, so re-checking that an open escalation still
+ * holds the task is a genuine condition rather than `() => true` — it refuses
+ * when the founder resolved the escalation inside the gap, which would otherwise
+ * strand the task in `needs_revision` with nothing outstanding.
+ */
+async function ensureEscalatedTaskStatus(taskId: string): Promise<void> {
+  await ensureTaskStatus(taskId, "needs_revision", () =>
+    hasOpenEscalationForTask(taskId),
+  );
+}
+
+/**
+ * Apply a founder resolution's terminal task outcome (accept -> completed,
+ * abandon -> rejected).
+ *
+ * Refuses while *another* escalation is still open on the task — the resolved
+ * one is already `resolved` by the time this runs, so it never blocks itself.
+ * Declaring the task finished under an outstanding founder decision is the same
+ * untruth the founder-request flow is now stopped from telling; the rule is one
+ * rule, applied wherever a flow wants to call a task done.
+ */
+async function ensureResolvedTaskStatus(
+  taskId: string,
+  status: Task["status"],
+): Promise<void> {
+  await ensureTaskStatus(
+    taskId,
+    status,
+    () => !hasOpenEscalationForTask(taskId),
+  );
 }
 
 /**
@@ -387,7 +464,7 @@ export async function raiseReviewExhaustionEscalation(
     return escalation;
   }
 
-  await ensureTaskStatus(escalation.taskId, "needs_revision");
+  await ensureEscalatedTaskStatus(escalation.taskId);
   await ensureEscalationEvidence({
     ref: `escalation:${escalation.id}:raised`,
     taskId: escalation.taskId,
@@ -441,7 +518,7 @@ export async function raiseRetryExhaustionEscalation(
     return escalation;
   }
 
-  await ensureTaskStatus(escalation.taskId, "needs_revision");
+  await ensureEscalatedTaskStatus(escalation.taskId);
   await ensureEscalationEvidence({
     ref: `escalation:${escalation.id}:raised`,
     taskId: escalation.taskId,
@@ -511,7 +588,7 @@ export async function resolveEscalation(
     appliedResolution === "revise" ? await ensureReviseDispatch(resolved) : null;
 
   if (appliedResolution !== "revise") {
-    await ensureTaskStatus(
+    await ensureResolvedTaskStatus(
       resolved.taskId,
       taskStatusForResolution(appliedResolution),
     );

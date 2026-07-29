@@ -134,12 +134,32 @@ export const REVIEW_EVENT_TYPE = {
 } as const;
 
 /**
+ * How many events the in-memory timeline retains. The feed cannot serve more
+ * than this, which is why it is also the upper bound the events endpoint
+ * accepts: a caller asking for more is asking for something the store can never
+ * answer, and answering it anyway would under-deliver silently.
+ */
+export const EVENT_BUFFER_SIZE = 200;
+
+/** Events returned by `GET /api/dev-hq/events` when the caller states no limit. */
+export const EVENT_FEED_DEFAULT_LIMIT = 20;
+
+/**
  * Escalation lifecycle event names, emitted from the service layer (ADR-0002 E2/E3).
  */
 export const ESCALATION_EVENT_TYPE = {
   raised: "escalation.raised",
   resolved: "escalation.resolved",
 } as const;
+
+/**
+ * Recorded when a flow's conditional `Task.status` write was refused by its
+ * precondition (ARCH-02). The refusal is the correct outcome — another
+ * orchestrator's decision stands — but a workflow that finalizes while the task
+ * keeps a different status is a divergence, and an unrecorded divergence is
+ * indistinguishable from one that never happened.
+ */
+export const TASK_STATUS_REFUSED_EVENT_TYPE = "task.status_write_refused";
 
 /** Base URL for Trigger.dev worker callbacks into the Next.js dev store. */
 export function getDevHqBaseUrl(): string {

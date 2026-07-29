@@ -911,7 +911,15 @@ export async function handleExecutionHeartbeat(
 export interface CompleteExecutionInput {
   executionId: string;
   status: AgentExecutionStatus;
-  instructions: string;
+  /**
+   * What the reporting worker believes it ran. Descriptive only — **nothing
+   * re-dispatches from it**. A retry runs `recoveryInstructions(execution)`, the
+   * execution's own immutable persisted request, exactly as every other
+   * re-dispatch path does. Optional because a caller that omits it changes
+   * nothing: the HTTP edge used to substitute `""` here, and that empty string
+   * became the work the retry ran.
+   */
+  instructions?: string;
   /** The completing attempt's assignment id — the idempotency key. */
   assignmentId?: string;
   summary?: string | null;
@@ -988,9 +996,18 @@ export async function handleExecutionComplete(
         execution.assignmentId,
         execution.agentId,
       );
+      // The execution's own persisted request, never the callback's payload.
+      // A retry is another attempt at *the same authorized work*, so it must run
+      // what the founder asked for — the same rule the reclaim and queued-sweep
+      // re-dispatches already follow through this one helper. Taking the
+      // caller's `instructions` made the work a function of whatever the last
+      // worker happened to report: the internal complete route substitutes `""`
+      // when the field is absent, so an omitted field re-ran the task with empty
+      // instructions, and a worker reporting different text silently replaced
+      // the request on every retry.
       await ensureDispatchForAssignment(
         execution.assignmentId,
-        input.instructions,
+        recoveryInstructions(execution),
       );
       return { execution, retried: true };
     }

@@ -40,7 +40,11 @@ export async function POST(request: Request) {
       executionId: body.executionId,
       assignmentId: body.assignmentId,
       status: body.status,
-      instructions: body.instructions ?? "",
+      // Passed through unsubstituted. An absent field is absent, not `""`:
+      // nothing re-dispatches from this value any more, and manufacturing an
+      // empty string here is what previously made an omitted field re-run the
+      // work with empty instructions.
+      instructions: body.instructions,
       summary: body.summary ?? null,
     });
     return NextResponse.json(result);

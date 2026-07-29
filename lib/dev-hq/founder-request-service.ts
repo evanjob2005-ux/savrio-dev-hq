@@ -3,8 +3,14 @@ import {
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_REQUEST_WORKFLOW_ID,
   FOUNDER_USER_ID,
+  TASK_STATUS_REFUSED_EVENT_TYPE,
 } from "@/lib/dev-hq/constants";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
+// The one predicate the two Task.status orchestrators share (ARCH-02). Imported
+// statically and by name so the coordination between them is greppable rather
+// than implied; the dependency is one-way — the escalation service knows nothing
+// about this one.
+import { hasOpenEscalationForTask } from "@/lib/dev-hq/escalation-service";
 import { nowIso, slugify } from "@/lib/dev-hq/id";
 import type { DevHqState } from "@/lib/dev-hq/types";
 import type {
@@ -395,10 +401,58 @@ export async function finalizeWorkflowOutcome(input: {
     });
   }
 
-  await taskRepository.updateTask(task.id, {
-    status: taskStatusForOutcome(input.decision, rejectionKind),
-    occurredAt: timestamp,
-  });
+  // ARCH-02. This flow and the escalation lifecycle both write `Task.status`,
+  // and this site used to write it unconditionally from a reading taken several
+  // awaits earlier — so the later writer simply overwrote the earlier one's
+  // decision. That is how an escalation could sit open on a task this flow had
+  // already marked `completed`: a founder decision outstanding on work the board
+  // reported finished.
+  //
+  // Both conditions are evaluated by the repository in the same synchronous step
+  // as the write:
+  //   - the task must still hold the status it was observed with, so a
+  //     transition that landed in the gap refuses this write instead of being
+  //     silently overwritten by it;
+  //   - no unresolved escalation may hold the task. An open escalation means the
+  //     founder still owes a decision here, and the escalation lifecycle owns
+  //     the status until they give it. Whichever of the two flows runs second
+  //     now observes the other and yields, so the pair converges either way
+  //     round instead of depending on who wrote last.
+  //
+  // The conditional writer stamps its own `updatedAt`; this write no longer
+  // shares `timestamp` with the rest of the finalization. Nothing reads that
+  // correspondence, and giving it up is what buys the guarantee above.
+  const taskOutcome = taskStatusForOutcome(input.decision, rejectionKind);
+  const appliedTaskStatus = await taskRepository.updateTaskStatusIf(
+    task.id,
+    taskOutcome,
+    (current) =>
+      current.status === task.status && !hasOpenEscalationForTask(task.id),
+  );
+  if (!appliedTaskStatus) {
+    // The workflow still finalizes — it did complete — but the task deliberately
+    // keeps someone else's status, and that divergence goes on the timeline
+    // rather than being inferred later from two records that disagree.
+    const current = await taskRepository.getTask(task.id);
+    await eventLogger.log({
+      type: TASK_STATUS_REFUSED_EVENT_TYPE,
+      entityType: "task",
+      entityId: task.id,
+      message:
+        `Workflow ${input.executionId} finalized as ${input.decision} but did not set task ` +
+        `${task.id} to "${taskOutcome}": the task now reads "${current?.status ?? "missing"}"` +
+        `${
+          hasOpenEscalationForTask(task.id)
+            ? " and an unresolved founder escalation holds it"
+            : " after another transition landed first"
+        }. The other decision stands.`,
+      actorId: null,
+      actorLabel: "System",
+      // One entry per (execution, intended outcome): a replay of the same
+      // finalization is the same refusal, not a second one.
+      dedupeKey: `${TASK_STATUS_REFUSED_EVENT_TYPE}:${input.executionId}:${taskOutcome}`,
+    });
+  }
 
   await workflowEngine.markExecutionSucceeded(input.executionId, {
     at: timestamp,
