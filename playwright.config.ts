@@ -1,17 +1,22 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolveE2EPorts } from "./test/playwright-config";
 
-const PORT = Number(process.env.E2E_PORT ?? 3100);
+const { app: PORT, triggerStub: TRIGGER_STUB_PORT } =
+  resolveE2EPorts({
+    E2E_PORT: process.env.E2E_PORT,
+    E2E_TRIGGER_PORT: process.env.E2E_TRIGGER_PORT,
+  });
 const baseURL = `http://127.0.0.1:${PORT}`;
-const TRIGGER_STUB_PORT = Number(process.env.E2E_TRIGGER_PORT ?? 3199);
 const triggerStubURL = `http://127.0.0.1:${TRIGGER_STUB_PORT}`;
 
-// E2E specs live in e2e/ and are matched explicitly by the .spec.ts suffix, so
-// a file placed here with a .test.ts suffix is collected by neither runner
+// E2E specs live in e2e/ and are matched explicitly by a .spec suffix, so a
+// file placed here with a .test suffix is collected by neither runner
 // rather than by both: Playwright matches only testMatch below, and the Vitest
-// node project excludes e2e/ outright.
+// projects exclude e2e/ outright. The glob admits Playwright's supported
+// JS/TS module and JSX forms without broadening into .test.*.
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "**/*.spec.ts",
+  testMatch: "**/*.spec.?(c|m)[jt]s?(x)",
   // The two projects share one deliberately process-local store and one Trigger
   // transport stub. Source order plus one worker keeps every project
   // deterministic without introducing a reset endpoint into either process.

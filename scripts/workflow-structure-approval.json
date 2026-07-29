@@ -2,22 +2,6 @@
   "version": 2,
   "approvals": [
     {
-      "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
-      "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
-      "changed_files": [
-        "ci.yml",
-        "dependencies.yml",
-        "frontend-tests.yml",
-        "lint.yml",
-        "release.yml",
-        "security.yml"
-      ],
-      "diff_digest": "sha256:1b364cfad05b783592abae1859a7ba138fe509b097264a2aacb956b1b1de0a71",
-      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
-      "fingerprint": "sha256:fdb078fefa5be67926b720140d66131fe4f550b520fbf4304717d5ffa8d0b31b"
-    },
-    {
       "base_commit": "7079779f69a9ec0edf6d92a3f4124599ac1b2a2d",
       "base_workflow_tree": "3d59ff7eab4ef53972dc2c5501e98316ab631239",
       "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
@@ -74,6 +58,33 @@
       "diff_digest": "sha256:6d1ee7350123a429eda9d293c569a76cfb9b702801e1f9686fbd2505d43e6354",
       "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
       "fingerprint": "sha256:a76adc79536b0c70e8d211432d25770e69dc41838eb1489a68994363262cac92"
+    },
+    {
+      "base_commit": "115378bcde14c04b940f17c6ed05768cd928921c",
+      "base_workflow_tree": "75ef1c45b5af4382c9e5d5435f68075a9e02e4c7",
+      "candidate_workflow_tree": "sha256:80c39079c37441feef66b3bdc0489bf7429fce3dc2b7fc9835e609eaf6c2c54c",
+      "changed_files": [
+        "frontend-tests.yml"
+      ],
+      "diff_digest": "sha256:b5314299dc09eda3f9a17e421402c032f9bc7d79b2854788d6df8506eef9116a",
+      "rationale": "Founder-authorized local test-infrastructure repair: require locked Playwright and Next binaries through an executable precondition with red/null coverage.",
+      "fingerprint": "sha256:9ab144d134de49682250b7fcd9de26e567142b0ea8ec12e436c320a9629a960a"
+    },
+    {
+      "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
+      "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
+      "candidate_workflow_tree": "sha256:80c39079c37441feef66b3bdc0489bf7429fce3dc2b7fc9835e609eaf6c2c54c",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
+        "lint.yml",
+        "release.yml",
+        "security.yml"
+      ],
+      "diff_digest": "sha256:c1c2f0217556cf38894a6f2cc7000a014bf54937d7ceb088aa68abd751089751",
+      "rationale": "Aggregate Founder-authorized workflow delta from 79dd9edf: retain reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair, and require locked Playwright and Next binaries through an executable precondition with red/null coverage.",
+      "fingerprint": "sha256:fb4816fddcb8ece71a197d8657dadb3bee5aad69ba3167f8e9161305627b5943"
     }
   ]
 }

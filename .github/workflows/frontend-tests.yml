@@ -136,9 +136,9 @@ jobs:
         run: npm test
 
       - name: Build application
-        # Deliberately ordered after Vitest. The build populates .next/, which
-        # neither Vitest project excludes, so building last keeps generated
-        # output out of test collection without modifying PKG-2 configuration.
+        # Deliberately ordered after Vitest so source tests finish before build
+        # output exists. Both Vitest projects also exclude .next/ explicitly,
+        # preserving that boundary if this ordering changes later.
         run: npx next build
 
       - name: Verify repository hygiene
@@ -202,29 +202,15 @@ jobs:
         run: npm ci
 
       - name: Verify harness preconditions
-        run: |
-          set -euo pipefail
-          missing=0
-
-          for file in playwright.config.ts e2e/smoke.spec.ts; do
-            if [[ ! -f "$file" ]]; then
-              echo "::error file=${file}::Required E2E harness file is missing."
-              missing=1
-            fi
-          done
-
-          if [[ ! -x "node_modules/.bin/playwright" ]]; then
-            echo "::error::node_modules/.bin/playwright is missing or not executable after npm ci."
-            missing=1
-          fi
-
-          if [[ "$missing" -ne 0 ]]; then
-            exit 1
-          fi
-          echo "E2E harness files and local binaries are present."
+        run: >-
+          node scripts/verify-test-harness-preconditions.mjs
+          --file playwright.config.ts
+          --file e2e/smoke.spec.ts
+          --binary playwright
+          --binary next
 
       - name: Install Playwright browser and OS dependencies
-        # Chromium only: playwright.config.ts declares exactly one project.
+        # Chromium only: the config declares desktop and mobile Chromium projects.
         # Browser binaries are intentionally not cached, so every run installs
         # and verifies the browser matching the locked Playwright version.
         run: npx playwright install --with-deps chromium
