@@ -13,7 +13,9 @@ Every finding below was produced by an independent reviewer that **executed** ra
 
 Findings are grouped by **what you'd do about them**, not by which reviewer found them.
 
-**Current state of the branch:** 400 tests pass, lint clean, `tsc --noEmit` clean, build succeeds. Nothing is broken. Two fixes are committed; one is uncommitted and working.
+**Current state of the branch:** 417 tests pass, e2e 6/6, lint clean, `tsc --noEmit` clean, build succeeds. Nothing is broken, nothing is uncommitted.
+
+**Update — second batch (commits `a788b75`, `aea4d6b`, `ab52a38`):** DOC-02, ARCH-01 and UI-01 are closed. Sections 2 and 3 are annotated below rather than rewritten, so the original finding stays readable next to what was done about it.
 
 ---
 
@@ -31,7 +33,7 @@ Findings are grouped by **what you'd do about them**, not by which reviewer foun
 
 ---
 
-## 2. Uncommitted but working (in the tree right now)
+## 2. ~~Uncommitted but working~~ — CLOSED, committed in `7079779`
 
 | ID | Problem | Location |
 |---|---|---|
@@ -39,13 +41,20 @@ Findings are grouped by **what you'd do about them**, not by which reviewer foun
 
 Tests in `lib/dev-hq/capability-token.test.ts` (untracked). Each carries a null arm asserting the **old** generator fails the same bar — including reproducing the reviewer's actual attack: increment the trailing counter and you hold the neighbouring token.
 
-**To finish:** `git add -A && git commit`.
+**Status:** committed in `7079779`. The unused `nextId` import it left behind in `review-service.ts` was removed in `ab52a38`.
 
 ---
 
 ## 3. BLOCKING — fix before this branch merges
 
-### ARCH-01 · CRITICAL · The two security boundaries have no tests
+### ARCH-01 · CRITICAL · ~~The two security boundaries have no tests~~ — CLOSED in `aea4d6b`
+
+> **Closed.** `proxy.test.ts` and `lib/dev-hq/internal-guard.test.ts` cover all four guard arms plus the production block and the matcher's reach; the e2e now requires at least one refused Dev HQ request.
+>
+> Proved capable of failing across four mutations, each restored: `proxy.ts` returning `next()` unconditionally turned the unit test red **and the e2e red** — the scenario that previously passed; disabling the guard's production check, disabling its unconfigured-token check, and relaxing its equality to `startsWith` each turned exactly the corresponding arm red.
+>
+> The two suites that stub the guard were left stubbed. They are testing other things, and now that the guard has direct coverage the stub is no longer the only word on it.
+
 **`proxy.ts`** and **`lib/dev-hq/internal-guard.ts`** stand between an unauthenticated caller and every mutating Dev HQ endpoint. Neither has a test.
 
 - The only two tests touching the inner guard **stub it to always allow**: `rejectInternalDevRequest: () => null` at `lib/dev-hq/continuation-terminal-failure.test.ts:42` and `lib/dev-hq/process-start-marker-continuation-seam.test.ts:57`
@@ -104,14 +113,24 @@ keyword at end    (same values)                          -> EXIT 1, flagged
 
 **Fix both the prose and the regex.** Widening will produce new hits on the existing tree; run it before merging.
 
-### UI-01 · MAJOR · Approve/Reject being wired backwards is undetectable
+### UI-01 · MAJOR · ~~Approve/Reject being wired backwards is undetectable~~ — CLOSED in `ab52a38`
+
+> **Closed, in two halves.** The finding named two independent swaps, and one test file cannot catch both: `ApprovalQueuePanel.test.tsx` presses the buttons and asserts each reaches its own callback and not the other; `MissionControlOverview.test.tsx` asserts Approve POSTs to `/approve`, Reject to `/reject`, and that the announcement matches the request actually sent.
+>
+> Each mutation turns exactly one file red and leaves the other green — which is the evidence that the two halves are genuinely separate rather than duplicated.
+>
+> The panel suite carries an explicit null arm proving `renderToStaticMarkup` output is byte-identical for a correct and a swapped panel. It stays green under the swap; that is the point of it.
+
 `components/mission-control/ApprovalQueuePanel.tsx:135,151`. The only test rendering this component uses `renderToStaticMarkup`, whose output **contains no handler information at all** (reviewer rendered it and inspected).
 
 Swap `onApprove`/`onReject`, or swap `"approve"`/`"reject"` at `components/dashboard/MissionControlOverview.tsx:167-168` — byte-identical HTML, 400/400 green, no e2e coverage. **The Founder presses Approve and the request is rejected.**
 
 This is the one irreversible control in the product and the least verified line in it. Fix is one `.test.tsx` using the already-configured `dom` project and `@testing-library/react`.
 
-### DOC-02 · MAJOR · OBL-12 will silently delete two amendments
+### DOC-02 · MAJOR · ~~OBL-12 will silently delete two amendments~~ — CLOSED in `a788b75`
+
+> **Closed.** OBL-12 now reads eight deltas, A-1 through A-7, and defers the count to the roadmap rather than restating it — so the two records cannot drift apart again. The `.docx` is safe to re-save.
+
 `docs/plans/OPEN_OBLIGATIONS.md:64` says the `.docx` differs by **"A-1..A-5 / six deltas."** `docs/roadmap/MASTER_ROADMAP.md:96-100` says **A-1 through A-7 / eight deltas.** The roadmap is right — A-6 and A-7 were added after OBL-12 was written.
 
 **If you re-save the `.docx` against OBL-12's stated scope, A-6 and A-7 fall outside the governing document while the register reads closed.** Those two are the amendments requiring that a proof be demonstrated capable of failing and that controls be independently re-derived.
@@ -218,11 +237,11 @@ The audit exception list keyed on package instead of advisory. The first workflo
 
 ## 9. Suggested order
 
-1. **DOC-02** — one line, and it's a live hazard the moment you touch the `.docx`
-2. Commit the uncommitted token fix (§2)
-3. **ARCH-01 / UI-02** — boundary tests. Highest value in the document
-4. **UI-01** — Approve/Reject test
-5. **CI-03, CI-05, CI-06, SEC-02, SEC-04** — the control gaps, as one batch
+1. ~~**DOC-02**~~ — done, `a788b75`
+2. ~~Commit the token fix (§2)~~ — done, `7079779`
+3. ~~**ARCH-01 / UI-02**~~ — done, `aea4d6b`
+4. ~~**UI-01**~~ — done, `ab52a38`
+5. **CI-03, CI-05, CI-06, SEC-02, SEC-04** — the control gaps, as one batch ← **next**
 6. **SEC-03** — regex *and* prose
 7. **UI-05, UI-04** — accessibility, both small
 8. Record corrections (§5) as one documentation pass
