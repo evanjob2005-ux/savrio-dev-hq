@@ -66,6 +66,34 @@ async function seedPendingApproval() {
   return { created, approval };
 }
 
+/**
+ * Records the order of the three steps as they actually execute, so the claim is
+ * observed rather than read out of the file.
+ *
+ * The assertion this replaces sliced the source from `async function
+ * decideFounderRequest` and compared `indexOf` of three identifier strings. That
+ * is satisfied by a *mention*, not a call, and it finds whichever mention comes
+ * first in the text -- including one inside a comment. An independent reviewer
+ * demonstrated it: hoisting the `attemptContinuation` call above the decision
+ * block and leaving a comment naming the three in the documented order kept
+ * every one of those assertions green against exactly the inversion this file
+ * exists to pin. Same defect class as UI-08, same treatment -- observe the
+ * resolved behaviour instead of the text that is supposed to produce it.
+ */
+function recordCallOrder(order: string[]) {
+  const manager = getDevHqAdapters().approvalManager;
+  const originalIntent = manager.recordDecisionIntent.bind(manager);
+  vi.spyOn(manager, "recordDecisionIntent").mockImplementation(async (input) => {
+    order.push("approvalManager.recordDecisionIntent");
+    return originalIntent(input);
+  });
+  const originalContinuation = manager.recordContinuation.bind(manager);
+  vi.spyOn(manager, "recordContinuation").mockImplementation(async (input) => {
+    order.push("approvalManager.recordContinuation");
+    return originalContinuation(input);
+  });
+}
+
 describe("decision-path ordering", () => {
   beforeEach(() => {
     resetDevHqStore();
@@ -88,17 +116,7 @@ describe("decision-path ordering", () => {
       return { id: "run_ordering_1f" };
     };
 
-    const manager = getDevHqAdapters().approvalManager;
-    const originalIntent = manager.recordDecisionIntent.bind(manager);
-    vi.spyOn(manager, "recordDecisionIntent").mockImplementation(async (input) => {
-      order.push("approvalManager.recordDecisionIntent");
-      return originalIntent(input);
-    });
-    const originalContinuation = manager.recordContinuation.bind(manager);
-    vi.spyOn(manager, "recordContinuation").mockImplementation(async (input) => {
-      order.push("approvalManager.recordContinuation");
-      return originalContinuation(input);
-    });
+    recordCallOrder(order);
 
     await approveFounderRequest(approval.id);
 
@@ -109,23 +127,58 @@ describe("decision-path ordering", () => {
     ]);
   });
 
-  it("pins the ordering in source", () => {
+  it("keeps the order when the provider returns a typed failure", async () => {
+    const { approval } = await seedPendingApproval();
+    const order: string[] = [];
+    hooks.trigger = async (id) => {
+      if (id === CONTINUATION_TASK_ID) {
+        order.push("tasks.trigger(continuation)");
+        return { ok: false, error: "No worker is available." };
+      }
+      return { id: "run_ordering_1f" };
+    };
+    recordCallOrder(order);
+
+    await approveFounderRequest(approval.id);
+
+    // The branch where the ordering carries the whole argument: the decision has
+    // to be recorded before anything is attempted, or a failed attempt leaves no
+    // record that the founder decided at all. The existing branch tests assert
+    // this by outcome; the deleted source check never reached it either way.
+    expect(order).toEqual([
+      "approvalManager.recordDecisionIntent",
+      "tasks.trigger(continuation)",
+      "approvalManager.recordContinuation",
+    ]);
+  });
+
+  it("keeps the order when the attempt throws", async () => {
+    const { approval } = await seedPendingApproval();
+    const order: string[] = [];
+    hooks.trigger = async (id) => {
+      if (id === CONTINUATION_TASK_ID) {
+        order.push("tasks.trigger(continuation)");
+        throw new Error("continuation dispatch failed");
+      }
+      return { id: "run_ordering_1f" };
+    };
+    recordCallOrder(order);
+
+    await approveFounderRequest(approval.id);
+
+    expect(order).toEqual([
+      "approvalManager.recordDecisionIntent",
+      "tasks.trigger(continuation)",
+      "approvalManager.recordContinuation",
+    ]);
+  });
+
+  it("does not leave the superseded ordering argument in the file", () => {
+    // A DOCUMENTATION check, not an ordering control -- it pins no behaviour and
+    // must not be read as doing so. It exists only so the file cannot carry two
+    // contradictory contracts in its comments. The ordering itself is pinned by
+    // the runtime observations above.
     const source = fs.readFileSync(path.join(ROOT, SERVICE), "utf8");
-    const region = source.slice(source.indexOf("async function decideFounderRequest"));
-    expect(region).not.toBe("");
-
-    expect(region).toContain("recordDecisionIntent");
-    expect(region).toContain("attemptContinuation");
-    expect(region).toContain("recordContinuation");
-    expect(region.indexOf("recordDecisionIntent")).toBeLessThan(
-      region.indexOf("attemptContinuation"),
-    );
-    expect(region.indexOf("attemptContinuation")).toBeLessThan(
-      region.indexOf("recordContinuation"),
-    );
-
-    // The superseded ordering and the argument for it must not survive anywhere
-    // in the file, or the source would carry two contradictory contracts.
     expect(source).not.toContain(
       "Complete the token before recording the decision.",
     );
