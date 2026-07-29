@@ -45,7 +45,7 @@ import {
   REVIEW_EVENT_TYPE,
   REVIEW_RESPONSE_DEADLINE_MS,
 } from "@/lib/dev-hq/constants";
-import { nextCapabilityToken, nextId, nowIso } from "@/lib/dev-hq/id";
+import { nextCapabilityToken, nowIso } from "@/lib/dev-hq/id";
 
 export const AGENT_REVIEW_TASK_ID = "agent-review";
 
