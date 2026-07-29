@@ -30,6 +30,24 @@ const FOUNDER_REQUEST_TASK_ID = "founder-request-workflow";
 /** Run 2: started by the founder's decision. */
 const FOUNDER_REQUEST_CONTINUATION_TASK_ID = "founder-request-continuation";
 
+/**
+ * A gate registration or finalization that cannot show it carries the authority
+ * it claims: an approval belonging to a different execution or task, a recorded
+ * decision contradicting the outcome being written, or a founder-gated workflow
+ * finalising with no approval identity at all.
+ *
+ * Distinct from an ordinary Error because the two say different things to the
+ * caller. A thrown Error says the server broke; this says the server evaluated
+ * the act and refused it. The internal routes answer 409 for this and 500 for
+ * everything else, so a refusal is never read as an outage and retried as one.
+ */
+export class ApprovalAuthorityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApprovalAuthorityError";
+  }
+}
+
 function deterministicExecutiveReview(task: Task): {
   passed: boolean;
   summary: string;
@@ -287,6 +305,75 @@ export async function runExecutiveReview(executionId: string): Promise<{
 }
 
 /**
+ * Resolves the approval a caller is acting under, and proves it belongs to this
+ * run before anything is written on its authority.
+ *
+ * `failWorkflowExecution` already required exactly this of its
+ * continuation-failure input. The two sites that write outcomes did not, which
+ * is how execution A came to be finalizable under execution B's approval: the
+ * approval was checked for existence, and existing is not belonging.
+ *
+ * Both links are checked, not only the execution. `Approval.executionId` and
+ * `Approval.taskId` are written independently when the approval is created, so
+ * agreeing with one is not evidence of agreeing with the other — and the outcome
+ * is written onto the task.
+ */
+async function requireApprovalBoundToRun(
+  approvalId: string,
+  run: WorkflowRunRecord,
+): Promise<Approval> {
+  const { approvalManager } = getDevHqAdapters();
+  const approval = await approvalManager.getApproval(approvalId);
+  // Rule 5 of the control standard: unable to evaluate is its own refusal, never
+  // a pass. An approval that cannot be read establishes nothing about who
+  // authorised this.
+  if (!approval) {
+    throw new ApprovalAuthorityError(
+      `Approval not found: ${approvalId}. Execution ${run.executionId} cannot act on an approval that does not exist.`,
+    );
+  }
+  if (approval.executionId !== run.executionId) {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} belongs to execution ${approval.executionId ?? "none"}, ` +
+        `not execution ${run.executionId}.`,
+    );
+  }
+  if (approval.taskId !== run.taskId) {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} belongs to task ${approval.taskId}, ` +
+        `not task ${run.taskId} which execution ${run.executionId} carries.`,
+    );
+  }
+  return approval;
+}
+
+/**
+ * Whether this run has reached the founder's gate, and so may only finalise
+ * under an approval.
+ *
+ * Two readings, because the gate is opened in two steps by two processes. The
+ * stage is set when the gate is registered; the approval exists one step before
+ * that, and a run whose approval was created but whose registration has not
+ * landed yet is just as much the founder's to decide. Reading the stage alone
+ * would leave the window between the two finalisable without any founder
+ * identity — which is the state `runExecutiveReview` explicitly retries through.
+ *
+ * A validation rejection reaches neither reading: it finalises from
+ * `executive_review`, and its own early return guarantees no approval exists for
+ * the execution. It is therefore unaffected, which is the point — the rule binds
+ * founder authority, and validation never claimed any.
+ */
+async function isAwaitingFounderAuthority(
+  run: WorkflowRunRecord,
+): Promise<boolean> {
+  if (run.stage === "founder_approval_required") return true;
+  const { approvalManager } = getDevHqAdapters();
+  return (
+    (await approvalManager.findPendingByExecution(run.executionId)) !== null
+  );
+}
+
+/**
  * Opens the founder decision gate. Run 1 calls this and then ends.
  *
  * There is no token to attach. The gate is now a stage on the run record and a
@@ -297,17 +384,21 @@ export async function registerApprovalGate(input: {
   executionId: string;
   approvalId: string;
 }): Promise<Approval> {
-  const { approvalManager, workflowRunRepository, eventLogger } =
-    getDevHqAdapters();
+  const { workflowRunRepository, eventLogger } = getDevHqAdapters();
   const run = await workflowRunRepository.getRun(input.executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${input.executionId}`);
   }
 
-  const approval = await approvalManager.getApproval(input.approvalId);
-  if (!approval) {
-    throw new Error(`Approval not found: ${input.approvalId}`);
-  }
+  // The approval must be this run's own, and that is established before the
+  // terminal early return so a cross-linked registration is never answered with
+  // another execution's approval record.
+  //
+  // Registering a gate under a foreign approval used to be accepted: this run's
+  // stage advanced to `founder_approval_required` while the approval the founder
+  // would actually act on carried a different execution. Deciding it advanced
+  // that one, and left this one parked at a gate no decision could open.
+  const approval = await requireApprovalBoundToRun(input.approvalId, run);
 
   if (isWorkflowCompleted(run)) {
     return approval;
@@ -352,6 +443,43 @@ export async function finalizeWorkflowOutcome(input: {
   const run = await workflowRunRepository.getRun(input.executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${input.executionId}`);
+  }
+
+  // --- The authority binding.
+  //
+  // Evaluated before anything else this function does, including the terminal
+  // early return, so a finalization that cannot show it carries this run's
+  // approval is refused whatever state the run is in. Behind the early return it
+  // would instead be answered with the completed record — a success it did not
+  // earn, reported for an act nobody authorised.
+  const approval = input.approvalId
+    ? await requireApprovalBoundToRun(input.approvalId, run)
+    : null;
+
+  // The founder recorded one answer and this call writes the other. Neither
+  // record is quietly corrected to match: the outcome is refused, and the
+  // recorded decision stands as the only decision either record holds. This is
+  // the same stance `decideFounderRequest` already takes on a conflicting
+  // submission, applied to the side that writes the outcome.
+  //
+  // An approval carrying *no* decision is a different case and is still
+  // converged forward below. That path is reachable only for this run's own
+  // approval, it is documented and covered behaviour, and absence of a recorded
+  // answer is not a contradiction of one.
+  if (approval?.decision && approval.decision !== input.decision) {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} records a ${approval.decision} decision and cannot ` +
+        `finalize execution ${run.executionId} as ${input.decision}.`,
+    );
+  }
+
+  // A founder-gated workflow finalising with no approval identity at all. The
+  // outcome would be attributed to Evan on the timeline with nothing behind it.
+  if (!approval && (await isAwaitingFounderAuthority(run))) {
+    throw new ApprovalAuthorityError(
+      `Execution ${run.executionId} is awaiting a founder decision and cannot be ` +
+        `finalized without the approval that carries it.`,
+    );
   }
 
   if (isWorkflowCompleted(run)) {
