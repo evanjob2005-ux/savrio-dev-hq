@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { nextCapabilityToken, nextId } from "@/lib/dev-hq/id";
 
@@ -18,6 +18,49 @@ import { nextCapabilityToken, nextId } from "@/lib/dev-hq/id";
  * between the two, not a property of a string.
  */
 describe("capability token entropy", () => {
+  /**
+   * The clock is frozen for every case here, and this is a correctness
+   * requirement rather than tidiness.
+   *
+   * `nextId` is `prefix-<epoch-millis>-<counter>` (`lib/dev-hq/id.ts:7`), so its
+   * output moves for two independent reasons. Every claim in this file is about
+   * the *counter* — that it is sequential, and that the clock is embedded at all
+   * — and none of them is about the millisecond the mint happened to land on. A
+   * live clock therefore contributed nothing but a race:
+   *
+   *   - the null arm below reconstructs the second id from the first by
+   *     incrementing only the trailing counter, which silently assumes both
+   *     mints saw the same millisecond. Straddle a tick and it reds with the
+   *     counter IDENTICAL and the epoch differing by one:
+   *       expected 'rvt-1785338711082-2' to be 'rvt-1785338711083-2'
+   *     Observed in ~0.9% of full-suite runs and 0 of 350 standalone runs — it
+   *     needs full-suite scheduling pressure to open the window.
+   *   - `is not derived from the wall clock` samples `Date.now()` and then mints,
+   *     comparing a second-resolution prefix. A boundary in that window reds it
+   *     the same way. Never observed, but latent for the same reason and closed
+   *     by the same freeze.
+   *
+   * Pinned at the describe level, not per case, so a case added later cannot
+   * reintroduce the race by omission — any comparison between a `nextId` output
+   * and a separately-sampled clock is exposed to it. Nothing here is lost to the
+   * freeze: `nextCapabilityToken` draws from `randomUUID()`, which does not read
+   * the clock, and no case in this file uses a timer.
+   *
+   * An explicit instant rather than whatever `useFakeTimers` defaults to: the
+   * assertions compare against a 13-digit epoch, so the value must be a real one
+   * and must not depend on that default.
+   */
+  const FROZEN = new Date("2026-07-29T09:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("is not derived from the wall clock", () => {
     const token = nextCapabilityToken("rvt");
     const nowPrefix = String(Date.now()).slice(0, 10);
