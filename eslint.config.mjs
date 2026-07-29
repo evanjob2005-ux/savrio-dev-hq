@@ -15,11 +15,19 @@ const eslintConfig = defineConfig([
     ".trigger/**",
     // Deliberately defective by design: these are the known-bad inputs the
     // Semgrep positive control scans to prove its rules still detect the
-    // defect classes they claim to. Linting them reports real problems that
-    // must not be fixed, and they are not application code. They escape tsc
-    // only incidentally, because TypeScript's include globs do not descend
-    // into dot-directories; this makes the exclusion declared rather than
-    // accidental for ESLint too.
+    // defect classes they claim to. They must never be "fixed", and they are
+    // not application code.
+    //
+    // They report zero problems under the current rule set, so this is not
+    // suppressing existing findings -- it is stopping the rule set from ever
+    // acquiring an opinion about files whose entire purpose is to be wrong.
+    // ESLint's flat config does traverse dot-directories, so without this they
+    // are genuinely in scope; these four are the only lintable files in any
+    // dot-directory in the repository.
+    //
+    // Note this declares the exclusion for ESLint only. The equivalent tsc
+    // exclusion is still incidental -- TypeScript's include globs happen not to
+    // descend into dot-directories -- and remains open as OBL-08.
     ".semgrep/fixtures/**",
   ]),
 ]);
