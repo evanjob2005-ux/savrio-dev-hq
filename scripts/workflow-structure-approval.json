@@ -4,7 +4,7 @@
     {
       "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
       "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
       "changed_files": [
         "ci.yml",
         "dependencies.yml",
@@ -13,46 +13,67 @@
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:7f28a138a49c4242a0dedc583c5f5f9d99196276761e4862137f7bf3d2d3a507",
-      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes.",
-      "fingerprint": "sha256:dd178f3c0990a029c6bad29af0970d0079df0da5ba19029f2126a88e96a39903"
+      "diff_digest": "sha256:1b364cfad05b783592abae1859a7ba138fe509b097264a2aacb956b1b1de0a71",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:fdb078fefa5be67926b720140d66131fe4f550b520fbf4304717d5ffa8d0b31b"
     },
     {
       "base_commit": "7079779f69a9ec0edf6d92a3f4124599ac1b2a2d",
       "base_workflow_tree": "3d59ff7eab4ef53972dc2c5501e98316ab631239",
-      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
       "changed_files": [
+        "ci.yml",
         "dependencies.yml",
+        "frontend-tests.yml",
         "lint.yml",
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:5ca0dd4a05fe9727a9eecbeaa3602014e959ad171cab1088d6fdeda1879cf496",
-      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes.",
-      "fingerprint": "sha256:0ce4531f4477cf9515e37c7d98ebd63d747dcaea772cf89663b7c1a2f59bd01f"
+      "diff_digest": "sha256:d82c3e88f2e538f9670b8045b228e80d85d964fc17714f0fa10c92c3d3b064c1",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:9c63167e3541160e558fd5a70af779b8ce2b4b5c58c4f5447e776bbc0b78d801"
     },
     {
       "base_commit": "a32d04048c4b0127316c65704c7c12e5cf22167d",
       "base_workflow_tree": "a0026081fadafb942f0b607fc8647a77469d50c4",
-      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
       "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
         "lint.yml",
         "release.yml"
       ],
-      "diff_digest": "sha256:4a08832eaa2fa8987d5ed5e85b9035b6162cfd5d3924f90c3a0b9976edd08730",
-      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes.",
-      "fingerprint": "sha256:7d536ed3126a6f40cd28f46b594d511fa9fd2d208cf22ad9fa3591b249d48691"
+      "diff_digest": "sha256:4d0e26a5b7aef6661cb0202dd3e3ecaa8b9a24ef0aa1870358d3e3a1c4964e46",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:e03659819f2d3e4e13ce8b00d1dacc540d8cc8fb24faba211c6b3402fd4e3903"
     },
     {
       "base_commit": "029f8b3886f67c23b156f99528a27f4577ba639c",
       "base_workflow_tree": "cad9a161b8c4c9c629f812de130d3294d9fdd968",
-      "candidate_workflow_tree": "sha256:c66ddae3670d216a3eb906c57b152250d8c019e0afee977e3461d626583c7a83",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
       "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
         "release.yml"
       ],
-      "diff_digest": "sha256:de3db3a17cd9d07966b638d3008a8dc15c384f3e20b22d8cfa1e0aa3e0906bc0",
-      "rationale": "Founder-authorized remediation candidate: preserve reviewed workflow controls and add explicit unreachable-remote handling to all release tag probes for manual dispatch.",
-      "fingerprint": "sha256:410b48f3d5054050de3c36b11ad5cb3d643d6b118950b46020f4f4abb41e4014"
+      "diff_digest": "sha256:eef64e4efad716f5cb78f250c464a7b07d4898d26df118f83b7b82c0e95b29f5",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:2eca322327abdae03941235568e73b35fd2a3321dd12bab4c1b4cd0a4549cdb1"
+    },
+    {
+      "base_commit": "78428bb455eed403f0807a20776603e4322118b7",
+      "base_workflow_tree": "731dca7ff61d48390a568f796d5a1d176d8734f8",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml"
+      ],
+      "diff_digest": "sha256:6d1ee7350123a429eda9d293c569a76cfb9b702801e1f9686fbd2505d43e6354",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:a76adc79536b0c70e8d211432d25770e69dc41838eb1489a68994363262cac92"
     }
   ]
 }

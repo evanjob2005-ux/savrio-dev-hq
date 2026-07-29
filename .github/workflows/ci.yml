@@ -340,18 +340,14 @@ jobs:
           node-version: "24"
           cache: npm
 
-      - name: Pin npm to the version that produced the lockfile
+      - name: Record bundled toolchain versions
         if: steps.detect.outputs.node == 'true'
-        # setup-node floats within the major, so this pins npm to the version
-        # that generated package-lock.json rather than whatever the latest
-        # Node 24 happens to bundle. Today they are identical -- v24.18.0 ships
-        # npm 11.16.0 -- so this is currently a no-op reinstall, and it stops
-        # being one the moment Node 24.x ships a newer npm.
-        #
-        # This is a pin, not a repair. Regenerating and validating
-        # package-lock.json remains the open follow-up (OBL-09), and that work
-        # decides whether all four pin steps are removed (OBL-27).
-        run: npm install --global npm@11.16.0
+        # Records the setup-node-provided binaries that actually execute npm ci.
+        # The lockfile is maintained by that bundled npm instead of replacing
+        # the package manager globally in every workflow.
+        run: |
+          node --version
+          npm --version
 
       - name: Install dependencies
         if: steps.detect.outputs.node == 'true'
