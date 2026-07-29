@@ -189,3 +189,104 @@ describe("MissionControlOverview decision endpoints", () => {
     expect(liveRegion?.textContent ?? "").not.toContain("approved");
   });
 });
+
+/**
+ * P2-35 — WCAG 2.4.3 (Focus Order) for the failure path.
+ *
+ * The decision handler moved focus to the approvals wrapper in a `finally`, so
+ * it ran whether or not anything was decided. On success that is right: the
+ * buttons are gone and focus has nowhere to be. On failure nothing was decided,
+ * the button is still there and still the only thing the founder can do, and
+ * they were moved off it onto a `tabIndex={-1}` container — from which
+ * retrying means tabbing forward through the whole panel to reach a control
+ * that never moved.
+ *
+ * Measured rather than asserted: the button is focused first (which is the state
+ * a keyboard user is necessarily in when they activate it), and
+ * `document.activeElement` is read back after the request settles.
+ */
+describe("P2-35 · a failed decision leaves focus on the control that can retry", () => {
+  const failingFetch = () =>
+    vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: "Approval service is unavailable." }),
+    }));
+
+  /**
+   * Renders, puts focus on Approve, and presses it. Identical in both arms.
+   *
+   * Also counts every time the approvals wrapper takes focus, because "focus
+   * ends on the button" is satisfied by a handler that moves focus to the
+   * wrapper and then back — which the founder's screen reader announces as a
+   * group they never asked for before returning them to where they already
+   * were.
+   */
+  const pressApproveWithFocus = () => {
+    const { container } = render(<MissionControlOverview />);
+    const region = container.querySelector<HTMLElement>(
+      '[aria-label="Founder approval gates"]',
+    );
+    expect(region, "the approvals wrapper is not in the tree").not.toBeNull();
+    let regionFocusCount = 0;
+    region!.addEventListener("focus", () => {
+      regionFocusCount += 1;
+    });
+
+    const approve = screen.getByRole("button", { name: "Approve" });
+    approve.focus();
+    expect(document.activeElement, "the fixture never had focus on the button").toBe(
+      approve,
+    );
+    fireEvent.click(approve);
+    return { approve, regionFocuses: () => regionFocusCount };
+  };
+
+  it("keeps focus on Approve when the request fails", async () => {
+    vi.stubGlobal("fetch", failingFetch());
+
+    const { approve, regionFocuses } = pressApproveWithFocus();
+
+    // The failure has been handled once the button is out of its busy state.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Approve" }).getAttribute("aria-busy"),
+      ).toBe("false"),
+    );
+    expect(
+      approve.hasAttribute("disabled"),
+      "the button is still disabled, so this is measuring focus mid-request",
+    ).toBe(false);
+
+    expect(
+      document.activeElement,
+      `focus was moved to <${(document.activeElement as HTMLElement | null)?.tagName.toLowerCase()} ` +
+        `aria-label="${document.activeElement?.getAttribute("aria-label") ?? ""}">, ` +
+        "away from the still-actionable Approve button the founder needs to retry",
+    ).toBe(approve);
+    expect(
+      regionFocuses(),
+      "focus was pushed onto the approvals wrapper and pulled back, so the " +
+        "founder is announced into a group they never left",
+    ).toBe(0);
+  });
+
+  it("NULL ARM: on success, focus does move to the approvals region", async () => {
+    // Identical starting state and identical keystroke; only the response
+    // differs. Without this, "focus stays on the button" would also be satisfied
+    // by deleting the focus handling altogether, which would drop the founder to
+    // the document start on every successful decision.
+    const { approve, regionFocuses } = pressApproveWithFocus();
+
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("aria-label")).toBe(
+        "Founder approval gates",
+      ),
+    );
+    expect(
+      document.activeElement,
+      "focus never left the button after a decision that landed",
+    ).not.toBe(approve);
+    expect(regionFocuses()).toBe(1);
+  });
+});

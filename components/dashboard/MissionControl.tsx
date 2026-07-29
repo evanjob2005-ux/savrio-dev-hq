@@ -75,7 +75,8 @@ export function MissionControl() {
         paused={paused}
         runningTitle={runningTask ? runningTask.title : null}
       />
-      <AgentStatusRail statuses={agentStatuses} />
+      {/* `agentStatuses` comes from useWorkflowEngine, the mock engine. */}
+      <AgentStatusRail statuses={agentStatuses} provenance="simulated" />
 
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-4 sm:px-5">
         <MissionControlOverview />

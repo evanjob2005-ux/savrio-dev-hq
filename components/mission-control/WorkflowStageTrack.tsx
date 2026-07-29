@@ -86,8 +86,13 @@ export function WorkflowStageTrack({
 
       {progress.currentIndex < 0 ? (
         <p className="text-[10.5px] leading-relaxed text-[var(--text-faint)]">
-          The run failed with a technical error. The stage it failed in is not recorded in
-          state, so no stage is marked complete.
+          {progress.outcome === "failed"
+            ? "The run failed with a technical error. The stage it failed in is not recorded in state, so no stage is marked complete."
+            : // P2-36: the run has a stage, but this workflow no longer declares
+              // the stage it belongs to. Saying so is the honest reading; the
+              // previous numeric mapping would have silently pointed at whatever
+              // stage now occupies that position.
+              "The run's stage is not among the stages this workflow declares, so its position cannot be shown. No stage is marked complete."}
         </p>
       ) : null}
     </div>

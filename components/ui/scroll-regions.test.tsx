@@ -32,9 +32,20 @@ import { WORKFLOW_STAGE } from "@/lib/mission-control/status";
  * cannot reach it. The accessible name is read off the resolved
  * `aria-label`/`aria-labelledby`, not off the source.
  *
+ * P2-37 — what counts as reachable. The audit originally exempted any container
+ * holding at least one focusable descendant. That is the wrong test and it is
+ * wrong in the direction that reports green: a container which is not itself a
+ * tab stop scrolls only as a side effect of focus landing inside it, so it
+ * scrolls exactly as far as its focusable descendants reach. One button at the
+ * top satisfied "contains something focusable" while leaving every row below the
+ * fold as unreachable as before. The exemption now requires the focusable
+ * descendants to *cover* the content: every content item must hold one, or the
+ * region is flagged.
+ *
  * Rule 2 of STD-CTRL-001: the null arm is the last `describe`. It runs the same
- * audit over three hand-built fixtures whose answers are known by inspection —
- * one violating, one compliant, one focusable-but-anonymous. Without it, an
+ * audit over hand-built fixtures whose answers are known by inspection — a
+ * violating one, a compliant one, a focusable-but-anonymous one, and the two
+ * partially-focusable cases the previous exemption waved through. Without it, an
  * audit that returned "no violations" for everything would pass every case above.
  */
 
@@ -58,6 +69,36 @@ function scrollContainers(root: ParentNode): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>("*")].filter(
     (el) => typeof el.className === "string" && SCROLLS.test(el.className),
   );
+}
+
+/**
+ * The items the container scrolls past, with pure layout wrappers unwrapped
+ * (P2-37).
+ *
+ * A container whose scrolling content is a single `<ul>` is not scrolled by
+ * reaching the `<ul>` — it is scrolled by reaching the rows inside it. So the
+ * unwrap descends through every element that has exactly one element child and
+ * stops at the first branch, which is the level at which content repeats.
+ *
+ * A container that unwraps to a single leaf has no items: there is nothing past
+ * the first screenful to be unreachable, and the reachability of the one thing
+ * it holds is settled by the focusable check itself.
+ */
+function contentItems(el: HTMLElement): HTMLElement[] {
+  let node: HTMLElement = el;
+  while (
+    node.childElementCount === 1 &&
+    node.firstElementChild instanceof HTMLElement
+  ) {
+    node = node.firstElementChild;
+  }
+  return [...node.children].filter(
+    (child): child is HTMLElement => child instanceof HTMLElement,
+  );
+}
+
+function holdsNothingFocusable(el: HTMLElement): boolean {
+  return !el.matches(FOCUSABLE) && el.querySelectorAll(FOCUSABLE).length === 0;
 }
 
 /** aria-label, or the text of the elements aria-labelledby points at. */
@@ -88,16 +129,37 @@ function keyboardAudit(root: ParentNode): string[] {
     const tabindex = el.getAttribute("tabindex");
     const claimsTabStop = tabindex !== null && Number(tabindex) >= 0;
 
-    if (!claimsTabStop && focusableInside === 0) {
-      problems.push(
-        `${describeElement(el)} scrolls its overflow but has no tabindex and ` +
-          `contains no focusable descendant, so keyboard users cannot reach it ` +
-          `and everything past its first screenful is unavailable (WCAG 2.1 SC 2.1.1)`,
-      );
+    if (!claimsTabStop) {
+      if (focusableInside === 0) {
+        problems.push(
+          `${describeElement(el)} scrolls its overflow but has no tabindex and ` +
+            `contains no focusable descendant, so keyboard users cannot reach it ` +
+            `and everything past its first screenful is unavailable (WCAG 2.1 SC 2.1.1)`,
+        );
+        continue;
+      }
+
+      // P2-37. This branch used to end here: one focusable descendant anywhere
+      // inside was accepted as proof the region was keyboard-operable. It is
+      // not. A container that is not itself a tab stop is scrolled only as a
+      // side effect of focus moving to something inside it, so it scrolls
+      // exactly as far as its focusable descendants reach. A single button at
+      // the top leaves every row below the fold as unreachable as it was with
+      // no focusable descendant at all -- and the control reported green on it,
+      // which is the failure mode this whole file exists to reject.
+      const items = contentItems(el);
+      const unreachable = items.filter(holdsNothingFocusable);
+      if (unreachable.length > 0) {
+        problems.push(
+          `${describeElement(el)} scrolls its overflow and is not a tab stop, ` +
+            `and ${unreachable.length} of its ${items.length} content items ` +
+            `hold nothing focusable (first: ${describeElement(unreachable[0])}), ` +
+            `so tabbing cannot scroll them into view; one focusable descendant ` +
+            `does not make the rest of the overflow reachable (WCAG 2.1 SC 2.1.1)`,
+        );
+      }
       continue;
     }
-
-    if (!claimsTabStop) continue;
 
     // Measured, not asserted: does the browser actually put focus here?
     el.focus();
@@ -314,7 +376,9 @@ afterEach(() => {
 
 describe("UI-04 · every scrollable region is keyboard-operable", () => {
   it("Agent status rail", () => {
-    const { container } = render(<AgentStatusRail statuses={AGENT_STATUSES} />);
+    const { container } = render(
+      <AgentStatusRail statuses={AGENT_STATUSES} provenance="simulated" />,
+    );
     expectKeyboardOperable(container, 1);
   });
 
@@ -394,6 +458,78 @@ describe("NULL ARM: the audit reports the defects it claims to detect", () => {
     const { container } = render(
       <div className="max-h-[420px] overflow-y-auto">
         <button type="button">Reachable</button>
+      </div>,
+    );
+
+    expect(keyboardAudit(container)).toEqual([]);
+  });
+
+  it("flags a scroll container with one focusable child whose overflow is still unreachable", () => {
+    // P2-37, and the case the audit used to pass. Structurally this is the
+    // fixture above with the content it exists to scroll put back: one button
+    // at the top, then twenty rows nobody can tab to. Focus can enter the
+    // region, so "contains something focusable" is satisfied, and the region is
+    // no more scrollable by keyboard than one holding nothing focusable at all.
+    const { container } = render(
+      <div className="max-h-[420px] overflow-y-auto">
+        <button type="button">Reachable</button>
+        <ul>
+          {Array.from({ length: 20 }, (_, i) => (
+            <li key={i}>Row {i} — below the fold, no way to scroll here</li>
+          ))}
+        </ul>
+      </div>,
+    );
+
+    const problems = keyboardAudit(container);
+    expect(
+      problems,
+      "one focusable child was accepted as proof the whole overflow is " +
+        "reachable, which is the defect this control exists to reject",
+    ).toHaveLength(1);
+    expect(problems[0]).toContain("1 of its 2 content items");
+    expect(problems[0]).toContain(
+      "one focusable descendant does not make the rest of the overflow reachable",
+    );
+  });
+
+  it("flags the rows a partially-focusable list leaves stranded", () => {
+    // The same defect at the level it actually occurs: the list rows above the
+    // fold carry a control and the ones below it do not.
+    const { container } = render(
+      <div className="max-h-[420px] overflow-y-auto">
+        <ul>
+          {Array.from({ length: 10 }, (_, i) => (
+            <li key={i}>
+              Row {i}
+              {i < 3 ? <button type="button">Open {i}</button> : null}
+            </li>
+          ))}
+        </ul>
+      </div>,
+    );
+
+    const problems = keyboardAudit(container);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("7 of its 10 content items");
+  });
+
+  it("NULL ARM: the same list passes once every row is reachable", () => {
+    // Identical fixture, identical row count; the only change is that the rows
+    // below the fold carry the control too. Without this, "flags stranded rows"
+    // would also be satisfied by an audit that rejects every non-tab-stop
+    // container, which would make the focusable-descendant path dead code and
+    // the claim untestable.
+    const { container } = render(
+      <div className="max-h-[420px] overflow-y-auto">
+        <ul>
+          {Array.from({ length: 10 }, (_, i) => (
+            <li key={i}>
+              Row {i}
+              <button type="button">Open {i}</button>
+            </li>
+          ))}
+        </ul>
       </div>,
     );
 

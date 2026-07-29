@@ -73,6 +73,8 @@ const LATER_POLL = snapshot("later-poll", []);
 interface InFlight {
   /** Resolves this request with the given snapshot. */
   settle: (state: DevHqState) => Promise<void>;
+  /** Resolves this request with a non-OK response, which `fetchState` throws on. */
+  fail: (status?: number) => Promise<void>;
 }
 
 let inFlight: InFlight[] = [];
@@ -82,15 +84,19 @@ function mockFetch() {
   return vi.fn(
     () =>
       new Promise((resolve) => {
+        const deliver = async (response: unknown) => {
+          await act(async () => {
+            resolve(response);
+            // Let fetchState's two awaits and the resulting render flush.
+            await Promise.resolve();
+            await Promise.resolve();
+          });
+        };
         inFlight.push({
-          settle: async (state) => {
-            await act(async () => {
-              resolve({ ok: true, status: 200, json: async () => state });
-              // Let fetchState's two awaits and the resulting render flush.
-              await Promise.resolve();
-              await Promise.resolve();
-            });
-          },
+          settle: (state) =>
+            deliver({ ok: true, status: 200, json: async () => state }),
+          fail: (status = 503) =>
+            deliver({ ok: false, status, json: async () => ({}) }),
         });
       }),
   );
@@ -287,5 +293,180 @@ describe("UI-07 · a stale poll cannot overwrite a fresher snapshot", () => {
       "the earlier request's result was applied after the later one's, so the " +
         "feed went backwards in time",
     ).toBe("later-poll");
+  });
+});
+
+describe("P1-23 · a stale failure cannot downgrade a newer successful state", () => {
+  /**
+   * Puts `count` requests in flight from a cold store, so every case below
+   * starts from the identical state (rule 3) and the arms differ only in which
+   * sequence carries the success and which carries the failure.
+   */
+  async function inFlightRequests(count: number) {
+    render(<Probe slot={0} />);
+    for (let i = 1; i < count; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+    }
+    expect(
+      inFlight,
+      `expected ${count} requests in flight; the shared loop is not polling`,
+    ).toHaveLength(count);
+  }
+
+  it("keeps the feed live when a request older than the last success fails", async () => {
+    await inFlightRequests(3);
+
+    // The newest request answers first, and the feed is current.
+    await inFlight[2].settle(LATER_POLL);
+    expect(feedAt(0).status).toBe("live");
+
+    // The oldest one now fails. It left before the snapshot on screen was even
+    // requested, so it is not evidence about the connection as it stands.
+    await inFlight[0].fail();
+
+    expect(
+      feedAt(0).status,
+      "a failure from a request that predates the displayed snapshot flipped " +
+        "the feed to degraded, so current data is labelled untrustworthy",
+    ).toBe("live");
+    expect(feedAt(0).consecutiveFailures).toBe(0);
+    expect(feedAt(0).error).toBeNull();
+    expect(feedAt(0).state?.processStart.id).toBe("later-poll");
+  });
+
+  it("NULL ARM: the same failure, when it is the newest report, does degrade", async () => {
+    // Identical starting state — three requests in flight — and the same one
+    // success and one failure. Only the order is swapped. Without this arm, a
+    // store that ignored every failure would pass the case above.
+    await inFlightRequests(3);
+
+    await inFlight[0].settle(LATER_POLL);
+    expect(feedAt(0).status).toBe("live");
+
+    await inFlight[2].fail();
+
+    expect(
+      feedAt(0).status,
+      "a failure newer than every success was ignored, so the feed no longer " +
+        "reports staleness at all",
+    ).toBe("degraded");
+    expect(feedAt(0).consecutiveFailures).toBe(1);
+    expect(feedAt(0).error).toContain("503");
+  });
+
+  it("does not report disconnected on three failures that all predate the snapshot", async () => {
+    await inFlightRequests(4);
+
+    await inFlight[3].settle(LATER_POLL);
+
+    await inFlight[0].fail();
+    await inFlight[1].fail();
+    await inFlight[2].fail();
+
+    expect(
+      feedAt(0).status,
+      "three superseded failures reported the feed as disconnected while it " +
+        "was displaying a snapshot that arrived after all three of them left",
+    ).toBe("live");
+    expect(feedAt(0).consecutiveFailures).toBe(0);
+  });
+
+  it("NULL ARM: three failures that do supersede the snapshot still reach disconnected", async () => {
+    // Same four requests, same three failures, same single success. The
+    // disconnected threshold must still be reachable, or the case above is
+    // satisfied by a feed that can never report a lost connection.
+    await inFlightRequests(4);
+
+    await inFlight[0].settle(LATER_POLL);
+
+    await inFlight[1].fail();
+    await inFlight[2].fail();
+    await inFlight[3].fail();
+
+    expect(
+      feedAt(0).status,
+      "the feed can no longer report a genuinely lost connection",
+    ).toBe("disconnected");
+    expect(feedAt(0).consecutiveFailures).toBe(3);
+  });
+
+  it("still applies a late success that is older than a failure, without clearing the failure", async () => {
+    // Why failure accounting has its own high-water mark rather than reusing
+    // the snapshot one: a failure must not make a late success get discarded.
+    // That success carries data older than the failed request but newer than
+    // anything on screen, and dropping it would lose the only state we have.
+    await inFlightRequests(3);
+
+    await inFlight[0].settle(BEFORE_DECISION);
+    await inFlight[2].fail();
+    expect(feedAt(0).status).toBe("degraded");
+
+    await inFlight[1].settle(AFTER_DECISION);
+
+    expect(
+      feedAt(0).state?.processStart.id,
+      "a success newer than the displayed snapshot was thrown away because an " +
+        "unrelated request had failed, so the feed stopped updating",
+    ).toBe("after-decision");
+    expect(
+      feedAt(0).status,
+      "a superseded success cleared a failure that is still the most recent " +
+        "thing this feed knows, so staleness was hidden",
+    ).toBe("degraded");
+    expect(feedAt(0).consecutiveFailures).toBe(1);
+  });
+
+  it("NULL ARM: with no failure outstanding, that same late success reports live", async () => {
+    await inFlightRequests(3);
+
+    await inFlight[0].settle(BEFORE_DECISION);
+    await inFlight[1].settle(AFTER_DECISION);
+
+    expect(feedAt(0).state?.processStart.id).toBe("after-decision");
+    expect(
+      feedAt(0).status,
+      "the feed is stuck reporting degraded with nothing failing",
+    ).toBe("live");
+    expect(feedAt(0).consecutiveFailures).toBe(0);
+  });
+
+  it("does not degrade the founder's own post-decision snapshot with an older poll failure", async () => {
+    await inFlightRequests(2);
+
+    await inFlight[0].settle(BEFORE_DECISION);
+
+    // The founder approves; the decision endpoint returns the authoritative
+    // snapshot over the same connection.
+    act(() => {
+      feedAt(0).applySnapshot(AFTER_DECISION);
+    });
+    expect(feedAt(0).status).toBe("live");
+
+    // The poll that was already in flight now fails.
+    await inFlight[1].fail();
+
+    expect(
+      feedAt(0).status,
+      "a poll that predates the founder's decision failed and degraded the " +
+        "snapshot that decision returned",
+    ).toBe("live");
+    expect(feedAt(0).consecutiveFailures).toBe(0);
+  });
+
+  it("NULL ARM: without the decision in between, that same poll failure degrades", async () => {
+    await inFlightRequests(2);
+
+    await inFlight[0].settle(BEFORE_DECISION);
+
+    await inFlight[1].fail();
+
+    expect(
+      feedAt(0).status,
+      "applySnapshot is suppressing every subsequent failure, not just the " +
+        "ones it supersedes",
+    ).toBe("degraded");
+    expect(feedAt(0).consecutiveFailures).toBe(1);
   });
 });

@@ -36,6 +36,10 @@ export function MissionControlOverview() {
   const approvalsRegionRef = useRef<HTMLDivElement>(null);
   const lastAnnouncedEventIdRef = useRef<string | null>(null);
 
+  // P2-35. Set only when a decision failed, and only to the control the founder
+  // was on when they pressed it. See `handleApprovalAction`.
+  const restoreFocusToRef = useRef<HTMLElement | null>(null);
+
   const model = useMemo(
     () => (state ? buildCommandCenterModel(state) : null),
     [state],
@@ -55,8 +59,26 @@ export function MissionControlOverview() {
     }
   }, [latestEvent]);
 
+  // P2-35. Runs after the commit that clears `busyApprovalId`, so the button is
+  // enabled again by the time focus is put back on it. A `requestAnimationFrame`
+  // would not guarantee that ordering, and `focus()` on a still-disabled button
+  // is silently a no-op — the user would be left wherever the blur dropped them.
+  useEffect(() => {
+    const target = restoreFocusToRef.current;
+    if (!target) return;
+    restoreFocusToRef.current = null;
+    if (target.isConnected) target.focus();
+  });
+
   const handleApprovalAction = useCallback(
     async (approvalId: string, action: "approve" | "reject") => {
+      // Captured before the request, because the failure path has to put the
+      // founder back on the control they pressed and by then focus may have been
+      // dropped by the button going disabled.
+      const pressed =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
       setBusyApprovalId(approvalId);
       setActionError(null);
       try {
@@ -80,11 +102,20 @@ export function MissionControlOverview() {
           err instanceof Error ? err.message : `Failed to ${action} request.`;
         setActionError(message);
         setAnnouncement(message);
+        // P2-35. Nothing was decided, so the button is still rendered and still
+        // the control the founder needs. Moving focus to the wrapper here took
+        // them off it and made retrying a hunt: the wrapper is a `tabIndex={-1}`
+        // container, so recovering means tabbing forward through the panel
+        // heading and every meta row to get back to a button that never moved.
+        // Only a decision that actually landed removes the buttons.
+        restoreFocusToRef.current = pressed;
       } finally {
         setBusyApprovalId(null);
-        // The action buttons are removed once decided, so move focus to the
-        // approvals region instead of dropping the user to the document start.
-        requestAnimationFrame(() => approvalsRegionRef.current?.focus());
+        if (!restoreFocusToRef.current) {
+          // The action buttons are removed once decided, so move focus to the
+          // approvals region instead of dropping the user to the document start.
+          requestAnimationFrame(() => approvalsRegionRef.current?.focus());
+        }
         void refresh();
       }
     },

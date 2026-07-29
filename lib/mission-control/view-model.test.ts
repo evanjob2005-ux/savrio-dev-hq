@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
 import { COLORS } from "@/lib/theme";
+import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
+import { buildDevHqState, resetDevHqStore } from "@/lib/dev-hq/store";
 import {
   buildCommandCenterModel,
   buildStageProgress,
@@ -153,12 +155,18 @@ const WORKFLOW: Workflow = {
   status: "active",
   createdAt: T,
   updatedAt: T,
+  // P2-36: the ids are the ones the Dev HQ store actually declares, not
+  // invented ones. A fixture with ids no real workflow has cannot detect a
+  // mapping that resolves stages by id, and the previous `st-0`..`st-4` fixture
+  // passed identically whether the mapping was right or arbitrary. The
+  // "declares the stages the run-stage map names" case below pins the two
+  // together so the fixture cannot drift from the store either.
   stages: [
-    { id: "st-0", name: "Request received", order: 0, requiresApproval: false },
-    { id: "st-1", name: "Executive review", order: 1, requiresApproval: false },
-    { id: "st-2", name: "Founder approval", order: 2, requiresApproval: true },
-    { id: "st-3", name: "Decision recorded", order: 3, requiresApproval: false },
-    { id: "st-4", name: "Completed", order: 4, requiresApproval: false },
+    { id: "stage-founder-request", name: "Request received", order: 0, requiresApproval: false },
+    { id: "stage-executive-review", name: "Executive review", order: 1, requiresApproval: false },
+    { id: "stage-founder-approval", name: "Founder approval", order: 2, requiresApproval: true },
+    { id: "stage-decision", name: "Decision recorded", order: 3, requiresApproval: false },
+    { id: "stage-completed", name: "Completed", order: 4, requiresApproval: false },
   ],
 };
 
@@ -410,6 +418,155 @@ describe("buildStageProgress reports only what the run records", () => {
 
     expect(progress.stages.map((s) => s.order)).toEqual([0, 1, 2, 3, 4]);
     expect(progress.stages[1].state).toBe("current");
+  });
+});
+
+/**
+ * P2-36 — the current position is resolved against the stages the workflow
+ * declares, not against five hardcoded numeric slots.
+ *
+ * The slots assumed today's five-stage definition forever. Insert a stage and
+ * every run kept rendering, with the marker silently on the wrong stage: an open
+ * founder gate shown at a stage that is not the gate, and the stages before it
+ * claimed complete. Nothing failed, because nothing compared the assumption to
+ * the definition.
+ *
+ * The three cases below are one property from three sides: the marker moves with
+ * the declared stage (insertion), it follows it when the list is reordered, and
+ * it refuses to guess when the stage is not declared at all.
+ */
+describe("P2-36 · stage position follows the declared stages", () => {
+  const withStages = (stages: Workflow["stages"]): Workflow => ({
+    ...WORKFLOW,
+    stages,
+  });
+
+  it("moves the marker with its stage when a stage is inserted before it", () => {
+    const extended = withStages([
+      { id: "stage-founder-request", name: "Request received", order: 0, requiresApproval: false },
+      { id: "stage-triage", name: "Triage", order: 1, requiresApproval: false },
+      { id: "stage-executive-review", name: "Executive review", order: 2, requiresApproval: false },
+      { id: "stage-founder-approval", name: "Founder approval", order: 3, requiresApproval: true },
+      { id: "stage-decision", name: "Decision recorded", order: 4, requiresApproval: false },
+      { id: "stage-completed", name: "Completed", order: 5, requiresApproval: false },
+    ]);
+
+    const progress = buildStageProgress(
+      run({ stage: "founder_approval_required" }),
+      extended,
+    )!;
+
+    expect(
+      progress.stages[progress.currentIndex]?.id,
+      "the marker stayed at its old numeric slot, so the founder's open gate is " +
+        "displayed on a stage that is not the gate",
+    ).toBe("stage-founder-approval");
+    expect(progress.currentIndex).toBe(3);
+    expect(progress.stages.map((s) => s.state)).toEqual([
+      "complete",
+      "complete",
+      "complete",
+      "current",
+      "pending",
+      "pending",
+    ]);
+  });
+
+  it("follows its stage when the declared order is changed", () => {
+    // The approval gate is declared later than it used to be. Its position is
+    // whatever the definition says it is.
+    const reordered = withStages([
+      { id: "stage-founder-request", name: "Request received", order: 0, requiresApproval: false },
+      { id: "stage-executive-review", name: "Executive review", order: 1, requiresApproval: false },
+      { id: "stage-decision", name: "Decision recorded", order: 2, requiresApproval: false },
+      { id: "stage-founder-approval", name: "Founder approval", order: 3, requiresApproval: true },
+      { id: "stage-completed", name: "Completed", order: 4, requiresApproval: false },
+    ]);
+
+    const progress = buildStageProgress(
+      run({ stage: "founder_approval_required" }),
+      reordered,
+    )!;
+
+    expect(progress.stages[progress.currentIndex]?.id).toBe("stage-founder-approval");
+    expect(progress.currentIndex).toBe(3);
+  });
+
+  it("refuses to place a run whose stage this workflow does not declare", () => {
+    // Fails closed rather than pointing at whatever now occupies slot 2. The
+    // same shape a technical failure produces: no stage complete, 0%, nothing
+    // claimed.
+    const withoutGate = withStages(
+      WORKFLOW.stages.filter((s) => s.id !== "stage-founder-approval"),
+    );
+
+    const progress = buildStageProgress(
+      run({ stage: "founder_approval_required" }),
+      withoutGate,
+    )!;
+
+    expect(
+      progress.currentIndex,
+      "an undeclared stage was placed on the track anyway, which is a guess",
+    ).toBe(-1);
+    expect(progress.percent).toBe(0);
+    expect(new Set(progress.stages.map((s) => s.state))).toEqual(new Set(["unknown"]));
+    // The outcome still reads from the run, which is recorded: only the position
+    // is unknown.
+    expect(progress.outcome).toBe("awaiting_approval");
+  });
+
+  it("NULL ARM: the unmodified definition still places every run stage", () => {
+    // Identical starting state, unmodified workflow. Without this, the case
+    // above is satisfied by a resolver that returns -1 for everything, which
+    // would render every run as unrecorded and hide all progress.
+    const placed = (
+      [
+        ["founder_request_received", 0],
+        ["executive_review", 1],
+        ["founder_approval_required", 2],
+        ["validation_rejected", 3],
+        ["approved", 3],
+        ["rejected", 3],
+        ["completed", 4],
+      ] as const
+    ).map(([stage, index]) => [
+      stage,
+      buildStageProgress(run({ stage }), WORKFLOW)!.currentIndex,
+      index,
+    ]);
+
+    for (const [stage, actual, expected] of placed) {
+      expect(actual, `${stage} resolved to index ${actual}, not ${expected}`).toBe(
+        expected,
+      );
+    }
+  });
+
+  it("declares the stages the run-stage map names", () => {
+    // Rule 3: measured against the workflow the app actually stores, not
+    // against this file's fixture. If the seed definition renames or drops a
+    // stage, the mapping stops resolving and every run silently renders as
+    // unrecorded -- a failure that would otherwise only show up in the browser.
+    resetDevHqStore();
+    const seeded = buildDevHqState().workflows.find(
+      (w) => w.id === FOUNDER_REQUEST_WORKFLOW_ID,
+    );
+    expect(seeded, "the founder-request workflow is not seeded").toBeDefined();
+
+    const declared = new Set(seeded!.stages.map((s) => s.id));
+    const named = new Set(WORKFLOW.stages.map((s) => s.id));
+
+    expect(
+      [...named].filter((id) => !declared.has(id)),
+      "this file's fixture names stage ids the stored workflow does not declare, " +
+        "so every case above is measuring a workflow that does not exist",
+    ).toEqual([]);
+    expect(
+      [...declared].filter((id) => !named.has(id)),
+      "the stored workflow declares a stage no run stage maps onto, so runs at " +
+        "that stage will render as unrecorded",
+    ).toEqual([]);
   });
 });
 

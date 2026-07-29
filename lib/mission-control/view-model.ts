@@ -155,19 +155,34 @@ export interface CommandCenterModel {
 }
 
 /**
- * Position of each founder-request stage within the workflow's declared stage
- * list. `failed` is intentionally absent: a technical failure does not record
+ * The declared workflow stage each founder-request run stage sits at, named by
+ * the stage's **id** (P2-36).
+ *
+ * This was a table of numeric positions — 0..4 — which silently assumed the
+ * stored Workflow declares exactly the five stages it declares today, in that
+ * order. Nothing enforced that. Insert a stage, reorder two, or drop one, and
+ * every run kept rendering: `founder_approval_required` would simply point at
+ * whatever stage now sat third, marking earlier ones complete and the founder's
+ * open gate as somewhere it is not. Drift produced a confident wrong answer with
+ * no failure anywhere.
+ *
+ * Resolving by id makes the declared list the authority for position: a
+ * reordered or inserted stage moves the marker with it, and a stage that is no
+ * longer declared resolves to nothing and renders as unrecorded rather than as a
+ * guess (see `buildStageProgress`).
+ *
+ * `failed` is null for the original reason: a technical failure does not record
  * which stage it failed in, so the UI must not guess.
  */
-const STAGE_INDEX: Record<FounderRequestWorkflowStage, number> = {
-  founder_request_received: 0,
-  executive_review: 1,
-  founder_approval_required: 2,
-  validation_rejected: 3,
-  approved: 3,
-  rejected: 3,
-  completed: 4,
-  failed: -1,
+const STAGE_ID_FOR_RUN_STAGE: Record<FounderRequestWorkflowStage, string | null> = {
+  founder_request_received: "stage-founder-request",
+  executive_review: "stage-executive-review",
+  founder_approval_required: "stage-founder-approval",
+  validation_rejected: "stage-decision",
+  approved: "stage-decision",
+  rejected: "stage-decision",
+  completed: "stage-completed",
+  failed: null,
 };
 
 const TERMINAL_STAGES: ReadonlySet<FounderRequestWorkflowStage> = new Set([
@@ -215,7 +230,14 @@ export function buildStageProgress(
 
   const ordered = [...workflow.stages].sort((a, b) => a.order - b.order);
   const outcome = runOutcome(run);
-  const currentIndex = STAGE_INDEX[run.stage];
+  // Resolved against the declared list, not assumed. `findIndex` returning -1 —
+  // because the run stage maps to no declared stage, or to one this workflow no
+  // longer declares — takes the same "not recorded" path as a technical failure,
+  // which is the honest answer: we know the run's stage and cannot place it on
+  // this workflow.
+  const stageId = STAGE_ID_FOR_RUN_STAGE[run.stage];
+  const currentIndex =
+    stageId === null ? -1 : ordered.findIndex((stage) => stage.id === stageId);
   const terminal = TERMINAL_STAGES.has(run.stage);
   const lastIndex = ordered.length - 1;
 

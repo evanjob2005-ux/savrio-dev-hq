@@ -24,6 +24,15 @@
 // sequence number and therefore supersedes every poll already in flight.
 // Without this, the poll that started before the approval could resolve after it
 // and put the approval back into the queue as pending.
+//
+// P1-23 — the same ordering rule governs the *connection verdict*, not just the
+// snapshot. Failure accounting was left ungated on the argument that a failed
+// request is evidence about the connection regardless of ordering. It is, but
+// `consecutiveFailures` does not report the connection: it reports how far the
+// displayed snapshot can be trusted. An old failure landing after a newer
+// success therefore labelled current data `degraded`, and three of them reported
+// `disconnected` while the founder was looking at a snapshot that arrived after
+// all three departed.
 
 import { useCallback, useSyncExternalStore } from "react";
 import type { DevHqState } from "@/lib/dev-hq/types";
@@ -95,6 +104,31 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let nextSequence = 0;
 let appliedSequence = 0;
 
+/**
+ * Highest sequence whose request has *reported* — succeeded or failed (P1-23).
+ *
+ * Separate from `appliedSequence`, which tracks only snapshots that reached the
+ * display, because the two answer different questions. `appliedSequence` answers
+ * "is the data I am holding newer than yours"; this answers "has anything more
+ * recent than you already told us how the connection is doing".
+ *
+ * `consecutiveFailures` is not a connection statistic — it is the sole input to
+ * `statusFor`, which labels how trustworthy the snapshot on screen is. A failure
+ * from request N is evidence about the connection *at N*. Once request N+1 has
+ * reported, that evidence is superseded: if N+1 succeeded, the connection
+ * provably worked after N failed, so counting N would report `degraded` beside a
+ * snapshot that is current, and three such laggards would report `disconnected`
+ * — a claim that the feed is lost, made while displaying data that arrived after
+ * all three of them departed. The word "consecutive" is false in that state too:
+ * a success sits between the failures in write order.
+ *
+ * Keeping this separate from `appliedSequence` matters in the other direction as
+ * well. A failure must not bump `appliedSequence`, or an older poll that
+ * succeeds late would be discarded in favour of nothing — its data is stale
+ * relative to the failed request, but it is still newer than what is on screen.
+ */
+let lastResultSequence = 0;
+
 function statusFor(consecutiveFailures: number, state: DevHqState | null): FeedStatus {
   if (!hasLoaded && !state) return "initial";
   if (consecutiveFailures >= DISCONNECTED_AFTER_FAILURES) return "disconnected";
@@ -126,19 +160,30 @@ async function poll(): Promise<void> {
     if (sequence <= appliedSequence) return;
     appliedSequence = sequence;
     hasLoaded = true;
+    // Only the freshest report is allowed to set the connection verdict, so a
+    // success that is itself already superseded clears nothing.
+    const supersedes = sequence > lastResultSequence;
+    if (supersedes) lastResultSequence = sequence;
+    const consecutiveFailures = supersedes ? 0 : snapshot.consecutiveFailures;
     emit({
       state: next,
-      status: statusFor(0, next),
-      error: null,
+      status: statusFor(consecutiveFailures, next),
+      error: supersedes ? null : snapshot.error,
       updatedAt: new Date().toISOString(),
-      consecutiveFailures: 0,
+      consecutiveFailures,
     });
   } catch (err) {
     if (signal.aborted) return;
+    // P1-23. A failure is only news if nothing newer has reported yet. A
+    // higher-numbered request that has already landed — a poll, or the founder's
+    // own decision — proves the connection worked *after* this one left, so
+    // counting this failure would degrade, or after three of them disconnect, a
+    // feed that is demonstrably current. Note this gates on
+    // `lastResultSequence`, not `appliedSequence`: dropping the failure must not
+    // also make it discard a late success (see the declaration).
+    if (sequence <= lastResultSequence) return;
+    lastResultSequence = sequence;
     hasLoaded = true;
-    // Failure accounting is deliberately not sequence-gated. A request that
-    // failed is evidence about the connection whether or not a newer snapshot
-    // has since arrived, and it never overwrites `state`.
     const consecutiveFailures = snapshot.consecutiveFailures + 1;
     emit({
       ...snapshot,
@@ -154,6 +199,12 @@ function applyMutationSnapshot(next: DevHqState): void {
   // flight: this snapshot came back from the write itself, so it is newer than
   // anything requested before it.
   appliedSequence = ++nextSequence;
+  // Also the freshest *report*: this snapshot came back over the same
+  // connection, so every poll that departed earlier and fails later is stale
+  // news about it and must not degrade the status the founder is reading
+  // (P1-23). The existing failure count is left alone — it was earned by
+  // evidence that is still the most recent this feed has.
+  lastResultSequence = appliedSequence;
   hasLoaded = true;
   emit({
     ...snapshot,
@@ -185,6 +236,7 @@ function stop(): void {
   hasLoaded = false;
   nextSequence = 0;
   appliedSequence = 0;
+  lastResultSequence = 0;
 }
 
 function subscribe(listener: () => void): () => void {
