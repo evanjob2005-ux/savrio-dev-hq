@@ -4,8 +4,13 @@ name: Dependencies
 # repository (npm and GitHub Actions). It is the single owner of dependency
 # scanning in the suite: manifest and lockfile consistency, package-manager
 # conflict detection, vulnerability auditing, and pull request dependency
-# review. It degrades gracefully in the documentation-first case where no
-# application manifests are present.
+# review.
+#
+# It degrades gracefully in the documentation-first case where no application
+# manifests are present -- but "gracefully" stops at the lockfile. A repository
+# with a package.json and no package-lock.json has a dependency tree that
+# nothing here can inspect, and both controls now fail closed on that state
+# instead of reporting health they did not measure.
 
 on:
   push:
@@ -76,10 +81,16 @@ jobs:
             errors=1
           fi
 
-          # A manifest present with npm should have its lockfile committed.
+          # A manifest present with npm MUST have its lockfile committed. This
+          # was a ::warning:: and exited 0, which is the failure mode this
+          # whole job exists to prevent: without a lockfile there is no
+          # resolved dependency tree to check, so "Manifest and Lockfile
+          # Health" reported healthy having verified nothing about the
+          # lockfile it is named after. Absence of the evidence fails closed.
           if [[ "$npm_manifest" == "true" && "$npm_lock" == "false" \
                 && "$pnpm_lock" == "false" && "$yarn_lock" == "false" ]]; then
-            echo "::warning::package.json is present but no lockfile was found."
+            echo "::error::package.json is present but no lockfile was found. There is no resolved dependency tree to validate, so this control cannot evaluate and fails closed. Commit package-lock.json."
+            errors=1
           fi
 
           # A lockfile without a manifest is unexpected.
@@ -124,31 +135,36 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Detect npm project
+      - name: Require a lockfile to audit
         id: detect
         run: |
           set -euo pipefail
-          if [[ -f package-lock.json ]]; then
-            echo "npm=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "npm=false" >> "$GITHUB_OUTPUT"
-            echo "No package-lock.json found. npm audit will be skipped."
+          # A missing lockfile used to set npm=false, which skipped every
+          # remaining step and left the job GREEN. "npm Audit" then reported
+          # success having audited nothing -- and it is in the release
+          # workflow's required-check set, so a deleted lockfile silently
+          # satisfied the release gate. Per STD-CTRL-001 rule 5 this exits with
+          # the distinct "could not evaluate" status and says what it could not
+          # do, rather than reporting a clean audit.
+          if [[ ! -f package-lock.json ]]; then
+            echo "::error::No package-lock.json found. npm audit has no resolved dependency tree to audit, so this control could not evaluate. It fails closed rather than reporting a clean audit."
             {
               echo "## npm Audit"
               echo ""
-              echo "No npm lockfile present. Skipped."
+              echo "- Scanner status: **NOT EVALUATED** (no package-lock.json)"
+              echo "- Policy: **not evaluated** — failing closed"
             } >> "$GITHUB_STEP_SUMMARY"
+            exit 2
           fi
+          echo "package-lock.json present; auditing the resolved tree."
 
       - name: Set up Node.js
-        if: steps.detect.outputs.npm == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
 
       - name: Pin npm to the version that produced the lockfile
-        if: steps.detect.outputs.npm == 'true'
         # setup-node floats within the major, so this pins npm to the version
         # that generated package-lock.json rather than whatever the latest
         # Node 24 happens to bundle. Today they are identical -- v24.18.0 ships
@@ -163,17 +179,23 @@ jobs:
         run: npm install --global --ignore-scripts --no-audit npm@11.16.0
 
       - name: Run npm audit
-        if: steps.detect.outputs.npm == 'true'
         run: |
           set -euo pipefail
 
           # Capture the real npm audit exit code. npm exits non-zero both when
           # vulnerabilities are found (a valid report) and when the scanner
           # itself fails (registry outage, auth error, malformed output). The
-          # two cases are distinguished below by inspecting the JSON, so a
-          # scanner failure can never be interpreted as a clean audit.
+          # two cases are distinguished below by inspecting the JSON AND by
+          # checking the exit code against its declared domain, so a scanner
+          # failure can never be interpreted as a clean audit.
+          #
+          # --audit-level=low is passed explicitly to PIN that domain. npm's
+          # exit code is 1 when findings at or above the audit level exist and
+          # 0 otherwise; leaving the level implicit would make the code depend
+          # on an npm default, and a code cross-checked against a moving
+          # threshold cannot be validated at all.
           audit_exit=0
-          npm audit --json > audit.json 2> audit.err || audit_exit=$?
+          npm audit --json --audit-level=low > audit.json 2> audit.err || audit_exit=$?
           export AUDIT_EXIT="$audit_exit"
           echo "npm audit exited with code ${audit_exit}."
 
@@ -191,6 +213,9 @@ jobs:
                       handle.write("\n".join(lines) + "\n")
 
           def fail_scanner(reason):
+              # Exit 2 -- "could not evaluate" -- is deliberately distinct from
+              # the exit 1 used for a policy violation (STD-CTRL-001 rule 5),
+              # so a broken scanner is never read as a satisfied control.
               print(f"::error::npm audit scanner failure: {reason}")
               write_summary([
                   "## npm Audit",
@@ -199,7 +224,26 @@ jobs:
                   f"- npm audit exit code: {exit_code}",
                   "- Policy: **not evaluated** — failing closed",
               ])
-              sys.exit(1)
+              sys.exit(2)
+
+          # The exit code was previously recorded and then never examined, so
+          # ANY code npm returned was carried forward as though the run were
+          # ordinary. With --audit-level=low pinned above, the domain of
+          # `npm audit --json` is exactly {0, 1}. Anything else -- 127 for a
+          # missing binary, 134 for a crash, an npm-internal usage error -- is
+          # a scanner that did not run as specified, and the JSON it may have
+          # left behind is not a report about this dependency tree.
+          try:
+              audit_exit = int(exit_code)
+          except (TypeError, ValueError):
+              fail_scanner(f"exit code '{exit_code}' is not an integer")
+          if audit_exit not in (0, 1):
+              fail_scanner(
+                  f"exit code {audit_exit} is outside the documented domain of "
+                  "`npm audit --json --audit-level=low`, which returns 0 when "
+                  "nothing at or above 'low' was found and 1 when something "
+                  "was. An unexpected code means the auditor did not complete "
+                  "as specified and its output is not a verdict.")
 
           # A missing or unparseable report is a scanner failure, not "clean".
           try:
@@ -229,6 +273,24 @@ jobs:
           counts = {level: vulns[level] for level in order}
           critical = counts["critical"]
           high = counts["high"]
+
+          # The exit code and the report must agree. With --audit-level=low,
+          # exit 0 asserts nothing at low or above was found; a report that
+          # simultaneously lists findings at low or above contradicts that, and
+          # one of the two is wrong. Reading the counts alone would trust a
+          # report the scanner's own status says is not about this tree.
+          at_or_above_low = sum(counts[level] for level in
+                                ("critical", "high", "moderate", "low"))
+          if audit_exit == 0 and at_or_above_low > 0:
+              fail_scanner(
+                  f"exit code 0 asserts nothing at or above 'low' was found, "
+                  f"but the report lists {at_or_above_low} such "
+                  f"vulnerabilities ({critical} critical, {high} high)")
+          if audit_exit == 1 and at_or_above_low == 0:
+              fail_scanner(
+                  "exit code 1 asserts findings at or above 'low', but the "
+                  "report lists none; the report does not describe the run "
+                  "that produced this exit code")
           # Security policy: High and Critical block production readiness.
           policy_pass = (critical + high) == 0
 

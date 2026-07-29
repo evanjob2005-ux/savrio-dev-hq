@@ -6,7 +6,15 @@ name: Release
 # Gate model (see RELEASE_PROCESS.md / VERSIONING_POLICY.md):
 #   validate  -> version, branch, readiness evidence, forward progression
 #   verify    -> required CI checks succeeded for the EXACT target commit
-#   publish   -> annotated tag + GitHub release, under a protected environment
+#   publish   -> under a protected environment: re-verify the tag set and the
+#                required checks AFTER the approval wait, then annotated tag +
+#                GitHub release with the tag rolled back if the release fails
+#
+# The verification in `verify-checks` is fail-fast only. An approval can sit
+# for hours, and a required check can be re-run and go pending or fail while it
+# does, so the publish job collects and evaluates check state again on the far
+# side of the gate. That evaluation, not the earlier one, is what the release
+# is published on.
 #
 # REQUIRED GitHub-side configuration that cannot be expressed in this file
 # (see docs: Actions > deployments-and-environments):
@@ -71,9 +79,20 @@ on:
 permissions:
   contents: read
 
-# Serialize releases of the same version and never cancel a release in flight.
+# One release at a time, repository-wide, and never cancel one in flight.
+#
+# The group was previously scoped by version, which serialized only reruns of
+# the SAME version and let different versions run concurrently. v2 and v3 could
+# then both validate forward progression against the same previous tag --
+# neither is visible to the other while both are in flight -- and publish in
+# either order, so the older version could land last and become the latest
+# release. A constant group serializes the entire workflow run, including the
+# protected-environment approval wait, so the tag set validate reasons about
+# cannot be moved by another release. Tags pushed by hand are outside that
+# guarantee, which is why publish re-checks the tag set (see
+# "Re-check that the remote release-tag set has not moved").
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -93,6 +112,8 @@ jobs:
       target_sha: ${{ steps.resolve.outputs.target_sha }}
       title: ${{ steps.resolve.outputs.title }}
       latest_tag: ${{ steps.resolve.outputs.latest_tag }}
+      resume: ${{ steps.resolve.outputs.resume }}
+      tag_digest: ${{ steps.tagset.outputs.tag_digest }}
     steps:
       - name: Restrict releases to the main branch
         env:
@@ -122,6 +143,9 @@ jobs:
           ROLLBACK: ${{ inputs.rollback_plan }}
           ALLOW_NO_NEW_COMMITS: ${{ inputs.allow_no_new_commits }}
           HEAD_SHA: ${{ github.sha }}
+          # Needed only to ask whether a release is attached to a tag that
+          # already exists; see the resume path below.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           python <<'PYTHON'
@@ -190,10 +214,41 @@ jobs:
               die(f"Target commit '{target_sha}' is not an ancestor of main.")
 
           # Duplicate tag protection (local history and remote).
-          if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode == 0:
-              die(f"Tag '{tag}' already exists in history.")
-          if git("ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}").returncode == 0:
-              die(f"Tag '{tag}' already exists on the remote.")
+          #
+          # An existing tag normally means the release was already made and the
+          # run must stop. There is exactly one exception, and it is the
+          # wreckage a run leaves behind when it pushes the tag and then fails
+          # before the release exists: the tag is ANNOTATED, peels to THIS
+          # exact target commit, and has NO release attached. Failing that
+          # state closed leaves the version permanently unreleasable with no
+          # path forward but a human deleting the remote tag by hand, because
+          # every rerun dies here. Publish now rolls the tag back on failure,
+          # so this path is the backstop for a rollback that itself failed.
+          tag_local = git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode == 0
+          tag_remote = git(
+              "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}"
+          ).returncode == 0
+          resume = False
+          if tag_local or tag_remote:
+              if not tag_local:
+                  git("fetch", "--force", "origin", f"refs/tags/{tag}:refs/tags/{tag}")
+              obj = git("cat-file", "-t", f"refs/tags/{tag}").stdout.strip()
+              peeled = git("rev-list", "-n", "1", f"refs/tags/{tag}").stdout.strip()
+              release_present = subprocess.run(
+                  ["gh", "release", "view", tag],
+                  capture_output=True, text=True).returncode == 0
+              if obj == "tag" and peeled == target_sha and not release_present:
+                  resume = True
+                  print(f"::warning::Tag {tag} already exists, is annotated, and "
+                        f"points at {target_sha} with no release attached. "
+                        "Treating this run as a resume of a release that failed "
+                        "after the tag was pushed.")
+              else:
+                  die(f"Tag '{tag}' already exists and is not a resumable "
+                      f"partial release (object type='{obj or 'unknown'}', "
+                      f"commit='{peeled or 'unknown'}', expected an annotated "
+                      f"tag at '{target_sha}'; release attached="
+                      f"{'yes' if release_present else 'no'}).")
 
           def parse(v):
               m = SEMVER.match(v)
@@ -217,7 +272,11 @@ jobs:
               return (major, minor, patch, pre_key)
 
           # Forward progression relative to the latest existing release tag.
+          # On a resume the tag being released is already in this list; leaving
+          # it in would make the version fail to move forward from itself.
           tags = [t for t in git("tag", "--list", "v*").stdout.split() if t]
+          if resume:
+              tags = [t for t in tags if t != tag]
           latest_tag = ""
           latest_parsed = None
           for existing in tags:
@@ -247,10 +306,24 @@ jobs:
               out.write(f"target_sha={target_sha}\n")
               out.write(f"title={title}\n")
               out.write(f"latest_tag={latest_tag}\n")
+              out.write(f"resume={'true' if resume else 'false'}\n")
 
           print(f"Validated {tag} at {target_sha} (prerelease={prerelease}, "
-                f"previous={latest_tag or 'none'}).")
+                f"previous={latest_tag or 'none'}, resume={resume}).")
           PYTHON
+
+      - name: Snapshot the remote release-tag set
+        id: tagset
+        run: |
+          set -euo pipefail
+          # Forward progression above was decided against this exact set of
+          # release tags. Publish re-computes the digest after the approval
+          # wait and refuses to publish if it moved, so a release cannot be
+          # cut against a tag set that no longer exists.
+          digest="$(git ls-remote --tags origin 'refs/tags/v*' \
+                    | sort | sha256sum | cut -d' ' -f1)"
+          echo "tag_digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Remote release-tag set digest: ${digest}"
 
       - name: Release validation summary
         if: always()
@@ -259,6 +332,7 @@ jobs:
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           PRERELEASE: ${{ steps.resolve.outputs.prerelease }}
           LATEST_TAG: ${{ steps.resolve.outputs.latest_tag }}
+          RESUME: ${{ steps.resolve.outputs.resume }}
           OUTCOME: ${{ steps.resolve.outcome }}
         run: |
           set -euo pipefail
@@ -270,6 +344,7 @@ jobs:
             echo "- Target commit: ${TARGET_SHA:-unresolved}"
             echo "- Previous release: ${LATEST_TAG:-none}"
             echo "- Pre-release: ${PRERELEASE:-unknown}"
+            echo "- Resuming a partially completed release: ${RESUME:-unknown}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   verify-checks:
@@ -285,6 +360,15 @@ jobs:
       run:
         shell: bash
     env:
+      CHECK_PHASE: pre-approval
+      # The GitHub App that must have published a check run for that run to
+      # count toward a required check. A check-run NAME is not an identity:
+      # any installed app, and any workflow holding a token with checks:write,
+      # can report a check run called "Secret Scan" on a commit. Without this
+      # allowlist the gate accepted whoever spoke last under the right name.
+      # All 16 names below are jobs in this repository's own workflows, so the
+      # publisher is always GitHub Actions.
+      REQUIRED_CHECK_APP: github-actions
       # The checks a release is gated on, by check-run name. A check-run name is
       # the job's `name:` field, so these must be kept in step with the `name:`
       # values in the workflows listed beside them. An unrecognised or renamed
@@ -332,9 +416,13 @@ jobs:
           # Check runs (GitHub Actions and other check-run providers), one
           # compact JSON record per line. `@json` guarantees a single line per
           # record; --paginate walks every page.
+          # app.slug carries the publisher identity the verifier checks; a
+          # record with a required name but a null or unexpected app is the
+          # impostor case, so the field is projected rather than dropped.
           gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate \
             --jq '.check_runs[]
-                  | {id, name, status, conclusion, started_at, completed_at}
+                  | {id, name, status, conclusion, started_at, completed_at,
+                     app_slug: (.app.slug // null), app_id: (.app.id // null)}
                   | @json' > "${RUNNER_TEMP}/check-runs.jsonl"
 
           # Legacy combined commit status (e.g. external status contexts).
@@ -350,104 +438,190 @@ jobs:
           COMBINED_STATUS_FILE: ${{ runner.temp }}/combined-status.txt
         run: |
           set -euo pipefail
+          # BEGIN required-check verifier -- byte-identical copy also runs in
+          # the `publish` job after the environment approval (see P0-11). The
+          # two copies exist because a composite action would need a new file
+          # and the two jobs run on different runners; keep them in step.
           python <<'PYTHON'
           import json
           import os
           import sys
 
+          # Exit status, per STD-CTRL-001 rule 5 (absence of evidence fails
+          # closed and says so):
+          #   0  every required check succeeded for the target commit
+          #   1  a required check is missing, unfinished, failed, or foreign
+          #   2  could not evaluate: required input absent or unparseable
           def error(message):
               print(f"::error::{message}")
 
-          sha = os.environ["SHA"]
-          required = [line.strip() for line in
-                      os.environ["REQUIRED_CHECKS"].splitlines() if line.strip()]
-          if not required:
-              error("REQUIRED_CHECKS is empty; refusing to publish without a "
-                    "required-check set.")
-              sys.exit(1)
+          def unevaluable(message):
+              error(f"Cannot evaluate required checks: {message}")
+              sys.exit(2)
 
-          with open(os.environ["COMBINED_STATUS_FILE"], encoding="utf-8") as handle:
-              combined = handle.read().strip() or "unknown"
+          sha = os.environ["SHA"]
+
+          allowed_app = os.environ.get("REQUIRED_CHECK_APP", "").strip()
+          if not allowed_app:
+              unevaluable("REQUIRED_CHECK_APP is empty; without a publisher "
+                          "allowlist any app can report a check run under a "
+                          "required name.")
+
+          required = [line.strip() for line in
+                      os.environ.get("REQUIRED_CHECKS", "").splitlines()
+                      if line.strip()]
+          if not required:
+              unevaluable("REQUIRED_CHECKS is empty; refusing to publish "
+                          "without a required-check set.")
+          required_set = set(required)
+
+          try:
+              with open(os.environ["COMBINED_STATUS_FILE"], encoding="utf-8") as handle:
+                  combined = handle.read().strip()
+          except OSError as exc:
+              unevaluable(f"combined commit status unreadable ({exc})")
+          if not combined:
+              unevaluable(f"combined commit status for {sha} is empty")
 
           runs = []
-          with open(os.environ["CHECK_RUNS_FILE"], encoding="utf-8") as handle:
-              for line in handle:
-                  line = line.strip()
-                  if line:
-                      runs.append(json.loads(line))
+          try:
+              with open(os.environ["CHECK_RUNS_FILE"], encoding="utf-8") as handle:
+                  for number, line in enumerate(handle, 1):
+                      line = line.strip()
+                      if not line:
+                          continue
+                      try:
+                          runs.append(json.loads(line))
+                      except ValueError as exc:
+                          unevaluable(f"check-run record on line {number} is "
+                                      f"not JSON ({exc})")
+          except OSError as exc:
+              unevaluable(f"check-run records unreadable ({exc})")
 
-          # A commit accumulates one check run per name for every workflow run
-          # that touched it, so a failure that was later re-run green is still
-          # in this list. Keep only the most recent run for each name --
-          # requiring every occurrence to be green would let a single historical
-          # failure block that commit from ever being released.
+          # Recency is decided on when a run STARTED, never on when it
+          # finished. Ordering on completed_at first ranked an in-progress
+          # rerun -- whose completed_at is null, sorting below every real
+          # timestamp -- BENEATH the stale success it was started to replace,
+          # so the gate accepted an obsolete green while the current run was
+          # still pending. started_at is populated for queued, in-progress and
+          # completed runs alike; the check-run id breaks ties and is
+          # monotonic within a repository.
           def recency(run):
-              return (run.get("completed_at") or "",
-                      run.get("started_at") or "",
-                      run.get("id") or 0)
+              return (str(run.get("started_at") or ""), int(run.get("id") or 0))
 
-          latest = {}
+          def orderable(run):
+              return bool(run.get("started_at")) or bool(run.get("id"))
+
+          # A check run counts toward a required name only when the app that
+          # published it is the expected one. The filter is applied BEFORE
+          # picking the latest run: selecting first would let a foreign app
+          # hand the gate a green run under a required name.
+          by_name = {}
+          foreign = {}
           for run in runs:
-              name = run.get("name") or ""
-              if name not in latest or recency(run) >= recency(latest[name]):
-                  latest[name] = run
+              name = str(run.get("name") or "")
+              app = str(run.get("app_slug") or "")
+              if app == allowed_app:
+                  by_name.setdefault(name, []).append(run)
+              elif name in required_set:
+                  foreign.setdefault(name, set()).add(app or "(no app)")
 
           failed = []
           rows = []
           for name in required:
-              run = latest.get(name)
-              if run is None:
+              # A commit accumulates one check run per name for every workflow
+              # run that touched it, so a failure that was later re-run green
+              # is still in this list. The verdict is taken from the latest
+              # run, because requiring every occurrence to be green would let
+              # one historical failure block that commit from ever being
+              # released -- but an UNFINISHED run is treated separately below.
+              candidates = by_name.get(name) or []
+              if not candidates:
                   failed.append(name)
-                  error(f"Required check '{name}' has no check run on {sha}.")
-                  rows.append(f"| `{name}` | (absent) | **MISSING** |")
+                  error(f"Required check '{name}' has no check run from "
+                        f"'{allowed_app}' on {sha}.")
+                  rows.append(f"| `{name}` | (absent) | - | **MISSING** |")
                   continue
-              status = run.get("status") or "unknown"
-              conclusion = run.get("conclusion") or "pending"
-              if status != "completed":
+              if not all(orderable(run) for run in candidates):
+                  unevaluable(f"a check run named '{name}' on {sha} carries "
+                              "neither started_at nor id, so its runs cannot "
+                              "be ordered")
+
+              latest = max(candidates, key=recency)
+              unfinished = [run for run in candidates
+                            if str(run.get("status") or "") != "completed"]
+              status = str(latest.get("status") or "unknown")
+              conclusion = str(latest.get("conclusion") or "pending")
+
+              if unfinished:
+                  # Any live run of a required name means the check state for
+                  # this commit is not settled, whichever run sorts latest. An
+                  # earlier completed run is not evidence for the current one.
                   failed.append(name)
-                  error(f"Required check '{name}' is not completed "
-                        f"(status={status}).")
-                  verdict = "**NOT COMPLETED**"
+                  states = ", ".join(sorted({str(run.get("status") or "unknown")
+                                             for run in unfinished}))
+                  error(f"Required check '{name}' has {len(unfinished)} run(s) "
+                        f"still in flight ({states}) on {sha}; an earlier "
+                        "completed run of the same check is not evidence for "
+                        "the one now running.")
+                  verdict = "**UNFINISHED**"
               elif conclusion not in ("success", "neutral"):
                   # `skipped` counts as a failure here on purpose: a required
                   # check that did not run is not evidence that it would have
-                  # passed. The previous version accepted it.
+                  # passed. The original version accepted it.
                   failed.append(name)
                   error(f"Required check '{name}' did not succeed "
                         f"(conclusion={conclusion}).")
                   verdict = "**FAIL**"
               else:
                   verdict = "PASS"
-              rows.append(f"| `{name}` | {status} / {conclusion} | {verdict} |")
+              rows.append(f"| `{name}` | {status} / {conclusion} | "
+                          f"`{allowed_app}` | {verdict} |")
+
+          for name in sorted(foreign):
+              failed.append(f"{name} (foreign publisher)")
+              error(f"Required check name '{name}' was also reported on {sha} "
+                    f"by {', '.join(sorted(foreign[name]))}, which is not the "
+                    f"required publisher '{allowed_app}'. A check run under a "
+                    "required name from an unexpected app blocks the release.")
 
           if combined in ("failure", "error"):
               failed.append("(combined commit status)")
               error(f"Combined commit status for {sha} is '{combined}'.")
 
-          other = sorted(name for name in latest if name not in set(required))
+          other = sorted(name for name in by_name if name not in required_set)
 
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-              out.write("## Required Checks\n\n")
-              out.write(f"- Target commit: `{sha}`\n")
-              out.write(f"- Required checks: {len(required)}\n")
-              out.write(f"- Check runs on the commit: {len(runs)} "
-                        f"({len(latest)} distinct names)\n")
-              out.write(f"- Combined commit status: {combined}\n")
-              out.write(f"- Result: {'FAIL' if failed else 'PASS'}\n\n")
-              out.write("| Required check | Latest run | Verdict |\n|---|---|---|\n")
-              for row in rows:
-                  out.write(row + "\n")
-              if other:
-                  out.write("\nPresent but not required, reported for information "
-                            "only: " + ", ".join(f"`{n}`" for n in other) + "\n")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              phase = os.environ.get("CHECK_PHASE", "unspecified")
+              with open(summary_path, "a", encoding="utf-8") as out:
+                  out.write(f"## Required Checks ({phase})\n\n")
+                  out.write(f"- Target commit: `{sha}`\n")
+                  out.write(f"- Required publisher: `{allowed_app}`\n")
+                  out.write(f"- Required checks: {len(required)}\n")
+                  out.write(f"- Check runs on the commit: {len(runs)} "
+                            f"({len(by_name)} distinct names from "
+                            f"`{allowed_app}`)\n")
+                  out.write(f"- Combined commit status: {combined}\n")
+                  out.write(f"- Result: {'FAIL' if failed else 'PASS'}\n\n")
+                  out.write("| Required check | Latest run | Publisher | "
+                            "Verdict |\n|---|---|---|---|\n")
+                  for row in rows:
+                      out.write(row + "\n")
+                  if other:
+                      out.write("\nPresent but not required, reported for "
+                                "information only: "
+                                + ", ".join(f"`{n}`" for n in other) + "\n")
 
           if failed:
               error(f"Required checks did not pass for target commit {sha}: "
                     f"{', '.join(failed)}.")
               sys.exit(1)
 
-          print(f"All {len(required)} required check(s) succeeded for {sha}.")
+          print(f"All {len(required)} required check(s) succeeded for {sha}, "
+                f"published by '{allowed_app}'.")
           PYTHON
+          # END required-check verifier
 
   publish:
     name: Publish Release
@@ -459,12 +633,42 @@ jobs:
     # Protected environment: human approval and self-review prevention are
     # enforced by the environment's protection rules (configured in settings).
     environment: production-release
-    # The only job granted write access, narrowly to create the tag and release.
+    # The only job granted write access, narrowly to create the tag and
+    # release. checks/statuses are read so the required-check state can be
+    # re-collected AFTER the approval wait rather than trusted from before it.
     permissions:
       contents: write
+      checks: read
+      statuses: read
     defaults:
       run:
         shell: bash
+    env:
+      CHECK_PHASE: post-approval
+      # Must match the values in `verify-checks`. The check state is collected
+      # again here because `verify-checks` runs BEFORE the protected
+      # environment gate: an approval can sit for hours, and during that time a
+      # required check can be re-run and go pending, or be re-run and fail. The
+      # earlier evaluation is a fail-fast convenience; THIS one is the evidence
+      # the release is actually published on.
+      REQUIRED_CHECK_APP: github-actions
+      REQUIRED_CHECKS: |
+        Repository Integrity
+        Structured Data Validation
+        Application Validation (Conditional)
+        YAML
+        GitHub Actions
+        JSON
+        Formatting and Naming
+        Scripts (conditional)
+        Unit and Static Validation
+        End-to-End Smoke
+        Secret Scan
+        Credential and Artifact Audit
+        GitHub Actions Hardening
+        Static Analysis (Semgrep)
+        Manifest and Lockfile Health
+        npm Audit
     steps:
       - name: Check out target commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -473,22 +677,279 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Re-verify tag and release absence
+      - name: Re-check that the remote release-tag set has not moved
         env:
-          TAG: ${{ needs.validate.outputs.tag }}
+          EXPECTED: ${{ needs.validate.outputs.tag_digest }}
+        run: |
+          set -euo pipefail
+          # Forward progression was decided in `validate` against the tag set
+          # as it stood then. If a tag appeared since -- another release, or a
+          # hand-pushed tag -- that decision was made against a tag set that no
+          # longer exists, and this release could land out of order.
+          if [[ -z "$EXPECTED" ]]; then
+            echo "::error::No release-tag digest was recorded at validation time; cannot tell whether the tag set moved during the approval wait."
+            exit 2
+          fi
+          actual="$(git ls-remote --tags origin 'refs/tags/v*' \
+                    | sort | sha256sum | cut -d' ' -f1)"
+          if [[ "$actual" != "$EXPECTED" ]]; then
+            echo "::error::The remote release-tag set changed between validation and publish (recorded ${EXPECTED}, found ${actual}). Forward progression was validated against a tag set that no longer exists. Re-run the release so validation is redone against current tags."
+            exit 1
+          fi
+          echo "Remote release-tag set unchanged since validation (${actual})."
+
+      - name: Re-collect check runs for the target commit
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.validate.outputs.target_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Guard against a race or a rerun creating a duplicate release.
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-            echo "::error::Tag '${TAG}' now exists; aborting to avoid a duplicate."
-            exit 1
-          fi
+
+          gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate \
+            --jq '.check_runs[]
+                  | {id, name, status, conclusion, started_at, completed_at,
+                     app_slug: (.app.slug // null), app_id: (.app.id // null)}
+                  | @json' > "${RUNNER_TEMP}/check-runs.jsonl"
+
+          gh api "repos/${REPO}/commits/${SHA}/status" --jq '.state' \
+            > "${RUNNER_TEMP}/combined-status.txt"
+
+          echo "Re-collected $(wc -l < "${RUNNER_TEMP}/check-runs.jsonl") check run record(s) after the approval gate."
+
+      - name: Re-verify every required check succeeded
+        env:
+          SHA: ${{ needs.validate.outputs.target_sha }}
+          CHECK_RUNS_FILE: ${{ runner.temp }}/check-runs.jsonl
+          COMBINED_STATUS_FILE: ${{ runner.temp }}/combined-status.txt
+        run: |
+          set -euo pipefail
+          # BEGIN required-check verifier -- byte-identical copy also runs in
+          # the `verify-checks` job before the environment approval. The two
+          # copies exist because a composite action would need a new file and
+          # the two jobs run on different runners; keep them in step.
+          python <<'PYTHON'
+          import json
+          import os
+          import sys
+
+          # Exit status, per STD-CTRL-001 rule 5 (absence of evidence fails
+          # closed and says so):
+          #   0  every required check succeeded for the target commit
+          #   1  a required check is missing, unfinished, failed, or foreign
+          #   2  could not evaluate: required input absent or unparseable
+          def error(message):
+              print(f"::error::{message}")
+
+          def unevaluable(message):
+              error(f"Cannot evaluate required checks: {message}")
+              sys.exit(2)
+
+          sha = os.environ["SHA"]
+
+          allowed_app = os.environ.get("REQUIRED_CHECK_APP", "").strip()
+          if not allowed_app:
+              unevaluable("REQUIRED_CHECK_APP is empty; without a publisher "
+                          "allowlist any app can report a check run under a "
+                          "required name.")
+
+          required = [line.strip() for line in
+                      os.environ.get("REQUIRED_CHECKS", "").splitlines()
+                      if line.strip()]
+          if not required:
+              unevaluable("REQUIRED_CHECKS is empty; refusing to publish "
+                          "without a required-check set.")
+          required_set = set(required)
+
+          try:
+              with open(os.environ["COMBINED_STATUS_FILE"], encoding="utf-8") as handle:
+                  combined = handle.read().strip()
+          except OSError as exc:
+              unevaluable(f"combined commit status unreadable ({exc})")
+          if not combined:
+              unevaluable(f"combined commit status for {sha} is empty")
+
+          runs = []
+          try:
+              with open(os.environ["CHECK_RUNS_FILE"], encoding="utf-8") as handle:
+                  for number, line in enumerate(handle, 1):
+                      line = line.strip()
+                      if not line:
+                          continue
+                      try:
+                          runs.append(json.loads(line))
+                      except ValueError as exc:
+                          unevaluable(f"check-run record on line {number} is "
+                                      f"not JSON ({exc})")
+          except OSError as exc:
+              unevaluable(f"check-run records unreadable ({exc})")
+
+          # Recency is decided on when a run STARTED, never on when it
+          # finished. Ordering on completed_at first ranked an in-progress
+          # rerun -- whose completed_at is null, sorting below every real
+          # timestamp -- BENEATH the stale success it was started to replace,
+          # so the gate accepted an obsolete green while the current run was
+          # still pending. started_at is populated for queued, in-progress and
+          # completed runs alike; the check-run id breaks ties and is
+          # monotonic within a repository.
+          def recency(run):
+              return (str(run.get("started_at") or ""), int(run.get("id") or 0))
+
+          def orderable(run):
+              return bool(run.get("started_at")) or bool(run.get("id"))
+
+          # A check run counts toward a required name only when the app that
+          # published it is the expected one. The filter is applied BEFORE
+          # picking the latest run: selecting first would let a foreign app
+          # hand the gate a green run under a required name.
+          by_name = {}
+          foreign = {}
+          for run in runs:
+              name = str(run.get("name") or "")
+              app = str(run.get("app_slug") or "")
+              if app == allowed_app:
+                  by_name.setdefault(name, []).append(run)
+              elif name in required_set:
+                  foreign.setdefault(name, set()).add(app or "(no app)")
+
+          failed = []
+          rows = []
+          for name in required:
+              # A commit accumulates one check run per name for every workflow
+              # run that touched it, so a failure that was later re-run green
+              # is still in this list. The verdict is taken from the latest
+              # run, because requiring every occurrence to be green would let
+              # one historical failure block that commit from ever being
+              # released -- but an UNFINISHED run is treated separately below.
+              candidates = by_name.get(name) or []
+              if not candidates:
+                  failed.append(name)
+                  error(f"Required check '{name}' has no check run from "
+                        f"'{allowed_app}' on {sha}.")
+                  rows.append(f"| `{name}` | (absent) | - | **MISSING** |")
+                  continue
+              if not all(orderable(run) for run in candidates):
+                  unevaluable(f"a check run named '{name}' on {sha} carries "
+                              "neither started_at nor id, so its runs cannot "
+                              "be ordered")
+
+              latest = max(candidates, key=recency)
+              unfinished = [run for run in candidates
+                            if str(run.get("status") or "") != "completed"]
+              status = str(latest.get("status") or "unknown")
+              conclusion = str(latest.get("conclusion") or "pending")
+
+              if unfinished:
+                  # Any live run of a required name means the check state for
+                  # this commit is not settled, whichever run sorts latest. An
+                  # earlier completed run is not evidence for the current one.
+                  failed.append(name)
+                  states = ", ".join(sorted({str(run.get("status") or "unknown")
+                                             for run in unfinished}))
+                  error(f"Required check '{name}' has {len(unfinished)} run(s) "
+                        f"still in flight ({states}) on {sha}; an earlier "
+                        "completed run of the same check is not evidence for "
+                        "the one now running.")
+                  verdict = "**UNFINISHED**"
+              elif conclusion not in ("success", "neutral"):
+                  # `skipped` counts as a failure here on purpose: a required
+                  # check that did not run is not evidence that it would have
+                  # passed. The original version accepted it.
+                  failed.append(name)
+                  error(f"Required check '{name}' did not succeed "
+                        f"(conclusion={conclusion}).")
+                  verdict = "**FAIL**"
+              else:
+                  verdict = "PASS"
+              rows.append(f"| `{name}` | {status} / {conclusion} | "
+                          f"`{allowed_app}` | {verdict} |")
+
+          for name in sorted(foreign):
+              failed.append(f"{name} (foreign publisher)")
+              error(f"Required check name '{name}' was also reported on {sha} "
+                    f"by {', '.join(sorted(foreign[name]))}, which is not the "
+                    f"required publisher '{allowed_app}'. A check run under a "
+                    "required name from an unexpected app blocks the release.")
+
+          if combined in ("failure", "error"):
+              failed.append("(combined commit status)")
+              error(f"Combined commit status for {sha} is '{combined}'.")
+
+          other = sorted(name for name in by_name if name not in required_set)
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              phase = os.environ.get("CHECK_PHASE", "unspecified")
+              with open(summary_path, "a", encoding="utf-8") as out:
+                  out.write(f"## Required Checks ({phase})\n\n")
+                  out.write(f"- Target commit: `{sha}`\n")
+                  out.write(f"- Required publisher: `{allowed_app}`\n")
+                  out.write(f"- Required checks: {len(required)}\n")
+                  out.write(f"- Check runs on the commit: {len(runs)} "
+                            f"({len(by_name)} distinct names from "
+                            f"`{allowed_app}`)\n")
+                  out.write(f"- Combined commit status: {combined}\n")
+                  out.write(f"- Result: {'FAIL' if failed else 'PASS'}\n\n")
+                  out.write("| Required check | Latest run | Publisher | "
+                            "Verdict |\n|---|---|---|---|\n")
+                  for row in rows:
+                      out.write(row + "\n")
+                  if other:
+                      out.write("\nPresent but not required, reported for "
+                                "information only: "
+                                + ", ".join(f"`{n}`" for n in other) + "\n")
+
+          if failed:
+              error(f"Required checks did not pass for target commit {sha}: "
+                    f"{', '.join(failed)}.")
+              sys.exit(1)
+
+          print(f"All {len(required)} required check(s) succeeded for {sha}, "
+                f"published by '{allowed_app}'.")
+          PYTHON
+          # END required-check verifier
+
+      - name: Re-verify tag and release state
+        id: tagstate
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "::error::Release '${TAG}' now exists; aborting to avoid a duplicate."
             exit 1
           fi
-          echo "Confirmed ${TAG} does not yet exist."
+
+          resume=false
+          remote_tag=0
+          remote_tag="$(git ls-remote --tags origin "refs/tags/${TAG}" | wc -l)"
+          local_tag=false
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            local_tag=true
+          fi
+
+          if [[ "$remote_tag" -gt 0 || "$local_tag" == "true" ]]; then
+            # A tag with no release attached is exactly the wreckage of a run
+            # that pushed the tag and then failed before the release existed.
+            # Resume it, but only when it is provably the tag this run would
+            # have created: annotated, and peeling to the validated target.
+            git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
+            obj="$(git cat-file -t "refs/tags/${TAG}" 2>/dev/null || echo none)"
+            peeled="$(git rev-list -n 1 "refs/tags/${TAG}" 2>/dev/null || echo none)"
+            if [[ "$obj" == "tag" && "$peeled" == "$TARGET_SHA" ]]; then
+              resume=true
+              echo "::warning::Tag ${TAG} already exists, is annotated, and points at ${TARGET_SHA} with no release attached. Resuming a partially completed release rather than wedging on it."
+            else
+              echo "::error::Tag '${TAG}' already exists and is not a resumable partial release (object type='${obj}', commit='${peeled}', expected an annotated tag at '${TARGET_SHA}')."
+              exit 1
+            fi
+          fi
+
+          echo "resume=${resume}" >> "$GITHUB_OUTPUT"
+          echo "Tag state for ${TAG}: resume=${resume}."
 
       - name: Create annotated tag and GitHub release
         env:
@@ -498,6 +959,7 @@ jobs:
           TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
           DRAFT: ${{ inputs.draft }}
+          RESUME: ${{ steps.tagstate.outputs.resume }}
           CHANGELOG: ${{ inputs.changelog }}
           ROLLBACK: ${{ inputs.rollback_plan }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -523,11 +985,22 @@ jobs:
 
           # gh release create would create a lightweight tag; VERSIONING_POLICY
           # calls for real release tags, so create and push an annotated tag
-          # explicitly first, then attach the release to it.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" "$TARGET_SHA" -m "$TITLE"
-          git push origin "refs/tags/${TAG}"
+          # explicitly first, then attach the release to it. The tag therefore
+          # necessarily reaches the remote BEFORE the release exists, and the
+          # window between the two is what has to be made recoverable: without
+          # the rollback below, a failed `gh release create` left the remote
+          # tag standing, every rerun was rejected by the duplicate-tag guard,
+          # and the version could never be released again.
+          pushed_here=false
+          if [[ "$RESUME" == "true" ]]; then
+            echo "Reusing the annotated tag ${TAG} pushed by an earlier run."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" "$TARGET_SHA" -m "$TITLE"
+            git push origin "refs/tags/${TAG}"
+            pushed_here=true
+          fi
 
           args=(release create "$TAG" --title "$TITLE" --notes-file "$notes")
           if [[ "$PRERELEASE" == "true" ]]; then
@@ -537,8 +1010,46 @@ jobs:
             args+=(--draft)
           fi
 
-          gh "${args[@]}"
-          echo "Created release ${TAG}."
+          rc=0
+          gh "${args[@]}" || rc=$?
+          if [[ "$rc" -eq 0 ]]; then
+            echo "Created release ${TAG}."
+            exit 0
+          fi
+
+          # Release creation failed. Before rolling the tag back, find out
+          # whether it actually failed: `gh` can report an error on a response
+          # it never read, and deleting the tag under a release that DOES
+          # exist would be the more destructive mistake -- it orphans a live
+          # release whose tag no longer resolves, which no rerun can repair.
+          #
+          # `gh release view` exits 1 for BOTH "no such release" and "could not
+          # reach the API", so its exit code alone does not license a delete.
+          # Only an explicit not-found does. Any other failure is unknown
+          # state, and unknown state keeps the tag: an orphaned tag is
+          # recoverable by the resume path, an orphaned release is not.
+          view_rc=0
+          view_out="$(gh release view "$TAG" 2>&1)" || view_rc=$?
+          if [[ "$view_rc" -eq 0 ]]; then
+            echo "::error::gh release create exited ${rc} but release ${TAG} exists. The tag is deliberately LEFT IN PLACE. Verify the release by hand; do not rerun."
+            exit 1
+          fi
+          if ! grep -qi "release not found" <<<"$view_out"; then
+            echo "::error::gh release create exited ${rc}, and whether release ${TAG} exists could not be determined (gh release view exited ${view_rc}: ${view_out}). The tag is deliberately LEFT IN PLACE rather than risk deleting the tag of a release that was created. Check the release by hand: if it exists, the release is complete; if it does not, delete the tag and rerun."
+            exit 1
+          fi
+
+          if [[ "$pushed_here" == "true" ]]; then
+            echo "::warning::Release creation failed (exit ${rc}). Deleting the tag this run pushed so a rerun starts from a clean state."
+            if git push --delete origin "refs/tags/${TAG}"; then
+              echo "::error::Release creation failed (exit ${rc}); remote tag ${TAG} was rolled back. Rerun the workflow with the same inputs."
+            else
+              echo "::error::Release creation failed (exit ${rc}) AND the remote tag ${TAG} could not be deleted. A rerun will resume from it: it is annotated, at ${TARGET_SHA}, with no release attached, which validate and the tag-state check both accept as resumable."
+            fi
+          else
+            echo "::error::Release creation failed (exit ${rc}) on a resumed run. Tag ${TAG} is left in place; rerun to resume from it."
+          fi
+          exit 1
 
       - name: Release summary
         if: always()
@@ -547,6 +1058,7 @@ jobs:
           TARGET_SHA: ${{ needs.validate.outputs.target_sha }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
           DRAFT: ${{ inputs.draft }}
+          RESUME: ${{ steps.tagstate.outputs.resume }}
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
@@ -558,4 +1070,6 @@ jobs:
             echo "- Target commit: ${TARGET_SHA}"
             echo "- Pre-release: ${PRERELEASE}"
             echo "- Draft: ${DRAFT}"
+            echo "- Resumed an earlier partial release: ${RESUME:-unknown}"
+            echo "- Required checks re-verified after the approval gate: yes"
           } >> "$GITHUB_STEP_SUMMARY"
