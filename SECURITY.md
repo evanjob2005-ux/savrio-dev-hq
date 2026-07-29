@@ -86,8 +86,17 @@ value may be quoted with `'`, `"` or a backtick, or left unquoted as in YAML,
 TOML, INI and shell. It may contain spaces, which matters because a passphrase
 is the one credential form a person is likely to type by hand.
 
-The name is split into words on `_`, `-`, `.` and camelCase boundaries, and is
-sensitive when:
+The name may be **quoted**, as an object or JSON property is — `"password":
+"…"` and `'apiKey': '…'` are read exactly like `password = "…"`. Until this was
+added the name had to run straight into the `:`, so a quote between the two
+produced no match at all: every `.json` file in the repository was outside the
+rule, and quoting one property name was a complete bypass in TypeScript too.
+
+The name is split into words on `_`, `-`, `.` and camelCase boundaries —
+including the boundary inside an acronym run, so `APIToken`, `JWTSecret` and
+`DBPassword` split the same way `apiToken` does. Without that second boundary an
+uppercase run swallowed the word after it and coverage depended on the author's
+capitalisation habit. A name is sensitive when:
 
 - any word is `secret`, `token`, `password`, `passwd`, `pwd`, `apikey` or
   `credential` (plurals included); or
@@ -105,18 +114,22 @@ it appears, including at the start of a very long identifier.
 `idempotencyKey` and `PENDING_DISPATCH_STORAGE_KEY` are ordinary identifiers,
 and a rule that flagged every one of them would be muted rather than obeyed.
 
-Two shapes are skipped because they are not literals at all: a value containing
-`${`, which is interpolated at runtime rather than committed, and an unquoted
-value that is program syntax rather than data — `body.callbackToken,` is a
-property being passed along, not a secret being written down.
+Three shapes are skipped because they are not credentials at all: a value
+containing `${`, which is interpolated at runtime rather than committed; an
+unquoted value that is program syntax rather than data — `body.callbackToken,`
+is a property being passed along, not a secret being written down; and a
+dependency specifier such as `^3.0.0 || ^4.0.0`. The last of those exists
+because reading quoted names brought lockfiles into scope, where the property
+name is a *package* name: `"js-tokens"` splits to a sensitive word while its
+value is a version range.
 
 ### The header exemption is decided on the value
 
 `DEV_HQ_INTERNAL_TOKEN_HEADER` holds `x-dev-hq-internal-token`: the wire name of
 the header a token travels in, not the token. So a name mentioning `header` is
-exempt — but **only when its value is genuinely shaped like a header name**:
-lowercase, hyphen-separated, with no segment long or opaque enough to be
-carrying entropy.
+exempt — but only when its value is genuinely the wire name of **that** header:
+lowercase, hyphen-separated, no segment long or opaque enough to carry entropy,
+**and every meaningful segment of the value is a word of the name itself**.
 
 The name alone is never enough, and this is not a hypothetical distinction. When
 the exemption was decided on the name — and decided before the sensitive words
@@ -125,12 +138,62 @@ were all exempt no matter what they held. Appending one word to any identifier
 switched the entire generic rule off for that line. A word that makes something
 a credential must not be cancellable by a word sitting next to it.
 
+Shape alone was not enough either. A constant named `SECRET_HEADER` holding
+`correct-horse-battery-staple` is lowercase, hyphen-separated and free of long
+or hex-like segments, so it satisfied every shape test — while being a strong
+passphrase rather than a header. Requiring the value's words to come from the
+name closes that: a constant naming a header is named after the header it holds.
+
+Two consequences worth stating plainly. A value made *entirely* of words already
+in its own identifier still passes; such a value has no secrecy left, because
+the name discloses it. And a short property name that does not spell its header
+out — a `tokenHeader` property holding `x-dev-hq-internal-token` — **will** be
+flagged. That is a false positive, and the pragma below is how to clear it; the
+rule is not pre-weakened for a shape this repository does not currently use.
+
+(Both examples in this section are written as prose rather than as assignments
+on purpose. Spelled out literally they are flagged by the very rule they
+describe — this document is scanned like every other tracked file.)
+
 The generic rule judges the **value**, not the file. Test files are scanned like
 everything else, because a real staging password pasted into a spec file is a
 real leak. A value is exempt only if it announces itself as a fixture — a
 `test-`, `fake_`, `example.`, `mock-` or similar prefix **and** a shape that
 looks synthetic: lowercase, no unusual symbols, no long opaque segment, no
 hex-like blob. `test-internal-token` is exempt; `test-account-Xy9$kL2mQp` is not.
+
+### How this scanner is known to work
+
+A green scan proves nothing on its own: "no credentials found" is exactly what a
+scanner that matches nothing also prints. This job ran for two rounds with no
+acceptance evidence of any kind — checkout and the scanner, nothing else — and
+was bypassed in both of them.
+
+The `Verify the credential scanner detects known-bad inputs` step is the fix. It
+runs before the real scan and:
+
+- lifts the scanner **out of the workflow file with PyYAML**, so the thing under
+  test is the thing CI runs rather than a copy that can drift;
+- writes known-bad inputs into a throwaway Git repository **at run time**. They
+  are never committed, because committing them would mean either a permanently
+  red scan or an excluded directory — and a scanner with an excluded directory
+  has a published bypass;
+- asserts the exact `path -> label` mapping, not a count, so the wrong rule
+  firing twice cannot stand in for the right one firing once;
+- includes a **null arm**: known-good inputs in the same tree that must produce
+  no finding, and a second tree of only known-good inputs on which the scanner
+  must exit 0. Without it, a scanner mutated to flag everything passes;
+- exits **2**, distinctly from a violation, when it cannot evaluate — for
+  instance if the scanner step is renamed and can no longer be located.
+
+The known-bad set covers every historical bypass found in this scanner: the
+`_HEADER` escape, `key` reachable only when qualified, the acronym run, and
+quoted property names. Re-introducing any one of them turns the step red. When
+you change the scanner, the obligation is not to make this step pass — it is to
+add the input that would have caught the defect you are fixing.
+
+See `standards/CONTROL_VERIFICATION_STANDARD.md` for why this is required of
+anything whose job is to fail.
 
 ## Suppressing a false positive
 

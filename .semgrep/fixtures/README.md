@@ -12,15 +12,31 @@ expected findings are absent.
 
 Each file's name states the defect class it represents. Do not "fix" them.
 
+## Depth matters, and two files exist only to prove it
+
+`route-nested-no-guard.ts` is copied to `internal/nested/deeper/route.ts`, two
+directories below `internal/`. Every other fixture sits exactly one directory
+below — and six of the ten real internal routes (`execution/complete`,
+`execution/dispatch`, `execution/heartbeat`, `execution/reclaim`,
+`execution/running`, `review/complete`) are two.
+
+Because the whole control lived at a single depth, narrowing the rule's path
+glob from `internal/**/route.ts` to `internal/*/route.ts` — one character — left
+every fixture detected and every compliant fixture clean while those six
+unauthenticated write paths stopped being scanned at all. Keep this fixture at
+its depth; the depth is the defect class it covers.
+
+`compliant-route-nested.ts` is its null half, at the same depth.
+
 ## The `compliant-*` files are the null arm
 
-`compliant-route.ts`, `compliant-route-braced.ts` and `compliant-env-reader.ts`
-are the opposite: they are **correct**, and the control fails if any rule
-produces a finding against them.
+`compliant-route.ts`, `compliant-route-braced.ts`, `compliant-route-nested.ts`
+and `compliant-env-reader.ts` are the opposite: they are **correct**, and the
+control fails if any rule produces a finding against them.
 
 They exist because the known-bad set alone cannot tell a working rule from one
 that has been widened into noise. A rule mutated to fire on every handler still
-detects all twelve known-bad fixtures, so a control asserting only "the rules
+detects all thirteen known-bad fixtures, so a control asserting only "the rules
 still fire" reports success — that mutation was run against this control and is
 caught solely by these files. A rule that flags compliant code gets muted, and a
 muted rule enforces nothing.

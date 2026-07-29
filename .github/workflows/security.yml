@@ -58,6 +58,377 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # POSITIVE CONTROL. This job scanned for two rounds with no acceptance
+      # evidence of any kind: its only steps were checkout and the scanner, so
+      # every green run was equally consistent with "the tree is clean" and
+      # "the scanner matches nothing". It was bypassed in both of those rounds.
+      # Under rule 1 of standards/CONTROL_VERIFICATION_STANDARD.md a control is
+      # accepted on its FAILING transcript, and this one had never produced one.
+      #
+      # The scanner under test is LIFTED OUT OF THIS FILE with PyYAML rather
+      # than duplicated into a fixture. A second copy is a second thing to keep
+      # in step, and the copy that drifts is always the one being tested.
+      #
+      # The known-bad inputs are WRITTEN AT RUN TIME into a throwaway git repo,
+      # never committed. Committing them would either make the real scan red or
+      # force an exclusion for the fixture directory -- and a scanner that skips
+      # a directory is a scanner with a published bypass.
+      - name: Verify the credential scanner detects known-bad inputs
+        run: |
+          set -euo pipefail
+          repo="$PWD"
+          control="$(mktemp -d)"
+          # OUTSIDE the scanned trees on purpose: the extracted scanner is a
+          # copy of a file full of credential shapes, and scanning it would
+          # report the control's own machinery as a finding.
+          scratch="$(mktemp -d)"
+          export CONTROL="$control" SCRATCH="$scratch"
+
+          python <<'BUILD'
+          import json
+          import os
+          import pathlib
+
+          import yaml
+
+          SCAN_STEP = "Scan for credentials, private keys, and committed artifacts"
+
+          control = pathlib.Path(os.environ["CONTROL"])
+          scratch = pathlib.Path(os.environ["SCRATCH"])
+
+          # Rule 5: inability to evaluate exits distinctly from
+          # property-violated, and says what could not be done.
+          def cannot_evaluate(reason):
+              print(f"::error::Credential scanner control could not evaluate: {reason}")
+              raise SystemExit(2)
+
+          with open(".github/workflows/security.yml", "r", encoding="utf-8") as handle:
+              document = yaml.safe_load(handle)
+          steps = (document.get("jobs", {})
+                   .get("credential-and-artifact-audit", {})
+                   .get("steps") or [])
+          bodies = [s.get("run") for s in steps
+                    if isinstance(s, dict) and s.get("name") == SCAN_STEP
+                    and isinstance(s.get("run"), str)]
+          if len(bodies) != 1:
+              cannot_evaluate(
+                  f"expected exactly one step named {SCAN_STEP!r}, found {len(bodies)}")
+          body = bodies[0]
+          opener = "python <<'PYTHON'\n"
+          if opener not in body or "\nPYTHON" not in body:
+              cannot_evaluate("the scanner step no longer wraps its Python in a "
+                              "'PYTHON' heredoc, so it cannot be lifted out")
+          source = body[body.index(opener) + len(opener):body.index("\nPYTHON")]
+          (scratch / "scanner.py").write_text(source, encoding="utf-8")
+
+          # Credential shapes are assembled rather than written out, for the
+          # same reason the scanner assembles its own patterns: a literal one in
+          # this file would be found by Gitleaks in the neighbouring job. A
+          # control that trips the gate it shares a repository with is a control
+          # somebody eventually deletes.
+          def synthesise(prefix, alphabet, length):
+              return prefix + "".join(alphabet[(i * 7 + 3) % len(alphabet)]
+                                      for i in range(length))
+
+          LOWER = "0123456789abcdefghijklmnopqrstuvwxyz"
+          MIXED = LOWER + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+          # 18 characters, mixed case and digits: long enough for the 16-char
+          # floor, and shaped so no high-confidence rule can claim it. That
+          # matters -- an earlier attempt at a red arm went red via the Stripe
+          # rule while the generic rule it was written to exercise stayed
+          # silent, which would have hidden the defect completely.
+          OPAQUE = "Zx91" + "QpLm" + "44Tv" + "BnRw" + "02"
+
+          PEM = ("-----BEGIN " + "RSA PRIVATE " + "KEY-----\n"
+                 + "MIIBOgIBAAJBAK" + OPAQUE + "\n"
+                 + "-----END " + "RSA PRIVATE " + "KEY-----\n")
+
+          GENERIC = "Generic secret assignment"
+
+          # Each entry: path, file content, the labels the scanner MUST report.
+          # The mapping is asserted exactly -- not a count. A count is satisfied
+          # by the wrong rule firing twice while the subtlest one has silently
+          # stopped working.
+          KNOWN_BAD = [
+              # --- the four historical bypasses, one fixture each -------------
+              # 1. Acronym-run camelCase. The lowercase-to-uppercase boundary
+              #    alone left the word after an uppercase run swallowed.
+              ("bad/acronym-run.ts",
+               f'const APIToken = "{OPAQUE}";\n'
+               f'const JWTSecret = "{OPAQUE}";\n'
+               f'const DBPassword = "{OPAQUE}";\n',
+               [GENERIC]),
+              # 2. Quoted property names. Zero matches before, in every JSON
+              #    file in the repository and every object literal.
+              ("bad/quoted-keys.json",
+               '{\n'
+               f'  "password": "{OPAQUE}",\n'
+               f'  "apiKey": "{OPAQUE}"\n'
+               '}\n',
+               [GENERIC]),
+              ("bad/quoted-key-literal.ts",
+               f'const o = {{ "token": "{OPAQUE}" }};\n',
+               [GENERIC]),
+              # 3. The _HEADER escape: any name containing "header" was exempt
+              #    before the sensitive words were even consulted.
+              ("bad/header-suffixed.ts",
+               f'const SECRET_HEADER = "{OPAQUE}";\n',
+               [GENERIC]),
+              #    ...and its narrower successor: a value that is merely
+              #    header-SHAPED is also a strong passphrase.
+              ("bad/header-passphrase.ts",
+               'const SECRET_HEADER = "correct-horse-battery-staple";\n',
+               [GENERIC]),
+              # 4. "key" reachable only when qualified. This name carries no
+              #    unconditionally sensitive word, so it is detected solely by
+              #    the qualified-key path -- remove that path and only this
+              #    fixture notices.
+              ("bad/qualified-key.ts",
+               f'const SUPABASE_SERVICE_ROLE_KEY = "{OPAQUE}";\n',
+               [GENERIC]),
+              # --- value shapes an earlier round had to widen for -------------
+              ("bad/passphrase-with-spaces.ts",
+               'const dbPassword = "correct horse battery staple";\n',
+               [GENERIC]),
+              ("bad/backtick-value.ts",
+               f'const apiToken = `{OPAQUE}`;\n',
+               [GENERIC]),
+              # --- the high-confidence rules ---------------------------------
+              ("bad/embedded-private-key.txt", PEM, ["Private key block"]),
+              # Deliberately NEUTRAL variable names. A sensitive name would make
+              # the generic rule fire too, and then these fixtures would not be
+              # evidence that the high-confidence rule still works.
+              ("bad/aws-access-key.ts",
+               f'const sample = "{synthesise("AKIA", "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", 16)}";\n',
+               ["AWS access key id"]),
+              ("bad/google-api-key.ts",
+               f'const sample = "{synthesise("AIza", MIXED + "_-", 35)}";\n',
+               ["Google API key"]),
+              ("bad/slack-token.ts",
+               f'const sample = "{synthesise("xox" + "b-", LOWER, 14)}";\n',
+               ["Slack token"]),
+              ("bad/github-token.ts",
+               f'const sample = "{synthesise("gh" + "p_", MIXED, 36)}";\n',
+               ["GitHub token"]),
+              ("bad/stripe-live-key.ts",
+               f'const sample = "{synthesise("s" + "k_" + "live_", LOWER, 24)}";\n',
+               ["Stripe live secret key"]),
+              # --- filename and artifact rules -------------------------------
+              ("bad/server.pem", "not a key block, judged by extension\n",
+               ["Key or certificate file"]),
+              ("bad/id_rsa", "judged by filename\n", ["Private key file"]),
+              ("bad/.env", "# a committed environment file\n",
+               ["Environment file"]),
+              # A template suffix exempts the FILENAME rule, which is exactly
+              # why the content rule has to cover it: otherwise a real value in
+              # a committed .env.*.example passes every control in the job.
+              ("bad/.env.example",
+               "DATABASE_URL=postgres://appuser:9aQXZ1mLpR44TvBnKd@db.internal:5432/app\n",
+               ["Secret value in environment file"]),
+              # Two labels on one path, asserted as two: the env-format rule and
+              # the unquoted generic rule both see this line, and collapsing
+              # that to "at least one finding here" would hide either one going
+              # dark.
+              ("bad/.env.template", f"SESSION_SECRET={OPAQUE}\n",
+               ["Secret value in environment file", GENERIC]),
+              # --- suppression discipline ------------------------------------
+              ("bad/unexplained-pragma.ts",
+               "// scanner:allow-secret\n"
+               "export const value = 1;\n",
+               ["Unexplained scanner:allow-secret pragma"]),
+              ("bad/node_modules/left-pad/index.js", "module.exports = 1;\n",
+               ["Committed build or dependency artifact"]),
+              # Rooted at the tree, not under bad/, because this arm tests the
+              # PREFIX branch rather than the "/node_modules/" substring branch.
+              ("dist/bundle.js", "module.exports = 1;\n",
+               ["Committed build or dependency artifact"]),
+          ]
+
+          # NULL ARM (rule 2). Correct inputs, in the SAME tree as the known-bad
+          # ones, that must produce NO finding. Without these the control
+          # asserts only "the scanner still fires", which a scanner mutated to
+          # fire on everything also satisfies -- and a scanner that flags
+          # innocent code gets muted, which is how this repository lost a
+          # control once already.
+          guard = pathlib.Path("lib/dev-hq/internal-guard.ts")
+          if not guard.exists():
+              cannot_evaluate(f"{guard} is missing, so the header exemption "
+                              "cannot be tested against the real constant it "
+                              "exists for")
+          KNOWN_GOOD = [
+              # The REAL file, copied rather than retyped. DEV_HQ_INTERNAL_TOKEN_HEADER
+              # holding "x-dev-hq-internal-token" is the one legitimate case the
+              # header exemption exists for, and a hand-written imitation of it
+              # tests the imitation.
+              ("good/real-internal-guard.ts",
+               guard.read_text(encoding="utf-8")),
+              ("good/innocent-keys.tsx",
+               'const idempotencyKey = "order-2026-07-29-00042";\n'
+               'const PENDING_DISPATCH_STORAGE_KEY = "pending-dispatch-storage";\n'
+               'export const Row = () => <li key="dashboard-overview-panel" />;\n'),
+              ("good/innocent.json",
+               '{\n'
+               '  "key": "dashboard-overview-panel",\n'
+               '  "storageKey": "pending-dispatch-storage"\n'
+               '}\n'),
+              # The false positive the quoted-name change actually produced on
+              # this repository: an npm package name is not a variable name, and
+              # "js-tokens" splits to a sensitive word. Kept as a fixture so the
+              # version-range exemption cannot be dropped silently.
+              ("good/lockfile-excerpt.json",
+               '{\n'
+               '  "js-tokens": "^3.0.0 || ^4.0.0",\n'
+               '  "api-key-generator": ">=1.4.0 <2.0.0"\n'
+               '}\n'),
+              ("good/interpolated.ts",
+               "const authToken = `Bearer ${session.accessToken}`;\n"),
+              ("good/passthrough.ts",
+               "await complete({ callbackToken: body.callbackToken });\n"),
+              ("good/announced-fixture.ts",
+               'const apiToken = "test-token-placeholder";\n'),
+              # A suppression WITH its reason. Proves the escape hatch still
+              # works, so the rest of the suite cannot be satisfied by a scanner
+              # that has quietly stopped honouring pragmas.
+              ("good/suppressed.ts",
+               f'const apiToken = "{OPAQUE}"; '
+               "// scanner:allow-secret rotated fixture credential, see SECURITY.md\n"),
+              ("good/.env.example", "API_TOKEN=test-token-placeholder\n"),
+          ]
+
+          def write(root, path, content):
+              target = root / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content, encoding="utf-8")
+
+          mixed = control / "mixed"
+          clean = control / "clean"
+          for path, content, _labels in KNOWN_BAD:
+              write(mixed, path, content)
+          for path, content in KNOWN_GOOD:
+              write(mixed, path, content)
+              write(clean, path, content)
+
+          expected = sorted({(path, label)
+                             for path, _c, labels in KNOWN_BAD
+                             for label in labels})
+          (scratch / "expected.json").write_text(
+              json.dumps({"expected": expected,
+                          "clean": sorted(p for p, _c in KNOWN_GOOD)}),
+              encoding="utf-8")
+          print(f"Built {len(KNOWN_BAD)} known-bad and {len(KNOWN_GOOD)} "
+                "known-good fixtures.")
+          BUILD
+
+          for tree in mixed clean; do
+            git -C "$control/$tree" -c init.defaultBranch=control init -q .
+            # The scanner enumerates via `git ls-files`, so the fixtures have to
+            # reach the index. No commit is needed and none is made.
+            git -C "$control/$tree" -c core.excludesFile=/dev/null add -A
+          done
+
+          set +e
+          ( cd "$control/mixed" && python "$scratch/scanner.py" ) \
+            > "$scratch/mixed.out" 2>&1
+          echo $? > "$scratch/mixed.rc"
+          ( cd "$control/clean" && python "$scratch/scanner.py" ) \
+            > "$scratch/clean.out" 2>&1
+          echo $? > "$scratch/clean.rc"
+          set -e
+
+          cd "$repo"
+          python <<'ASSERT'
+          import json
+          import os
+          import pathlib
+          import re
+          import sys
+
+          scratch = pathlib.Path(os.environ["SCRATCH"])
+          spec = json.loads((scratch / "expected.json").read_text(encoding="utf-8"))
+          expected = [tuple(pair) for pair in spec["expected"]]
+          clean_paths = set(spec["clean"])
+
+          FINDING = re.compile(r"^::error file=(?P<path>.+?)::(?P<label>.+) detected\.$")
+
+          def load(name):
+              rc = int((scratch / f"{name}.rc").read_text(encoding="utf-8").strip())
+              out = (scratch / f"{name}.out").read_text(encoding="utf-8")
+              return rc, out
+
+          mixed_rc, mixed_out = load("mixed")
+          clean_rc, clean_out = load("clean")
+
+          # Rule 5. A scanner that crashed is not a scanner that found nothing,
+          # and the two must never share an exit status.
+          for name, rc, out in (("mixed", mixed_rc, mixed_out),
+                                ("clean", clean_rc, clean_out)):
+              if rc not in (0, 1):
+                  print(f"::error::Credential scanner control could not evaluate: "
+                        f"the scanner exited {rc} on the {name} tree.")
+                  print(out)
+                  sys.exit(2)
+
+          reported = set()
+          for line in mixed_out.split("\n"):
+              match = FINDING.match(line.strip())
+              if match:
+                  reported.add((match.group("path"), match.group("label")))
+
+          failed = False
+
+          missing = [(path, label) for path, label in expected
+                     if not any(rp == path and rl.startswith(label)
+                                for rp, rl in reported)]
+          for path, label in missing:
+              print(f"::error::Scanner no longer reports '{label}' for {path}")
+          if missing:
+              failed = True
+              print(f"RED ARM FAILED: {len(missing)} of {len(expected)} known-bad "
+                    "inputs undetected. A credential shape this job claims to "
+                    "catch is now invisible.")
+
+          unaccounted = [(path, label) for path, label in sorted(reported)
+                         if not any(path == ep and label.startswith(el)
+                                    for ep, el in expected)]
+          for path, label in unaccounted:
+              kind = "COMPLIANT fixture" if path in clean_paths else "unexpected path"
+              print(f"::error::Scanner reports '{label}' on {kind} {path}")
+          if unaccounted:
+              failed = True
+              print("NULL ARM FAILED: a finding outside the known-bad set. "
+                    "Either a rule fires on correct input -- which is how a "
+                    "scanner gets muted -- or this control's model of the "
+                    "fixtures has drifted from the fixtures.")
+
+          if mixed_rc != 1:
+              failed = True
+              print(f"::error::Scanner exited {mixed_rc} on a tree containing "
+                    f"{len(expected)} planted credentials; expected 1.")
+
+          if clean_rc != 0 or "::error" in clean_out:
+              failed = True
+              print(f"::error::Scanner exited {clean_rc} on the known-good tree, "
+                    "which contains no planted credential at all. Without this "
+                    "arm a scanner that fails on everything would satisfy every "
+                    "check above.")
+              print(clean_out)
+
+          if failed:
+              print("\n--- scanner output on the mixed tree ---")
+              print(mixed_out)
+              sys.exit(1)
+
+          print(f"Credential scanner positive control passed: "
+                f"{len(expected)} known-bad path/label pairs reported, "
+                f"{len(clean_paths)} known-good fixtures clean, "
+                f"exit 1 on the planted tree and exit 0 on the clean tree.")
+          for path, label in expected:
+              print(f"  RED   {label} -> {path}")
+          for path in sorted(clean_paths):
+              print(f"  GREEN no finding -> {path}")
+          ASSERT
+
       - name: Scan for credentials, private keys, and committed artifacts
         run: |
           set -euo pipefail
@@ -106,8 +477,31 @@ jobs:
           # A value containing "${" is skipped: that is an interpolated
           # expression evaluated at runtime, not a committed literal, and
           # `Bearer ${token}` is a correct construction rather than a leak.
+          #
+          #   * QUOTED NAMES. The name ran straight into `\s*[:=]`, so a QUOTED
+          #     property put a quote character between the identifier and the
+          #     colon and the pattern matched nothing at all:
+          #
+          #         {"password": "Zx91QpLm44TvBnRw"}     zero matches
+          #         {'apiKey': 'Zx91QpLm44TvBnRw'}       zero matches
+          #
+          #     UNQUOTED_SECRET could not pick these up either, because its
+          #     value must be bare. That is not a narrowing of the rule -- it is
+          #     an entire file format outside it. EVERY .json file in the
+          #     repository, every package manifest, every fixture payload and
+          #     every object literal written with quoted keys was unscannable by
+          #     the generic rule, and quoting one property name was a complete
+          #     bypass in TypeScript too.
+          #
+          #     The quote is captured and back-referenced so it must be balanced
+          #     -- `"name': ...` is not a property -- and it stays optional so
+          #     the bare `apiToken = "..."` form is unaffected. Backticks are
+          #     deliberately absent: they are a valid string quote but not a
+          #     valid object-key quote.
           GENERIC_SECRET = re.compile(
+              r"(?P<namequote>['\"])?"
               r"(?P<name>[A-Za-z_$][A-Za-z0-9_$.\-]*)"
+              r"(?(namequote)(?P=namequote))"
               r"\s*[:=]\s*(?P<quote>['\"`])(?P<value>[^'\"`\n]{16,})(?P=quote)")
 
           # Unquoted assignments outside .env files: YAML, TOML, INI, shell.
@@ -145,6 +539,36 @@ jobs:
               return bool(IDENTIFIER_PATH.match(value)) and all(
                   len(segment) <= 24 for segment in value.split("."))
 
+          # A dependency SPECIFIER is not a credential. Reading quoted property
+          # names brought package-lock.json into scope, where the property name
+          # is a package name rather than a variable name -- and npm package
+          # names contain sensitive words as hyphen-separated components:
+          #
+          #     "js-tokens": "^3.0.0 || ^4.0.0"
+          #
+          # splits to ["js", "tokens"], and "tokens" is unconditionally
+          # sensitive. That was the single false positive the quoted-name change
+          # produced across the whole tree, and it is fixed here rather than
+          # muted, because a lockfile regenerates and a pragma inside it would
+          # not survive.
+          #
+          # The exemption is on the VALUE and stays tight: each chunk must be a
+          # numeric-core version, optionally preceded by a range operator. The
+          # leading digit is not enough on its own -- "9aQXZ1mLpR44TvBnKd" is a
+          # plausible token that starts with one -- so the character after the
+          # numeric core must be a separator, never more alphanumerics.
+          VERSION_TOKEN = re.compile(
+              r"^(?:[\^~]|[><]=?|=)?"
+              r"[0-9]+(?:\.(?:[0-9]+|[x*]))*"
+              r"(?:[-+][0-9A-Za-z.\-]{1,20})?$")
+
+          def looks_like_version_range(value):
+              chunks = [c for c in re.split(r"\s*\|\|\s*|\s+", value.strip())
+                        if c]
+              return bool(chunks) and all(
+                  chunk == "-" or VERSION_TOKEN.match(chunk)
+                  for chunk in chunks)
+
           ALWAYS_SENSITIVE = {
               "secret", "secrets", "password", "passwords", "passwd", "pwd",
               "token", "tokens", "apikey", "apikeys",
@@ -180,11 +604,29 @@ jobs:
           # credential must not be cancellable by a word sitting next to it.
           HEADER_WORDS = {"header", "headers"}
 
+          # Two camelCase boundaries, and the second one is not cosmetic.
+          #
+          #   lower/digit -> UPPER   apiToken   -> api  | Token
+          #   UPPER -> UPPER+lower   APIToken   -> API  | Token
+          #
+          # With only the first, an uppercase RUN swallowed the word after it:
+          # APIToken split to ["apitoken"], JWTSecret to ["jwtsecret"] and
+          # DBPassword to ["dbpassword"], none of which equals a sensitive word,
+          # so all three were undetected -- while the camelCase spellings of the
+          # very same names (apiToken, jwtSecret, dbPassword) were caught. The
+          # scanner's coverage therefore depended on the author's capitalisation
+          # habit, and the conventional way to write an acronym was the way that
+          # evaded it. AWSAccessKeyId lost "access" the same way, which cost the
+          # qualifier that makes a "key" a credential.
+          IDENTIFIER_BOUNDARY = re.compile(
+              r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
           def _identifier_words(name):
               """Split an identifier into lowercase words on _, -, ., $ and
-              camelCase boundaries, so API_KEY, apiKey and serviceRoleKey all
-              yield a standalone "key" while monkey and keyboard do not."""
-              spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+              camelCase boundaries, so API_KEY, apiKey, APIKey and
+              serviceRoleKey all yield a standalone "key" while monkey and
+              keyboard do not."""
+              spaced = IDENTIFIER_BOUNDARY.sub("_", name)
               return [word.lower() for word in re.split(r"[_$.\-]+", spaced)
                       if word]
 
@@ -226,11 +668,37 @@ jobs:
           # does a UUID -- its segments are hex.
           HEADER_NAME = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$")
 
-          def looks_like_header_name(value):
+          def looks_like_header_name(name_words, value):
+              """Whether `value` is the wire name of the header `name` names.
+
+              Shape alone was not enough. A lowercase hyphenated value whose
+              segments are all short and non-hex describes a header name -- and
+              also describes a correct-horse-battery-staple passphrase, which is
+              a strong secret, not a header. SECRET_HEADER holding exactly that
+              was exempt.
+
+              So the value must not merely LOOK like a header name, it must look
+              like THIS one: every meaningful segment of the value has to be a
+              word of the identifier. That is what makes the exemption's own
+              justification true rather than merely plausible --
+              DEV_HQ_INTERNAL_TOKEN_HEADER really is "x-dev-hq-internal-token",
+              and API_KEY_HEADER really is "x-api-key", because a constant that
+              names a header is named after that header. Single-character
+              segments are skipped so the conventional "x-" prefix need not be
+              spelled out in the identifier.
+
+              Honest limit: a value made ENTIRELY of words already present in
+              its own identifier still passes. Such a value has no secrecy left
+              -- the name discloses it -- so the exemption costs nothing there.
+              """
               if not HEADER_NAME.match(value):
                   return False
-              return all(len(segment) <= 12 and not HEXISH.match(segment)
-                         for segment in value.split("-"))
+              segments = value.split("-")
+              if not all(len(segment) <= 12 and not HEXISH.match(segment)
+                         for segment in segments):
+                  return False
+              return all(segment in name_words
+                         for segment in segments if len(segment) > 1)
 
           def is_sensitive_assignment(name, value):
               """Whether this name/value pair is a credential.
@@ -245,7 +713,7 @@ jobs:
               if not has_sensitive_name(name):
                   return False
               words = set(_identifier_words(name))
-              if words & HEADER_WORDS and looks_like_header_name(value):
+              if words & HEADER_WORDS and looks_like_header_name(words, value):
                   return False
               return True
 
@@ -311,11 +779,13 @@ jobs:
                   m for m in GENERIC_SECRET.finditer(text)
                   if is_sensitive_assignment(m.group("name"), m.group("value"))
                   and "${" not in m.group("value")
+                  and not looks_like_version_range(m.group("value"))
                   and not looks_synthetic(m.group("value"))] + [
                   m for m in UNQUOTED_SECRET.finditer(text)
                   if is_sensitive_assignment(m.group("name"), m.group("value"))
                   and "${" not in m.group("value")
                   and not looks_like_code_expression(m.group("value"))
+                  and not looks_like_version_range(m.group("value"))
                   and not looks_synthetic(m.group("value"))])
 
           def env_secret_hits(text):
@@ -749,6 +1219,8 @@ jobs:
                    "$internal/guardafter" "$internal/notenforced" \
                    "$internal/untyped" "$internal/zeroparam" \
                    "$internal/compliant" "$internal/compliantbraced" \
+                   "$internal/nested/deeper" \
+                   "$internal/compliantnested/deeper" \
                    "$control/lib/dev-hq"
 
           cp .semgrep/fixtures/route-guard-result-discarded.ts "$internal/discarded/route.ts"
@@ -760,13 +1232,21 @@ jobs:
           cp .semgrep/fixtures/route-guard-not-enforced.ts     "$internal/notenforced/route.ts"
           cp .semgrep/fixtures/route-untyped-no-guard.ts       "$internal/untyped/route.ts"
           cp .semgrep/fixtures/route-zero-param-no-guard.ts    "$internal/zeroparam/route.ts"
+          # DEPTH ARM. Two directories below internal/, which is where six of
+          # the ten real internal routes live (execution/*, review/complete).
+          # Every other fixture sits exactly one directory below, so narrowing
+          # the rule's glob from `internal/**/route.ts` to `internal/*/route.ts`
+          # left the control fully green while those six write paths stopped
+          # being scanned. This is the fixture that makes that mutation visible.
+          cp .semgrep/fixtures/route-nested-no-guard.ts        "$internal/nested/deeper/route.ts"
           cp .semgrep/fixtures/token-destructured.ts           "$control/lib/dev-hq/token-destructured.ts"
           cp .semgrep/fixtures/token-renamed.ts                "$control/lib/dev-hq/token-renamed.ts"
           cp .semgrep/fixtures/token-env-aliased.ts            "$control/lib/dev-hq/token-env-aliased.ts"
 
-          # NULL ARM. These three are correct and must produce no finding.
+          # NULL ARM. These four are correct and must produce no finding.
           cp .semgrep/fixtures/compliant-route.ts              "$internal/compliant/route.ts"
           cp .semgrep/fixtures/compliant-route-braced.ts       "$internal/compliantbraced/route.ts"
+          cp .semgrep/fixtures/compliant-route-nested.ts       "$internal/compliantnested/deeper/route.ts"
           cp .semgrep/fixtures/compliant-env-reader.ts         "$control/lib/dev-hq/compliant-env-reader.ts"
 
           cp -r .semgrep "$control/.semgrep"
@@ -799,6 +1279,14 @@ jobs:
               ("app/api/dev-hq/internal/untyped/route.ts", GUARD),
               # No request parameter at all, so nothing to guard with.
               ("app/api/dev-hq/internal/zeroparam/route.ts", GUARD),
+              # DEPTH ARM. Two directories below internal/, matching the real
+              # layout of execution/complete, execution/dispatch,
+              # execution/heartbeat, execution/reclaim, execution/running and
+              # review/complete. Without this entry the rule's path glob could
+              # be narrowed from ** to * -- one character -- and every fixture
+              # above still matched, because every one of them is exactly one
+              # directory deep.
+              ("app/api/dev-hq/internal/nested/deeper/route.ts", GUARD),
               ("lib/dev-hq/token-destructured.ts", TOKEN),
               ("lib/dev-hq/token-renamed.ts", TOKEN),
               ("lib/dev-hq/token-env-aliased.ts", TOKEN),
@@ -819,6 +1307,10 @@ jobs:
               # statement, and this is the fixture that fails if that
               # requirement is ever narrowed to one exact spelling.
               "app/api/dev-hq/internal/compliantbraced/route.ts",
+              # The depth arm's null half: correct code at nested depth. The
+              # known-bad half above catches a narrowed path glob; this catches
+              # a widened pattern that fires on everything it reaches there.
+              "app/api/dev-hq/internal/compliantnested/deeper/route.ts",
               "lib/dev-hq/compliant-env-reader.ts",
           }
 
