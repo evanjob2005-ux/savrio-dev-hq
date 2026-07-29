@@ -176,12 +176,16 @@ before starting.
 
 ---
 
-## 3. FOUNDER DECISIONS — recorded, none enacted
+## 3. FOUNDER DECISIONS — recorded, none ratified here
+
+Some rows describe provisional implementation that already exists. That code is
+evidence and a candidate policy, not a substitute for the Founder decision the
+row requires. This section records no new ratification.
 
 | ID | Decision |
 |---|---|
-| **OBL-36** | What a founder resolution means for a still-queued stalled execution. **Restate before closing** — the recorded framing covers `revise` only, but `7979950` fixed all three verbs, and the acceptance criterion as written would close the obligation while leaving `abandon`/`accept` unaddressed. |
-| **OBL-34** | `environment: production-release` does not exist (`gh api .../environments` → `total_count: 0`). The release gate approves nothing today; the P0-11 revalidation logic is correct and **inert** until you create it. |
+| **OBL-36** | What a Founder resolution means for a non-terminal escalated execution. `7979950` provisionally ends the existing non-terminal execution for all three verbs, but that implementation is not Founder ratification. **Scope correction recorded in `OPEN_OBLIGATIONS.md`:** the decision and closure evidence must cover `accept`, `abandon`, and `revise`, including queued and running executions and replay convergence. The policy decision itself remains open. |
+| **OBL-34** | `environment: production-release` does not exist (`gh api .../environments` → `total_count: 0`). No human release approval or self-review prevention is enforced, so publishing can proceed without that approval. The P0-11 post-approval revalidation logic is correct but has no approval wait to operate across until the protected environment is configured. |
 | **X-29** | A **new superseding ADR** for the delegated stall-deadline decision. Not an amendment — `VERSIONING_POLICY.md:222-232` makes ADRs immutable. It must state: O6's resting→terminating change, the third `EscalationOrigin` member, the O5-class deadline value, and (per the architecture review) what resolution does to a non-terminal execution. |
 | **ARCH-02** | Whether a machine-raised escalation may reopen a founder-terminal task. An agent proved there is **no point on the write path** where a terminal guard can live without contradicting ARCH-02's convergence rule — both `updateTaskStatusIf` and `ensureEscalatedTaskStatus` break asserted contracts. Governance, not implementation. |
 | **OBL-30** | Wiring `verify-workflow-structure.py` into CI. Still runs nowhere. |
