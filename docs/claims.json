@@ -36,9 +36,9 @@
   "amended_claims": [
     {
       "id": "capability-token-uses-node-crypto",
-      "reason": "CTL-01 bypass 2: whole-file grep-present -> grep-scoped at the generator. randomUUID() surviving anywhere in id.ts kept this green after the generator was replaced by a predictable counter. Paired with capability-token-not-from-nextid, because proximity alone is decoy-satisfiable.",
+      "reason": "CTL-01 bypass 2, twice. Whole-file grep-present -> grep-scoped at the generator, because randomUUID() surviving anywhere in id.ts kept this green after the generator was replaced by a predictable counter. Then bound to the RETURNED expression, because a line radius is not a function body: padding the body moved the forbidden nextId( outside the paired absent-window while an unused randomUUID() stayed inside the present-window.",
       "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:689603e1675077bce3c51d4f9a0cf71d322152f8561ff2dd93c07de860fef58f"
+      "body": "sha256:ab0ec716a36a708aeacffa3cda5a025d44fe0674b20cb5f010ad70cd9a8f3a6c"
     },
     {
       "id": "event-buffer-size-is-a-page-limit",
@@ -95,12 +95,6 @@
       "body": "sha256:dc68faab3acd67f44e20e2c38554649641c5d2616ce8e3c91d69fadea1d076fe"
     },
     {
-      "id": "timeline-retention-test-appends-205",
-      "reason": "Independent review found `if (index === 0)` wrapping the append satisfied within:3. Bound to the awaited call at within:2.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:e72d2dce3557c419a5e7ce6c671ebf6b63e402969caec60853a9a7fed22e5077"
-    },
-    {
       "id": "vitest-projects-exclude-e2e",
       "reason": "code_only added: a commented-out exclusion must not satisfy this claim.",
       "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
@@ -141,9 +135,12 @@
     "    satisfied by a lightweight ref that carries no annotation at all.",
     "  * A scoped claim proves PROXIMITY, not data flow. `randomUUID()` three",
     "    lines from a generator can be an unused decoy while the generator",
-    "    returns a counter. Where that matters, pair grep-scoped with",
-    "    grep-scoped-absent so the right call must be present AND the wrong one",
-    "    absent at the same site.",
+    "    returns a counter. Pairing grep-scoped with grep-scoped-absent -- the",
+    "    right call present AND the wrong one absent -- closes that decoy, but",
+    "    the pair bounds a WINDOW, not a function body, so a body longer than",
+    "    the window escapes both halves. Where it matters, bind the pattern to",
+    "    the line that decides the value, as capability-token-uses-node-crypto",
+    "    binds its return statement.",
     "  * code_only is NOT available on grep-absent. For a claim that something",
     "    is absent, removing text can only hide a violation, and a control may",
     "    not fail in the direction that reads as satisfied.",
@@ -230,15 +227,15 @@
     {
       "id": "capability-token-uses-node-crypto",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "SEC-6 correction: lib/dev-hq/id.ts implements nextCapabilityToken over randomUUID() from node:crypto.",
+      "statement": "SEC-6 correction: lib/dev-hq/id.ts implements nextCapabilityToken by RETURNING a value built from randomUUID() from node:crypto.",
       "probe": "grep-scoped",
       "args": {
         "path": "lib/dev-hq/id.ts",
         "anchor": "export function nextCapabilityToken",
-        "pattern": "randomUUID\\(\\)",
+        "pattern": "^\\s*return `\\$\\{prefix\\}-\\$\\{randomUUID\\(\\)",
         "within": 3
       },
-      "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim. Proximity alone does not decide this: capability-token-not-from-nextid is the other half, and neither is sufficient by itself."
+      "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim. This binds the RETURNED expression, not merely the presence of randomUUID() nearby: `const unused = randomUUID(); ... return nextId(prefix);` satisfies proximity while every token becomes predictable, and padding the body moves the forbidden call outside any fixed window. capability-token-not-from-nextid is the complement, and the window it uses is a heuristic."
     },
     {
       "id": "capability-token-not-from-nextid",
@@ -265,6 +262,19 @@
         "within": 0
       },
       "red_means": "Nothing executes the retention test any more. timeline-retention-guarded-by-test and timeline-retention-test-appends-205 pin that test's TEXT; this claim is what makes them mean something, because a pinned test that no workflow runs proves nothing. Without it the append-only guarantee would rest entirely on static probes over store.ts."
+    },
+    {
+      "id": "retention-test-collected-by-node-project",
+      "document": "docs/decisions/ADR-0004-deployment-persistence-transport-auth.md",
+      "statement": "The Vitest node project collects **/*.test.ts, which is what makes lib/dev-hq/audit-timeline.test.ts part of the run frontend-tests.yml executes.",
+      "probe": "grep-scoped",
+      "args": {
+        "path": "vitest.config.ts",
+        "anchor": "name: \"node\"",
+        "pattern": "include: \\[\"\\*\\*/\\*\\.test\\.ts\"\\]",
+        "within": 3
+      },
+      "red_means": "The node project no longer collects the retention test by that pattern. retention-test-executes-in-ci pins the workflow step and the timeline-retention-* claims pin the test's text, but the link between them lives here: excluding audit-timeline.test.ts from this project stops it executing anywhere while all four of those claims stay green."
     },
     {
       "id": "event-store-has-no-retention-cap",

@@ -261,22 +261,37 @@ def _strip_comments(lines):
         Both re-opened CTL-01 bypass 2 -- a claim about a CSPRNG satisfied by a
         comment -- through the very mechanism added to close it.
 
-    So this walks the text: block-comment state carries across lines, and
-    quotes are tracked so `//` inside a string or template literal is never
-    mistaken for a comment. That last part matters in both directions. Stripping
-    too EAGERLY hides text from an absent-style claim, which reads as
-    "satisfied"; `assetPrefix: "//cdn.example.com"` is an ordinary idiom and
-    must not truncate the line.
+    So this walks the text with a small state machine. Block-comment state and
+    TEMPLATE-LITERAL state both carry across lines; `'` and `"` do not, because
+    in JavaScript they cannot span one unescaped. Regex literals are recognised,
+    with character-class awareness. Each of those was a live false green:
 
-    Residue, disclosed rather than papered over: a regex literal containing
-    `//` (`/\\/\\//`) is not tracked, and a template literal spanning several
-    lines is only tracked within each line.
+      * `const sep = /[/*]/;` -- a valid regex -- opened a block comment that
+        never closed, blanking every line BELOW it, so a cap or a predictable
+        token four lines down was invisible and the claim reported holds;
+      * a multi-line template literal containing `/*` did the same, because
+        quote state reset at each line boundary while block state did not.
+
+    Both silenced the rest of the file in the direction that reads as
+    satisfied. An unterminated block comment at end of file now raises
+    CannotEvaluate rather than returning a mostly-blank file: if the scanner's
+    model of the text is wrong, it must say so rather than report a verdict
+    drawn from text it silently discarded.
+
+    Stripping too EAGERLY is the dangerous direction, so quotes are honoured:
+    `assetPrefix: "//cdn.example.com"` is an ordinary idiom and must not
+    truncate the line.
+
+    Residue: nested block comments (not legal in JS anyway) and a regex literal
+    whose opening `/` is preceded by a token this scanner does not class as an
+    operator would be misread.
     """
     out = []
     in_block = False
+    in_template = False
     for line in lines:
         buf = []
-        quote = None
+        quote = "`" if in_template else None
         index = 0
         end = len(line)
         while index < end:
@@ -311,13 +326,109 @@ def _strip_comments(lines):
                 in_block = True
                 index += 2
                 continue
+            if char == "/" and _starts_regex(buf):
+                consumed = _skip_regex(line, index)
+                if consumed is not None:
+                    buf.append(line[index:consumed])
+                    index = consumed
+                    continue
             buf.append(char)
+            index += 1
+        in_template = quote == "`"
+        out.append("".join(buf))
+    if in_block:
+        raise CannotEvaluate(
+            "a /* ... */ comment is never closed, so this file does not parse "
+            "the way comment stripping assumes and everything after the opener "
+            "would have been discarded unread")
+    return out
+
+
+# Positions after which a `/` begins a regular expression rather than division.
+# Not a full JavaScript grammar; enough to keep `/[/*]/` and `/a\/*/` from being
+# read as the start of a block comment.
+_REGEX_PRECEDERS = set("=(,:[!&|?{};+-*%<>~^") | {""}
+
+
+def _starts_regex(buf):
+    for char in reversed(buf):
+        if char.isspace():
+            continue
+        return char in _REGEX_PRECEDERS
+    return True
+
+
+def _skip_regex(line, index):
+    """Index just past a regex literal starting at `index`, or None."""
+    cursor = index + 1
+    in_class = False
+    end = len(line)
+    while cursor < end:
+        char = line[cursor]
+        if char == "\\":
+            cursor += 2
+            continue
+        if char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        elif char == "/" and not in_class:
+            cursor += 1
+            while cursor < end and line[cursor].isalpha():
+                cursor += 1
+            return cursor
+        cursor += 1
+    return None
+
+
+# Comment syntax by file extension. `code_only` on a file whose syntax is not
+# listed is REFUSED, not silently treated as C-family.
+#
+# It was silently treated as C-family, and that was a false green: the executed
+# arm of the append-only guarantee is a claim over a YAML workflow, `#` is not
+# `//`, so nothing was stripped and
+#
+#     # historically: npx vitest run --project node
+#     run: npx vitest run --project dom
+#
+# satisfied a claim that the node project still runs. A comment answering for
+# code is CTL-01 bypass 2 exactly, reinstated in the claim carrying the only
+# executed guard.
+C_FAMILY = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"}
+HASH_FAMILY = {".yml", ".yaml", ".py", ".sh", ".toml", ".cfg", ".ini"}
+
+
+def _strip_hash_comments(lines):
+    """`#` to end of line, outside single or double quotes."""
+    out = []
+    for line in lines:
+        buf = []
+        quote = None
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if quote:
+                buf.append(char)
+                if char == "\\":
+                    if index + 1 < len(line):
+                        buf.append(line[index + 1])
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+                buf.append(char)
+            elif char == "#":
+                break
+            else:
+                buf.append(char)
             index += 1
         out.append("".join(buf))
     return out
 
 
-def code_lines(text, code_only):
+def code_lines(text, code_only, raw_path=""):
     """File lines, with comments removed when code_only is set.
 
     Emptied in place rather than dropped so that reported line numbers keep
@@ -326,7 +437,17 @@ def code_lines(text, code_only):
     lines = text.splitlines()
     if not code_only:
         return lines
-    return _strip_comments(lines)
+    suffix = pathlib.PurePosixPath(raw_path).suffix.lower()
+    if suffix in C_FAMILY:
+        return _strip_comments(lines)
+    if suffix in HASH_FAMILY:
+        return _strip_hash_comments(lines)
+    raise CannotEvaluate(
+        f"code_only was requested for {raw_path!r}, whose comment syntax this "
+        f"verifier does not know ({suffix or 'no extension'}). Guessing would "
+        f"mean either reading comments as code or discarding code as comments, "
+        f"so nothing was measured (known: "
+        f"{', '.join(sorted(C_FAMILY | HASH_FAMILY))})")
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +546,8 @@ def _grep(args):
     raw, path = repo_path(args)
     pattern_text, pattern = compiled(args)
     text = read_text(raw, path)
-    searched = "\n".join(code_lines(text, flag(args, "code_only", False)))
+    searched = "\n".join(
+        code_lines(text, flag(args, "code_only", False), raw))
     return pattern_text, pattern, searched, raw
 
 
@@ -472,7 +594,7 @@ def probe_grep_scoped(args):
     pattern_text, pattern = compiled(args)
     within = radius(args)
     text = read_text(raw, path)
-    lines = code_lines(text, flag(args, "code_only", True))
+    lines = code_lines(text, flag(args, "code_only", True), raw)
 
     anchor_lines = [i for i, line in enumerate(lines) if anchor.search(line)]
     if not anchor_lines:
@@ -518,7 +640,7 @@ def probe_grep_scoped_absent(args):
     pattern_text, pattern = compiled(args)
     within = radius(args)
     text = read_text(raw, path)
-    lines = code_lines(text, flag(args, "code_only", True))
+    lines = code_lines(text, flag(args, "code_only", True), raw)
 
     anchor_lines = [i for i, line in enumerate(lines) if anchor.search(line)]
     if not anchor_lines:
@@ -550,16 +672,19 @@ def probe_grep_scoped_absent(args):
 # `if (store.events.length === 0)` guard used to be reported as a live retention
 # cap, and a control that cries wolf on correct code teaches readers to ignore
 # it.
+# Every form is whitespace-tolerant, including around the dot, because
+# `store . events . length = 200` and a line broken after `store.events`
+# truncate exactly as effectively as the tidy spelling.
 _TRUNCATION_FORMS = (
     (r"\s*=(?![=>])", "rebound to a new value"),
-    (r"\.length\s*=(?![=>])", ".length assignment"),
-    (r"\.length\s*-=", ".length -="),
-    (r"\.splice\s*\(", ".splice("),
-    (r"\.pop\s*\(", ".pop("),
-    (r"\.shift\s*\(", ".shift("),
+    (r"\s*\.\s*length\s*=(?![=>])", ".length assignment"),
+    (r"\s*\.\s*length\s*-=", ".length -="),
+    (r"\s*\.\s*splice\s*\(", ".splice("),
+    (r"\s*\.\s*pop\s*\(", ".pop("),
+    (r"\s*\.\s*shift\s*\(", ".shift("),
     # An argument is required: `.slice()` with none is a defensive copy that
     # shortens nothing, and flagging it would be a false alarm.
-    (r"\.slice\s*\(\s*[^)\s]", ".slice( with an argument"),
+    (r"\s*\.\s*slice\s*\(\s*[^)\s]", ".slice( with an argument"),
 )
 
 
@@ -591,20 +716,29 @@ def probe_no_truncation(args):
     raw, path = repo_path(args)
     collection = require(args, "collection")
     text = read_text(raw, path)
-    lines = code_lines(text, flag(args, "code_only", True))
+    body = "\n".join(code_lines(text, flag(args, "code_only", True), raw))
 
-    if collection not in "\n".join(lines):
+    # Whitespace-tolerant, and searched over the whole file rather than line by
+    # line. Both mattered: matching `re.escape("store.events")` against single
+    # lines meant `store.events\n  = [];`, `store\n  .events.length = 200;` and
+    # `store . events . length = 200;` were all invisible while truncating the
+    # audit timeline. A formatter or a long line produces the first two without
+    # anyone intending anything.
+    subject = r"\s*\.\s*".join(re.escape(part)
+                               for part in collection.split("."))
+    if not re.search(subject, body):
         return False, (f"{collection} does not appear in {raw} at all, so the "
                        f"claim's subject is gone and nothing was measured "
                        f"about it")
 
     hits = []
-    for i, line in enumerate(lines):
-        for form, label in _TRUNCATION_FORMS:
-            if re.search(re.escape(collection) + r"\s*" + form, line):
-                hits.append(f"{raw}:{i + 1} ({label})")
+    for form, label in _TRUNCATION_FORMS:
+        for found in re.finditer(subject + form, body):
+            line = body.count("\n", 0, found.start()) + 1
+            hits.append(f"{raw}:{line} ({label})")
     if hits:
-        return False, (f"{collection} is TRUNCATED at " + "; ".join(hits[:4]) +
+        return False, (f"{collection} is TRUNCATED at " +
+                       "; ".join(sorted(set(hits))[:4]) +
                        " -- a retention cap exists")
     return True, (f"{collection} appears in {raw} and is never rebound, "
                   f"spliced, popped, shifted, sliced-with-an-argument, or "
@@ -658,6 +792,10 @@ def check_args(probe, args):
     """Reject unknown, missing, or non-object args before any probe runs."""
     if not isinstance(args, dict):
         raise CannotEvaluate("args is not an object")
+    if probe not in PROBE_ARGS:
+        raise CannotEvaluate(
+            f"probe {probe!r} is registered but declares no argument schema, so "
+            f"its args could not be checked")
     required, optional = PROBE_ARGS[probe]
     unknown = sorted(set(args) - required - optional)
     if unknown:
@@ -820,6 +958,19 @@ def missing_required_claims(manifest, present):
             "required_claims_baseline names neither a tag nor a commit, so "
             "there is no base to read")
 
+    if tag is not None and commit is not None:
+        peeled, why = _peel(tag)
+        if why is not None:
+            raise CannotEvaluate(
+                f"the baseline tag {tag} could not be resolved ({why}), so the "
+                f"pin could not be checked against its recorded commit")
+        if not peeled.startswith(commit) and not commit.startswith(peeled):
+            raise CannotEvaluate(
+                f"the baseline tag {tag} points at {peeled[:12]} but the "
+                f"manifest records {commit[:12]}. A tag can be force-moved with "
+                f"no change to any tracked file, so the recorded commit is what "
+                f"keeps a pin move visible in a diff; they must agree")
+
     raw = resolved = None
     reasons = []
     for kind, ref in refs:
@@ -861,15 +1012,38 @@ def missing_required_claims(manifest, present):
         raise CannotEvaluate(
             f"the baseline manifest at {ref}:{path} yielded no usable claim ids")
 
-    retired = set(_authorized(manifest, "retired_claims"))
+    retired_records = _authorized(manifest, "retired_claims")
     amended = _authorized(manifest, "amended_claims", pin_body=True)
+    for field, records in (("retired_claims", retired_records),
+                           ("amended_claims", amended)):
+        stray = sorted(set(records) - set(required))
+        if stray:
+            raise CannotEvaluate(
+                f"{field} names {', '.join(stray)}, which was never required at "
+                f"the baseline. A record excusing a claim that was never there "
+                f"understates the coverage count and hides what it is for")
+    retired = set(retired_records)
 
     gone = sorted(set(required) - set(present) - retired)
     redefined = sorted(
         identifier for identifier, body in required.items()
         if identifier in present and present[identifier] != body
         and amended.get(identifier) != body_digest(present[identifier]))
-    return gone, redefined, len(required) - len(retired)
+    return (gone, redefined, len(required) - len(retired), f"{kind} {ref}",
+            required)
+
+
+def _peel(ref):
+    """(commit sha, reason). Exactly one is None."""
+    try:
+        out = subprocess.run(["git", "rev-parse", f"{ref}^{{commit}}"],
+                             capture_output=True)
+    except OSError as error:
+        return None, f"git could not be executed ({error})"
+    if out.returncode != 0:
+        detail = " ".join(out.stderr.decode("utf-8", errors="replace").split())
+        return None, (detail or f"git rev-parse exited {out.returncode}")
+    return out.stdout.decode("utf-8", errors="replace").strip(), None
 
 
 def _is_ancestor(ref):
@@ -916,6 +1090,10 @@ def _authorized(manifest, field, pin_body=False):
                 f"{field} #{index} is missing {', '.join(blank)}; a record "
                 f"that does not say what was changed, why, and on whose "
                 f"authority is not a reviewed authorization")
+        if record["id"] in excused:
+            raise CannotEvaluate(
+                f"{field} names {record['id']!r} more than once; which record "
+                f"authorizes what could not be attributed")
         excused[record["id"]] = record.get("body")
     return excused
 
@@ -983,12 +1161,13 @@ def main():
     missing = []
     redefined = []
     coverage_note = None
+    present_bodies = {claim["id"]: claim_body(claim) for claim in claims}
+    baseline_bodies = {}
     try:
-        missing, redefined, required_count = missing_required_claims(
-            manifest, {claim["id"]: claim_body(claim) for claim in claims})
+        (missing, redefined, required_count, source,
+         baseline_bodies) = missing_required_claims(manifest, present_bodies)
         coverage_note = (f"{len(claims)} claim(s) present; "
-                         f"{required_count} still required at the pinned "
-                         f"baseline")
+                         f"{required_count} still required at {source}")
     except CannotEvaluate as reason:
         unevaluated.append(({"id": "(manifest coverage)",
                              "document": args.manifest,
@@ -1016,10 +1195,13 @@ def main():
               f"it decided before. This check cannot tell a strengthening from "
               f"a weakening -- it reports that the meaning MOVED, and a human "
               f"decides which it was.")
+        print(f"    baseline: {baseline_bodies.get(identifier, '(unknown)')}")
+        print(f"    present:  {present_bodies.get(identifier, '(unknown)')}")
         print("  Keeping the id while replacing what it measures is a deletion "
               "that does not change the claim count. Restore the body, or "
               "record an authorized amended_claims entry naming the claim, the "
-              "reason, and the authority.")
+              "reason, the authority, and the sha256 of the body it "
+              "authorizes.")
 
     print()
     if unevaluated:
@@ -1064,21 +1246,30 @@ def main():
           "behaviour a claim describes. This is strong evidence of consistency "
           "and NOT proof. What remains weak:")
     print("  * `no-truncation` treats any REBIND of the collection as suspect "
-          "rather than listing spellings, but an alias bound to another "
-          "variable first (`const e = store.events; e.length = 0`), eviction "
-          "performed in a different file, or a shortening call passed as a "
-          "callback would still evade it;")
-    print("  * comment stripping tracks quotes and /* ... */ spans, but NOT "
-          "regex literals containing '//', and a template literal spanning "
-          "several lines is only tracked within each line;")
+          "rather than listing spellings, and tolerates whitespace and line "
+          "breaks around the dots -- but an alias bound to another variable "
+          "first (`const e = store.events; e.length = 0`), eviction performed "
+          "in a different file, or a shortening call passed as a callback "
+          "would still evade it;")
+    print("  * comment stripping is a scanner, not a parser. It tracks quotes, "
+          "template literals across lines, /* ... */ spans, and regex "
+          "literals, and it REFUSES a file whose comment syntax it does not "
+          "know rather than guessing -- but a regex literal whose opening `/` "
+          "follows a token it does not class as an operator would be misread. "
+          "Two earlier versions of this stripper each turned out to hide a "
+          "live defect, which is why an unterminated block comment now exits "
+          "2 rather than returning a mostly-blank file;")
     print("  * claims still written as whole-file greps prove that text "
           "exists somewhere in the file, not that it binds to the claimed "
           "site; `grep-scoped` and `grep-scoped-absent` bind one, and they are "
           "used only where a claim names a site;")
-    print("  * a scoped claim proves PROXIMITY, not data flow. Requiring the "
-          "CSPRNG near the generator and forbidding the predictable counter "
-          "there is what makes that pair decisive; proximity alone is "
-          "satisfiable by an unused decoy.")
+    print("  * a scoped claim proves PROXIMITY, not data flow, and `within` "
+          "is a line radius rather than a function body -- so a body longer "
+          "than the radius escapes it. Pairing a required-present claim with "
+          "a required-absent one closes the unused-decoy case but NOT the "
+          "padding case; where it matters, bind the pattern to the line that "
+          "decides the value, as capability-token-uses-node-crypto binds its "
+          "return statement.")
     print("A green run here does not certify any security or audit property. "
           "Closure additionally requires the OBL-30 external trust anchor: the "
           "baseline is read from git history and compares each claim's probe "

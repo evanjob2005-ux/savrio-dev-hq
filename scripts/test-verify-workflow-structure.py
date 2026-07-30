@@ -509,6 +509,47 @@ def _(root):
     p.write_text(updated, encoding="utf-8", newline="")
 
 
+CHECKOUT_ANCHOR = "# v7.0.1\n\n      - name: Set up Python\n"
+
+
+def toggle_checkout_input(text, entry):
+    """Add or remove one `with:` input on the structured-data checkout.
+
+    THREE states, not two. The fixture is rebuilt from BASE, and BASE has been
+    each of these at different times:
+
+      1. the input is present            -> remove that one line
+      2. `with:` exists without it       -> add the line to the existing block
+      3. there is no `with:` at all      -> add the block and the line
+
+    Two states was not enough and the case failed at the base CI actually uses:
+    at `5064526` the checkout carries `fetch-tags: true` but no `fetch-depth`,
+    which is state 2, and an add-or-remove written for states 1 and 3 asserted
+    its way into an error rather than measuring anything.
+
+    Removing only the named line matters too. Taking the whole `with:` block
+    away while another input remains leaves YAML that does not parse, so the
+    verifier would exit 2 and the case would be measuring a broken fixture
+    rather than a detected structural change.
+    """
+    if entry in text:
+        updated = re.sub(r"(?m)^[ \t]+" + re.escape(entry) + r"\n", "", text,
+                         count=1)
+        assert updated != text, f"{entry} could not be removed"
+        return updated
+    if CHECKOUT_ANCHOR in text:
+        return text.replace(
+            CHECKOUT_ANCHOR,
+            f"# v7.0.1\n        with:\n          {entry}\n\n"
+            "      - name: Set up Python\n", 1)
+    existing = re.search(
+        r"(?m)^([ \t]+)with:\n(?=[ \t]+(?:#|fetch-))", text)
+    assert existing, ("selected baseline fixture has no structured-data "
+                      "checkout to add an input to")
+    insert = existing.end()
+    return text[:insert] + f"{existing.group(1)}  {entry}\n" + text[insert:]
+
+
 @case("add/remove fetch-tags on the structured-data checkout", 1)
 def _(root):
     # Without tags the record-claims verifier refuses to judge any tag claim
@@ -516,29 +557,9 @@ def _(root):
     # quietly -- but it does turn CI red for a reason unrelated to any claim,
     # so the input is structural and is compared like one.
     p = root / ".github/workflows/ci.yml"
-    text = p.read_text(encoding="utf-8")
-    anchor = "# v7.0.1\n\n      - name: Set up Python\n"
-    tagged = ("# v7.0.1\n        with:\n          fetch-tags: true\n\n"
-              "      - name: Set up Python\n")
-    if "fetch-tags: true" in text:
-        # Only the one input line. This used to remove the whole `with:` block,
-        # which was right while fetch-tags was its sole member -- but the block
-        # now also carries fetch-depth: 0 (CTL-02), and taking `with:` away
-        # while leaving fetch-depth behind produces a step whose YAML does not
-        # parse. The verifier would then exit 2, "cannot evaluate", and this
-        # case would be measuring a broken fixture rather than a detected
-        # structural change.
-        #
-        # Latent at the current BASE, which carries no `with:` at all, so the
-        # else-branch is what runs today. Corrected anyway: the branch that is
-        # not exercised is exactly the one that rots.
-        updated = re.sub(r"(?m)^[ \t]+fetch-tags: true\n", "", text, count=1)
-        assert updated != text, "fetch-tags could not be removed"
-    else:
-        assert anchor in text, "selected baseline fixture has no bare "\
-                               "structured-data checkout"
-        updated = text.replace(anchor, tagged, 1)
-    p.write_text(updated, encoding="utf-8", newline="")
+    p.write_text(toggle_checkout_input(p.read_text(encoding="utf-8"),
+                                       "fetch-tags: true"),
+                 encoding="utf-8", newline="")
 
 
 @case("add/remove fetch-depth on the structured-data checkout", 1)
@@ -551,21 +572,11 @@ def _(root):
     #
     # Symmetric, like the fetch-tags case above and for the same reason: the
     # fixture is rebuilt from BASE, and whether BASE already carries this input
-    # depends on where BASE is. Asserting one direction would make the case
-    # fail on a baseline that simply predates the input.
+    # depends on where BASE is.
     p = root / ".github/workflows/ci.yml"
-    text = p.read_text(encoding="utf-8")
-    anchor = "# v7.0.1\n\n      - name: Set up Python\n"
-    added = ("# v7.0.1\n        with:\n          fetch-depth: 0\n\n"
-             "      - name: Set up Python\n")
-    if "fetch-depth: 0" in text:
-        updated = re.sub(r"(?m)^[ \t]+fetch-depth: 0\n", "", text, count=1)
-        assert updated != text, "fetch-depth could not be removed"
-    else:
-        assert anchor in text, ("selected baseline fixture has no bare "
-                                "structured-data checkout")
-        updated = text.replace(anchor, added, 1)
-    p.write_text(updated, encoding="utf-8", newline="")
+    p.write_text(toggle_checkout_input(p.read_text(encoding="utf-8"),
+                                       "fetch-depth: 0"),
+                 encoding="utf-8", newline="")
 
 
 def null_audit():

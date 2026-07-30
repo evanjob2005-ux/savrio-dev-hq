@@ -147,7 +147,7 @@ def fixture_manifest(pinned_sha):
             {"id": "g-present", "document": "FIXTURE.md",
              "statement": "the needle is in the fixture file",
              "probe": "grep-present",
-             "args": {"path": "lib/needle.txt", "pattern": NEEDLE},
+             "args": {"path": "lib/needle.ts", "pattern": NEEDLE},
              "red_means": "fixture"},
             {"id": "g-absent", "document": "FIXTURE.md",
              "statement": "the forbidden needle is not in the fixture file",
@@ -161,13 +161,13 @@ def fixture_manifest(pinned_sha):
             {"id": "g-scoped", "document": "FIXTURE.md",
              "statement": "the needle is on the anchor's own line",
              "probe": "grep-scoped",
-             "args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+             "args": {"path": "lib/scoped.ts", "anchor": ANCHOR,
                       "pattern": NEEDLE, "within": 0},
              "red_means": "fixture"},
             {"id": "gsa-scoped", "document": "FIXTURE.md",
              "statement": "the forbidden needle is not on the anchor's line",
              "probe": "grep-scoped-absent",
-             "args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+             "args": {"path": "lib/scoped.ts", "anchor": ANCHOR,
                       "pattern": FORBIDDEN, "within": 0},
              "red_means": "fixture"},
             {"id": "nt-events", "document": "FIXTURE.md",
@@ -198,7 +198,7 @@ def scratch(tmp):
     (root / "present.txt").write_text("a file that exists\n",
                                       encoding="utf-8", newline="")
     (root / "lib").mkdir()
-    (root / "lib" / "needle.txt").write_text(
+    (root / "lib" / "needle.ts").write_text(
         f"alpha\n{NEEDLE}\nomega\n", encoding="utf-8", newline="")
     (root / "lib" / "clean.txt").write_text(
         "nothing objectionable here\n", encoding="utf-8", newline="")
@@ -207,7 +207,7 @@ def scratch(tmp):
     # satisfied by the decoy alone, so removing the needle from the anchor line
     # is exactly CTL-01's "matching text elsewhere in the file" bypass, and the
     # matrix case below requires the scoped probe to still go red.
-    (root / "lib" / "scoped.txt").write_text(
+    (root / "lib" / "scoped.ts").write_text(
         f"preamble\n{ANCHOR} {NEEDLE}\nmiddle\n{NEEDLE}\nomega\n",
         encoding="utf-8", newline="")
     (root / "lib" / "collection.ts").write_text(
@@ -306,7 +306,7 @@ def _(root):
 
 @case("grep-present: the matching text is removed", 1, "no longer matches")
 def _(root):
-    (root / "lib" / "needle.txt").write_text("alpha\nomega\n",
+    (root / "lib" / "needle.ts").write_text("alpha\nomega\n",
                                              encoding="utf-8", newline="")
 
 
@@ -349,17 +349,17 @@ def _(root):
 def _(root):
     # The bypass verbatim: a whole-file grep is still satisfied by the decoy on
     # its own line, so only a site-bound probe can see that the claim broke.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}", ANCHOR, 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
 @case("grep-scoped when the anchor itself is gone: red, not satisfied", 1,
       "no longer exists")
 def _(root):
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
-    (root / "lib" / "scoped.txt").write_text(
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
+    (root / "lib" / "scoped.ts").write_text(
         text.replace(ANCHOR, "renamed-anchor", 1), encoding="utf-8",
         newline="")
 
@@ -369,10 +369,10 @@ def _(root):
 def _(root):
     # The id.ts shape: the call is replaced by something predictable and the
     # identifier is left behind in a comment describing what it used to do.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}",
                         f"{ANCHOR}\n// {NEEDLE}", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -382,9 +382,9 @@ def _(root):
     # Found by this harness against the first CTL-01 fix, which blanked whole
     # comment LINES only. `token: nextId("rvt"), // nextCapabilityToken("rvt")`
     # kept the searched-for call on the exact line the claim names.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR} // {NEEDLE}", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -392,10 +392,11 @@ def _(root):
 def _(root):
     # The over-stripping guard. If `//` after a colon were cut, every claim
     # about a line containing a URL would go red for no reason.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}",
-                        f"{ANCHOR} {NEEDLE} https://example.invalid/x", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                        f'const host = "https://example.invalid/x"; '
+                        f"{ANCHOR} {NEEDLE}", 1)
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -414,6 +415,122 @@ def _(root):
 # Every case below is a mutation an independent reviewer executed against the
 # FIRST version of this repair, each of which exited 0. They are the reason the
 # repair changed shape, so they stay as regressions.
+
+@case("REVIEW2/A a regex literal must not open a block comment", 1,
+      "is TRUNCATED")
+def _(root):
+    # The scanner had no regex-literal state, so `/[/*]/` -- a valid regex --
+    # opened a `/*` that never closed and blanked EVERY line below it. A cap
+    # four lines down was invisible and the claim reported holds.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("const sep = /[/*]/;\nvoid sep;\n"
+                     "store.events.length = 200;\n")
+
+
+@case("REVIEW2/A a template literal spanning lines must not leak", 1,
+      "is TRUNCATED")
+def _(root):
+    # Block state carried across lines while quote state reset at each line
+    # boundary, so a `/*` INSIDE a multi-line template literal opened a real
+    # block comment and silenced the rest of the file.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("const banner = `\n/*\n`;\nvoid banner;\n"
+                     "store.events.length = 200;\n")
+
+
+@case("an unterminated /* ... */ is refused, not silently swallowed", 2,
+      "never closed")
+def _(root):
+    # If the scanner's model of the text is wrong, everything after the opener
+    # was discarded unread. That is not a verdict.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("/* opened and never closed\n")
+
+
+@case("REVIEW2/B code_only over an unknown comment syntax is refused", 2,
+      "comment syntax this verifier does not know")
+def _(root):
+    # Treating every file as C-family meant `#` was not a comment, so a YAML
+    # comment answered for the code beside it.
+    amend(root, "g-present", lambda c: c["args"].update(
+        {"path": "notes.rst", "code_only": True}))
+    (root / "notes.rst").write_text(NEEDLE + "\n", encoding="utf-8",
+                                    newline="")
+
+
+@case("REVIEW2/B a # comment does not satisfy a claim about YAML", 1,
+      "no longer matches")
+def _(root):
+    amend(root, "g-present", lambda c: c["args"].update(
+        {"path": "conf.yml", "code_only": True}))
+    (root / "conf.yml").write_text("# was: " + NEEDLE + "\nvalue: other\n",
+                                   encoding="utf-8", newline="")
+
+
+@case("REVIEW2/C a cap split across lines still counts", 1, "is TRUNCATED")
+def _(root):
+    # Matching per physical line meant a formatter's line break hid the cap.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store.events\n  = [];\n")
+
+
+@case("REVIEW2/C a cap with spaces around the dots still counts", 1,
+      "is TRUNCATED")
+def _(root):
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store . events . length = 200;\n")
+
+
+@case("REVIEW2/E a record for a never-required id is refused", 2,
+      "never required at the baseline")
+def _(root):
+    # It silently lowered the reported required count.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["retired_claims"] = [{"id": "never-existed", "reason": "r",
+                               "authorized_by": "a"}]
+    write_manifest(root, data)
+
+
+@case("REVIEW2/E a duplicate authorization id is refused", 2, "more than once")
+def _(root):
+    # load_manifest already refuses duplicate CLAIM ids for this reason.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["retired_claims"] = [
+        {"id": "f-present", "reason": "r", "authorized_by": "a"},
+        {"id": "f-present", "reason": "other", "authorized_by": "b"},
+    ]
+    data["claims"] = [c for c in data["claims"] if c["id"] != "f-present"]
+    write_manifest(root, data)
+
+
+@case("REVIEW2/MAJOR-2 a tag that disagrees with its recorded commit", 2,
+      "must agree")
+def _(root):
+    # A tag can be force-moved with no change to any tracked file, so the
+    # recorded commit is what keeps a pin move visible in a diff.
+    git(["tag", "-a", "fixture-drifted-tag", "-m", "drifted", "HEAD~1"], root)
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["required_claims_baseline"]["tag"] = "fixture-drifted-tag"
+    write_manifest(root, data)
+
+
+@case("a redefinition alongside an unevaluable claim exits 2", 2,
+      "were redefined")
+def _(root):
+    # The third outcome class had no mixed-precedence case.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    for claim in data["claims"]:
+        if claim["id"] == "f-present":
+            claim["args"] = {"path": "second.txt"}
+        if claim["id"] == "g-present":
+            claim["args"] = {"path": "lib/needle.ts", "pattern": "bad(["}
+    write_manifest(root, data)
+
 
 @case("REVIEW/1 a cap by .filter rebind, naming no listed operation", 1,
       "is TRUNCATED")
@@ -462,19 +579,19 @@ def _(root):
     # Comment stripping was line-local, so any line inside a block comment that
     # did not itself begin with `*` was read as code. Two lines re-opened the
     # CSPRNG bypass on the real tree.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}",
                         f"{ANCHOR}\n/*\nwas {NEEDLE}\n*/", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
 @case("REVIEW/2 a one-line /* ... */ comment is not code", 1,
       "does NOT match within")
 def _(root):
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR} /* {NEEDLE} */", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -483,9 +600,9 @@ def _(root):
 def _(root):
     # `key://value` is valid JavaScript with the value on the next line. The
     # `(?<!:)` lookbehind added to spare URLs spared this too.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR}://{NEEDLE}", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -493,11 +610,11 @@ def _(root):
 def _(root):
     # The mirror. Over-stripping truncates the line, which HIDES text from an
     # absent-style claim -- the direction a control may not fail in.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}",
                         f'const host = "//cdn.example.invalid";'
                         f' {ANCHOR} {NEEDLE}', 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -507,10 +624,10 @@ def _(root):
     # Proximity alone is decoy-satisfiable: an unused correct call three lines
     # away kept a claim green while the generator returned a counter. Requiring
     # the WRONG call to be absent at the site is what excludes that.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}",
                         f"{ANCHOR} {NEEDLE} {FORBIDDEN}", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -518,8 +635,8 @@ def _(root):
       "no longer exists")
 def _(root):
     # Deleting the site must not prove a claim about that site.
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
-    (root / "lib" / "scoped.txt").write_text(
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
+    (root / "lib" / "scoped.ts").write_text(
         text.replace(ANCHOR, "renamed-anchor"), encoding="utf-8", newline="")
 
 
@@ -573,9 +690,9 @@ def _(root):
     # -- from satisfying a claim that the call is unconditional.
     amend(root, "g-scoped", lambda c: c["args"].update(
         {"pattern": f"^\\s*{NEEDLE}"}))
-    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = (root / "lib" / "scoped.ts").read_text(encoding="utf-8")
     text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR}\nif (x) {NEEDLE}", 1)
-    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+    (root / "lib" / "scoped.ts").write_text(text, encoding="utf-8",
                                              newline="")
 
 
@@ -766,7 +883,7 @@ def _(root):
 @case("grep-present over a MISSING file: exit 2, not a verdict", 2,
       "never searched")
 def _(root):
-    (root / "lib" / "needle.txt").unlink()
+    (root / "lib" / "needle.ts").unlink()
 
 
 @case("grep-absent over a MISSING file: exit 2, NEVER 'claim still holds'", 2,
@@ -901,7 +1018,7 @@ def _(root):
       "not a valid regular expression")
 def _(root):
     amend(root, "g-present", lambda c: c.update(
-        {"args": {"path": "lib/needle.txt", "pattern": "unclosed(["}}))
+        {"args": {"path": "lib/needle.ts", "pattern": "unclosed(["}}))
 
 
 @case("tag-at-commit given something that is not an object name: exit 2", 2,
@@ -914,14 +1031,14 @@ def _(root):
 @case("grep-scoped with no anchor: exit 2", 2, "requires args anchor")
 def _(root):
     amend(root, "g-scoped", lambda c: c.update(
-        {"args": {"path": "lib/scoped.txt", "pattern": NEEDLE}}))
+        {"args": {"path": "lib/scoped.ts", "pattern": NEEDLE}}))
 
 
 @case("grep-scoped with a non-integer within: exit 2", 2,
       "not a non-negative integer")
 def _(root):
     amend(root, "g-scoped", lambda c: c.update(
-        {"args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+        {"args": {"path": "lib/scoped.ts", "anchor": ANCHOR,
                   "pattern": NEEDLE, "within": "close enough"}}))
 
 
@@ -929,7 +1046,7 @@ def _(root):
       "not a non-negative integer")
 def _(root):
     amend(root, "g-scoped", lambda c: c.update(
-        {"args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+        {"args": {"path": "lib/scoped.ts", "anchor": ANCHOR,
                   "pattern": NEEDLE, "within": -1}}))
 
 
@@ -937,7 +1054,7 @@ def _(root):
       "not a valid regular expression")
 def _(root):
     amend(root, "g-scoped", lambda c: c.update(
-        {"args": {"path": "lib/scoped.txt", "anchor": "unclosed(",
+        {"args": {"path": "lib/scoped.ts", "anchor": "unclosed(",
                   "pattern": NEEDLE, "within": 0}}))
 
 
@@ -957,7 +1074,7 @@ def _(root):
 @case("code_only given a non-boolean: exit 2", 2, "is not a boolean")
 def _(root):
     amend(root, "g-present", lambda c: c.update(
-        {"args": {"path": "lib/needle.txt", "pattern": NEEDLE,
+        {"args": {"path": "lib/needle.ts", "pattern": NEEDLE,
                   "code_only": "yes"}}))
 
 
@@ -967,9 +1084,9 @@ def _(root):
     # Proves the option is actually wired, not merely accepted: with the only
     # occurrence commented out, a code claim must not read as satisfied.
     amend(root, "g-present", lambda c: c.update(
-        {"args": {"path": "lib/needle.txt", "pattern": NEEDLE,
+        {"args": {"path": "lib/needle.ts", "pattern": NEEDLE,
                   "code_only": True}}))
-    (root / "lib" / "needle.txt").write_text(
+    (root / "lib" / "needle.ts").write_text(
         f"alpha\n// {NEEDLE}\nomega\n", encoding="utf-8", newline="")
 
 
@@ -982,7 +1099,7 @@ def _(root):
     # about anything, so exiting 1 here would report a finished judgement.
     (root / "present.txt").unlink()                       # red
     amend(root, "g-present", lambda c: c.update(          # unevaluable
-        {"args": {"path": "lib/needle.txt", "pattern": "bad(["}}))
+        {"args": {"path": "lib/needle.ts", "pattern": "bad(["}}))
 
 
 @case("an unevaluable claim says it reached no verdict", 2,
@@ -1091,6 +1208,13 @@ SCOPED_VIOLATIONS = {
     "retention-test-executes-in-ci": (
         "run: npx vitest run --project node",
         "run: npx vitest run --project dom",
+    ),
+    # The middle link: the workflow runs the project, and the project collects
+    # the test. Narrowing the include stops the retention test executing while
+    # the workflow claim and both text claims stay green.
+    "retention-test-collected-by-node-project": (
+        'include: ["**/*.test.ts"],',
+        'include: ["**/*.service.test.ts"],',
     ),
 }
 
