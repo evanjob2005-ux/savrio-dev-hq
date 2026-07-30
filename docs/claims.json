@@ -1,25 +1,100 @@
 {
   "version": 1,
   "required_claims_baseline": {
+    "tag": "claims-baseline-1",
     "commit": "5064526bd32007575303e94c7bfab522b3308734",
     "path": "docs/claims.json",
     "_why": [
       "CTL-02: nothing checked this manifest, so deleting an entry took",
       "coverage from 15 claims to 14 and still exited 0 -- which made",
       "'delete the claim' the cheapest way to turn any red green. Every claim",
-      "id present at this commit must still be present here, or be named in",
-      "retired_claims with a reason and an authority.",
+      "present at this baseline must still be present here AND still have the",
+      "same probe and args, or be named in retired_claims / amended_claims",
+      "with a reason and an authority.",
+      "",
+      "Comparing ids alone was not enough. Keeping an id while swapping its",
+      "probe for a tautology is a deletion that does not change the claim",
+      "count, and it left the summary line byte-identical to a clean run.",
       "",
       "Read out of git history rather than from a sibling file, so that the",
       "change deleting a claim cannot also supply the list of what was",
-      "required. This needs full history: the verifier exits 2, never 0, when",
-      "the pinned commit cannot be read.",
+      "required. This needs full history AND tags: the verifier exits 2, never",
+      "0, when the baseline cannot be read.",
       "",
-      "Moving this pin forward is a reviewable act. Do it only when claims are",
-      "legitimately retired, and say so in the retirement record."
+      "The TAG is the durable anchor and is tried first; the commit is only a",
+      "fallback, reachable while this branch exists. GIT_STANDARD.md prefers",
+      "squash merges, after which the commit is unreachable from the default",
+      "branch. The tag MUST be pushed to origin before this branch merges.",
+      "",
+      "Moving this pin is a reviewable act. Do it only when claims are",
+      "legitimately retired or amended, and say so in that record. The pin must",
+      "be an ancestor of HEAD, so it cannot be moved backward past a claim's",
+      "introduction to drop it silently."
     ]
   },
   "retired_claims": [],
+  "amended_claims": [
+    {
+      "id": "capability-token-uses-node-crypto",
+      "reason": "CTL-01 bypass 2: whole-file grep-present -> grep-scoped at the generator. randomUUID() surviving anywhere in id.ts kept this green after the generator was replaced by a predictable counter. Paired with capability-token-not-from-nextid, because proximity alone is decoy-satisfiable.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "event-buffer-size-is-a-page-limit",
+      "reason": "code_only added: a commented-out declaration must not satisfy a claim about a live constant.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "event-store-has-no-retention-cap",
+      "reason": "CTL-01 bypass 1: grep-absent over five identifiers -> no-truncation over the operation applied to store.events. The old probe searched for the identifier a PREVIOUS cap happened to use, so an equivalent cap written any other way passed while evicting audit history.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "next-config-not-standalone",
+      "reason": "code_only removed, for the same reason as sec6-review-token-not-nextid.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "pkg3-approval-tag-exists",
+      "reason": "CTL-01 bypass 4: tag-present -> tag-annotated. The statement says the tag 'exists and is annotated', but tag-present is satisfied by a lightweight ref carrying no annotation at all.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "playwright-spec-collection-widened",
+      "reason": "code_only added: a commented-out spec glob must not satisfy this claim.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "sec6-review-token-from-csprng",
+      "reason": "CTL-01 bypass 5: whole-file grep-present -> grep-scoped bound to the reserveCallbackToken call. A whole-file grep proved only that the text existed somewhere in a ~945-line file, which a decoy satisfies.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "sec6-review-token-not-nextid",
+      "reason": "code_only removed. On an absent claim, stripping text can only hide a violation, so the option's failure direction is 'reads as satisfied'.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "smoke-heading-match-is-exact",
+      "reason": "code_only added: a commented-out exact:true must not satisfy this claim.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "timeline-retention-guarded-by-test",
+      "reason": "CTL-01 bypass 3: whole-file grep-present -> grep-scoped with within:0 on the assertion line. An unrelated toHaveLength(205) added as filler satisfied the whole-file grep while the guard asserted 1.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "timeline-retention-test-appends-205",
+      "reason": "Independent review found `if (index === 0)` wrapping the append satisfied within:3. Bound to the awaited call at within:2.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    },
+    {
+      "id": "vitest-projects-exclude-e2e",
+      "reason": "code_only added: a commented-out exclusion must not satisfy this claim.",
+      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized"
+    }
+  ],
   "_readme": [
     "Executable form of the factual claims this repository's records make about",
     "itself. Every entry pairs a documented statement with a probe that decides",
@@ -35,8 +110,11 @@
     "",
     "Probe types: tag-present, tag-absent, tag-annotated, tag-at-commit,",
     "file-present, file-absent, grep-present, grep-absent, grep-scoped,",
-    "no-truncation. Patterns are Python regular expressions; paths are",
-    "repository-relative and use forward slashes.",
+    "grep-scoped-absent, no-truncation. Patterns are Python regular",
+    "expressions; paths are repository-relative and use forward slashes. An",
+    "arg a probe does not read is REFUSED, not ignored: a misspelled `within`",
+    "would otherwise fall back to a laxer default and the claim would go on",
+    "reporting that it holds.",
     "",
     "Choosing a probe (CTL-01 exists because these were chosen carelessly):",
     "  * A claim naming a SITE -- 'the token is minted at this call' -- wants",
@@ -49,11 +127,19 @@
     "    cap happened to use.",
     "  * A claim saying a tag is ANNOTATED wants tag-annotated. tag-present is",
     "    satisfied by a lightweight ref that carries no annotation at all.",
+    "  * A scoped claim proves PROXIMITY, not data flow. `randomUUID()` three",
+    "    lines from a generator can be an unused decoy while the generator",
+    "    returns a counter. Where that matters, pair grep-scoped with",
+    "    grep-scoped-absent so the right call must be present AND the wrong one",
+    "    absent at the same site.",
+    "  * code_only is NOT available on grep-absent. For a claim that something",
+    "    is absent, removing text can only hide a violation, and a control may",
+    "    not fail in the direction that reads as satisfied.",
     "  * grep-scoped and no-truncation ignore comment-only lines by default, so",
     "    a comment describing what the code used to do cannot satisfy a claim",
-    "    about the code. Pass code_only:true on grep-present/grep-absent to get",
-    "    the same treatment; pass code_only:false on the scoped probes for a",
-    "    claim genuinely about prose."
+    "    about the code. Pass code_only:true on grep-present to get the same",
+    "    treatment; pass code_only:false on the scoped probes for a claim",
+    "    genuinely about prose."
   ],
   "claims": [
     {
@@ -112,9 +198,9 @@
       "probe": "grep-scoped",
       "args": {
         "path": "lib/dev-hq/review-service.ts",
-        "anchor": "token:",
+        "anchor": "reserveCallbackToken\\(",
         "pattern": "nextCapabilityToken\\(\\s*\"rvt\"\\s*\\)",
-        "within": 0
+        "within": 3
       },
       "red_means": "SEC-6, a HIGH pre-deployment blocker recorded as Closed, is reopened. The register would still read Closed while the CSPRNG requirement it claims is met no longer is."
     },
@@ -125,8 +211,7 @@
       "probe": "grep-absent",
       "args": {
         "path": "lib/dev-hq/review-service.ts",
-        "pattern": "nextId\\(\\s*\"rvt\"\\s*\\)",
-        "code_only": true
+        "pattern": "nextId\\(\\s*\"rvt\"\\s*\\)"
       },
       "red_means": "The predictable prefix-epoch-counter minting an independent reviewer brute-forced in roughly 250k guesses is back in the review path. This is the exact defect SEC-6 was closed on."
     },
@@ -141,7 +226,33 @@
         "pattern": "randomUUID\\(\\)",
         "within": 3
       },
-      "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim."
+      "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim. Proximity alone does not decide this: capability-token-not-from-nextid is the other half, and neither is sufficient by itself."
+    },
+    {
+      "id": "capability-token-not-from-nextid",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "SEC-6 correction: nextCapabilityToken does not delegate to nextId. The docstring in lib/dev-hq/id.ts records that it is \"Deliberately NOT nextId()\", and that is enforced rather than merely asserted.",
+      "probe": "grep-scoped-absent",
+      "args": {
+        "path": "lib/dev-hq/id.ts",
+        "anchor": "export function nextCapabilityToken",
+        "pattern": "nextId\\(",
+        "within": 4
+      },
+      "red_means": "The capability-token generator is delegating to the prefix-epoch-counter scheme an independent reviewer brute-forced in roughly 250k guesses. This claim exists because requiring randomUUID() NEAR the generator is satisfiable by a decoy: `const unused = randomUUID(); void unused; return nextId(prefix);` keeps capability-token-uses-node-crypto green while every token in the system becomes predictable. Presence of the CSPRNG and absence of the counter must both hold."
+    },
+    {
+      "id": "retention-test-executes-in-ci",
+      "document": "docs/decisions/ADR-0004-dev-hq-local-execution-boundary.md",
+      "statement": "ADR-0004 Section 2's append-only ruling has an EXECUTED guard: .github/workflows/frontend-tests.yml runs the Vitest node project, which collects lib/dev-hq/audit-timeline.test.ts.",
+      "probe": "grep-scoped",
+      "args": {
+        "path": ".github/workflows/frontend-tests.yml",
+        "anchor": "vitest run",
+        "pattern": "--project node",
+        "within": 0
+      },
+      "red_means": "Nothing executes the retention test any more. timeline-retention-guarded-by-test and timeline-retention-test-appends-205 pin that test's TEXT; this claim is what makes them mean something, because a pinned test that no workflow runs proves nothing. Without it the append-only guarantee would rest entirely on static probes over store.ts."
     },
     {
       "id": "event-store-has-no-retention-cap",
@@ -187,8 +298,8 @@
       "args": {
         "path": "lib/dev-hq/audit-timeline.test.ts",
         "anchor": "index < 205",
-        "pattern": "logger\\.log",
-        "within": 3
+        "pattern": "await logger\\.log\\(\\{",
+        "within": 2
       },
       "red_means": "The guard no longer appends the 205 events its assertion counts. CTL-01 bypass 3 was exactly this shape: the loop bound was lowered to 1 and an unrelated toHaveLength(205) left behind, and a whole-file grep could not tell the difference. Retention would then be unguarded while both claims read green."
     },
@@ -199,8 +310,7 @@
       "probe": "grep-absent",
       "args": {
         "path": "next.config.ts",
-        "pattern": "output\\s*:\\s*[\"']standalone[\"']",
-        "code_only": true
+        "pattern": "output\\s*:\\s*[\"']standalone[\"']"
       },
       "red_means": "One of the three named conditions that convert the PKG-2 Architecture Review's verdict to REJECT -- REMEDIATION REQUIRED is now true. The register states in terms that the deferral of M-1 through M-4 must be revisited if this happens."
     },

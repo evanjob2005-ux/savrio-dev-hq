@@ -229,39 +229,103 @@ def flag(args, field, default):
     return value
 
 
-def _is_comment_line(line):
-    """True for a line whose content is only a comment."""
-    stripped = line.lstrip()
-    return (stripped.startswith("//") or stripped.startswith("*")
-            or stripped.startswith("/*"))
+def radius(args, field="within"):
+    """The scoped probes' line radius. `0` means the anchor's own line."""
+    value = args.get(field, 3)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise CannotEvaluate(
+            f"args.{field} {value!r} is not a non-negative integer")
+    return value
 
 
-# A trailing `//` comment, which must go too. Blanking only whole comment LINES
-# is not enough: `token: nextId("rvt"), // nextCapabilityToken("rvt")` leaves
-# the searched-for call on the very line the claim names, and this harness
-# caught that passing. The lookbehind spares `http://` and `https://`.
-_TRAILING_COMMENT = re.compile(r"(?<!:)//.*$")
+def _strip_comments(lines):
+    """Remove comment text from each line, preserving line numbering.
+
+    Stateful, because two cheaper versions of this were both defeated:
+
+      * Blanking whole comment LINES left `token: nextId("rvt"),
+        // nextCapabilityToken("rvt")` -- the searched-for call still sitting on
+        the exact line the claim names.
+      * Adding a trailing-`//` regex with a `(?<!:)` lookbehind to spare URLs
+        also spared `token://nextCapabilityToken("rvt")`, which is valid
+        JavaScript with the value on the next line, and left a `/* ... */` body
+        readable as code whenever a continuation line did not begin with `*`:
+
+            export function nextCapabilityToken(prefix: string): string {
+            /*
+            was: randomUUID()
+            */
+              return `${prefix}-${counter}`;
+
+        Both re-opened CTL-01 bypass 2 -- a claim about a CSPRNG satisfied by a
+        comment -- through the very mechanism added to close it.
+
+    So this walks the text: block-comment state carries across lines, and
+    quotes are tracked so `//` inside a string or template literal is never
+    mistaken for a comment. That last part matters in both directions. Stripping
+    too EAGERLY hides text from an absent-style claim, which reads as
+    "satisfied"; `assetPrefix: "//cdn.example.com"` is an ordinary idiom and
+    must not truncate the line.
+
+    Residue, disclosed rather than papered over: a regex literal containing
+    `//` (`/\\/\\//`) is not tracked, and a template literal spanning several
+    lines is only tracked within each line.
+    """
+    out = []
+    in_block = False
+    for line in lines:
+        buf = []
+        quote = None
+        index = 0
+        end = len(line)
+        while index < end:
+            char = line[index]
+            following = line[index + 1] if index + 1 < end else ""
+            if in_block:
+                if char == "*" and following == "/":
+                    in_block = False
+                    index += 2
+                    continue
+                index += 1
+                continue
+            if quote:
+                buf.append(char)
+                if char == "\\":
+                    if following:
+                        buf.append(following)
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = None
+                index += 1
+                continue
+            if char in "\"'`":
+                quote = char
+                buf.append(char)
+                index += 1
+                continue
+            if char == "/" and following == "/":
+                break
+            if char == "/" and following == "*":
+                in_block = True
+                index += 2
+                continue
+            buf.append(char)
+            index += 1
+        out.append("".join(buf))
+    return out
 
 
 def code_lines(text, code_only):
     """File lines, with comments removed when code_only is set.
 
-    Blanked in place rather than dropped so that reported line numbers keep
-    referring to the real file. CTL-01 bypass 2 was exactly this: a claim
-    asserting that a generator is built over `randomUUID()` stayed green when
-    the call was replaced by a predictable counter and the identifier survived
-    in a COMMENT describing what the code used to do. A claim about code must be
-    decided by code.
-
-    Heuristic, and knowingly so: `//` inside a string literal is treated as the
-    start of a comment, so a claim whose pattern spans one would read short.
-    Erring that way makes a claim go red rather than falsely green.
+    Emptied in place rather than dropped so that reported line numbers keep
+    referring to the real file.
     """
     lines = text.splitlines()
     if not code_only:
         return lines
-    return ["" if _is_comment_line(line) else _TRAILING_COMMENT.sub("", line)
-            for line in lines]
+    return _strip_comments(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -405,10 +469,7 @@ def probe_grep_scoped(args):
     raw, path = repo_path(args)
     anchor_text, anchor = compiled(args, "anchor")
     pattern_text, pattern = compiled(args)
-    within = args.get("within", 3)
-    if not isinstance(within, int) or isinstance(within, bool) or within < 0:
-        raise CannotEvaluate(
-            f"args.within {within!r} is not a non-negative integer")
+    within = radius(args)
     text = read_text(raw, path)
     lines = code_lines(text, flag(args, "code_only", True))
 
@@ -429,15 +490,75 @@ def probe_grep_scoped(args):
                    f"it -- the claim's binding to that site is broken")
 
 
-# Every way a JavaScript array is shortened in place or rebound to a shorter
-# copy. Kept as one list so a reviewer can see the whole surface at a glance.
+def probe_grep_scoped_absent(args):
+    """`pattern` must NOT match within `within` lines of `anchor`.
+
+    The complement of grep-scoped, and the answer to a proximity bypass it
+    could not close on its own. `grep-scoped` asks whether the claimed text is
+    NEAR the site, which a decoy satisfies:
+
+        export function nextCapabilityToken(prefix: string): string {
+          const unusedEntropy = randomUUID();
+          void unusedEntropy;
+          return nextId(prefix);
+        }
+
+    `randomUUID()` is present, three lines from the anchor, and every token is
+    now the predictable counter that SEC-6 was closed on. Proving what must NOT
+    be at a site is what excludes that: a claim can require the CSPRNG near the
+    generator AND forbid the counter there.
+
+    The anchor must still be present. If it is gone, the claimed site is gone,
+    and this reports red rather than treating an absent site as satisfied --
+    otherwise deleting the function would prove the claim.
+    """
+    raw, path = repo_path(args)
+    anchor_text, anchor = compiled(args, "anchor")
+    pattern_text, pattern = compiled(args)
+    within = radius(args)
+    text = read_text(raw, path)
+    lines = code_lines(text, flag(args, "code_only", True))
+
+    anchor_lines = [i for i, line in enumerate(lines) if anchor.search(line)]
+    if not anchor_lines:
+        return False, (f"anchor {anchor_text} matches nothing in {raw}, so the "
+                       f"claimed site no longer exists and nothing was "
+                       f"measured about it")
+    for i in anchor_lines:
+        lo = max(0, i - within)
+        hi = min(len(lines), i + within + 1)
+        window_text = "\n".join(lines[lo:hi])
+        found = pattern.search(window_text)
+        if found:
+            return False, (f"{pattern_text} now MATCHES within {within} "
+                           f"line(s) of {anchor_text} at {raw}:{i + 1}")
+    return True, (f"{pattern_text} matches nothing within {within} line(s) of "
+                  f"{anchor_text} in {raw}")
+
+
+# How a collection loses entries. Enumerating SPELLINGS is what made the first
+# version of this probe wrong: it listed six and missed `store.events = []`,
+# `store.events = store.events.filter(...)`, and
+# `store.events = [...store.events].slice(0, 200)` -- the last being the idiom
+# already used elsewhere in the very file the claim is about. So the first form
+# below is not a spelling at all: ANY rebinding of the collection is treated as
+# suspect, because a rebind can shorten it in unboundedly many ways and a
+# control cannot enumerate them.
+#
+# `(?![=>])` keeps `==`, `===` and `=>` out of the assignment forms. A read-only
+# `if (store.events.length === 0)` guard used to be reported as a live retention
+# cap, and a control that cries wolf on correct code teaches readers to ignore
+# it.
 _TRUNCATION_FORMS = (
-    (r"\.slice\s*\(", ".slice("),
+    (r"\s*=(?![=>])", "rebound to a new value"),
+    (r"\.length\s*=(?![=>])", ".length assignment"),
+    (r"\.length\s*-=", ".length -="),
     (r"\.splice\s*\(", ".splice("),
     (r"\.pop\s*\(", ".pop("),
     (r"\.shift\s*\(", ".shift("),
-    (r"\.length\s*=", ".length ="),
-    (r"\.length\s*-=", ".length -="),
+    # An argument is required: `.slice()` with none is a defensive copy that
+    # shortens nothing, and flagging it would be a false alarm.
+    (r"\.slice\s*\(\s*[^)\s]", ".slice( with an argument"),
 )
 
 
@@ -448,12 +569,15 @@ def probe_no_truncation(args):
     exists; the probe searched for the identifier a PREVIOUS cap happened to
     use, so writing a genuinely equivalent cap by other means --
     `if (store.events.length > 200) store.events.length = 200;` -- kept it
-    green. This searches for the OPERATION instead of a name, over every form
-    that shortens an array in place or rebinds it to a shorter copy.
+    green. This searches for the OPERATION instead of a name.
 
-    Still a static check, and still not proof: an alias assigned to another
-    variable first, or truncation performed in a different file, would evade
-    it. That residue is disclosed rather than papered over.
+    Still a static check, and still not proof. Known residue: an alias bound to
+    another variable first (`const events = store.events; events.length = 0`),
+    eviction performed in a different file, and a shortening call passed as a
+    callback rather than applied here. Treating any REBIND as suspect is what
+    covers the open-ended cases -- a rebind can shorten a collection in
+    unboundedly many ways -- at the cost of flagging a legitimate whole-array
+    replacement, which is the right direction for an append-only claim.
 
     This probe deliberately does NOT execute the retention behaviour. The
     verifier runs in a Python-only CI job with no Node toolchain, so a probe
@@ -481,8 +605,9 @@ def probe_no_truncation(args):
     if hits:
         return False, (f"{collection} is TRUNCATED at " + "; ".join(hits[:4]) +
                        " -- a retention cap exists")
-    return True, (f"{collection} appears in {raw} and no "
-                  f"slice/splice/pop/shift/length-assignment is applied to it")
+    return True, (f"{collection} appears in {raw} and is never rebound, "
+                  f"spliced, popped, shifted, sliced-with-an-argument, or "
+                  f"length-assigned")
 
 
 PROBES = {
@@ -491,12 +616,59 @@ PROBES = {
     "tag-annotated": probe_tag_annotated,
     "tag-at-commit": probe_tag_at_commit,
     "grep-scoped": probe_grep_scoped,
+    "grep-scoped-absent": probe_grep_scoped_absent,
     "no-truncation": probe_no_truncation,
     "file-present": probe_file_present,
     "file-absent": probe_file_absent,
     "grep-present": probe_grep_present,
     "grep-absent": probe_grep_absent,
 }
+
+# Which args each probe reads: (required, optional). An arg NOT listed here is
+# rejected rather than ignored.
+#
+# Ignoring it was a silent false-green path all of its own: renaming `within` to
+# `withn` on a claim bound with `within: 0` restored the permissive 3-line
+# default, the claim went on reporting "holds", and nothing anywhere said the
+# binding had been loosened. A one-character edit re-opened a closed bypass. The
+# same applied to `code_only` and `collection`. A control must not silently
+# accept an instruction it did not understand.
+PROBE_ARGS = {
+    "tag-present": ({"tag"}, set()),
+    "tag-absent": ({"tag"}, set()),
+    "tag-annotated": ({"tag"}, {"commit"}),
+    "tag-at-commit": ({"tag", "commit"}, set()),
+    "file-present": ({"path"}, set()),
+    "file-absent": ({"path"}, set()),
+    "grep-present": ({"path", "pattern"}, {"code_only"}),
+    # code_only is deliberately NOT offered on grep-absent. For a claim that
+    # something is ABSENT, stripping text can only ever hide a violation, so the
+    # option's failure direction is "reads as satisfied" -- the one direction a
+    # control may not fail in. Absent claims are matched over the raw file.
+    "grep-absent": ({"path", "pattern"}, set()),
+    "grep-scoped": ({"path", "anchor", "pattern"}, {"within", "code_only"}),
+    "grep-scoped-absent": ({"path", "anchor", "pattern"},
+                           {"within", "code_only"}),
+    "no-truncation": ({"path", "collection"}, {"code_only"}),
+}
+
+
+def check_args(probe, args):
+    """Reject unknown, missing, or non-object args before any probe runs."""
+    if not isinstance(args, dict):
+        raise CannotEvaluate("args is not an object")
+    required, optional = PROBE_ARGS[probe]
+    unknown = sorted(set(args) - required - optional)
+    if unknown:
+        raise CannotEvaluate(
+            f"probe {probe!r} does not read args {', '.join(unknown)}. A "
+            f"misspelled argument would silently fall back to a more permissive "
+            f"default, so it is refused rather than ignored (known: "
+            f"{', '.join(sorted(required | optional))})")
+    absent = sorted(required - set(args))
+    if absent:
+        raise CannotEvaluate(
+            f"probe {probe!r} requires args {', '.join(absent)}")
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +717,30 @@ def load_manifest(location):
 RETIREMENT_FIELDS = ("id", "reason", "authorized_by")
 
 
+def claim_body(claim):
+    """The executable content of a claim, canonically serialised.
+
+    `id` is a LABEL. Comparing only labels left the manifest open to being
+    gutted in place: keep the id, the document, the statement and the
+    red_means, and swap
+
+        "probe": "no-truncation",
+        "args":  {"path": "lib/dev-hq/store.ts", "collection": "store.events"}
+
+    for
+
+        "probe": "file-present",
+        "args":  {"path": "lib/dev-hq/store.ts"}
+
+    and a live retention cap reports green with the claim count unchanged and
+    the coverage line byte-identical to a clean run -- quieter than the deletion
+    CTL-02 closed. What a claim MEANS is its probe and its args, so that is what
+    is compared.
+    """
+    return json.dumps({"probe": claim.get("probe"), "args": claim.get("args")},
+                      sort_keys=True, separators=(",", ":"))
+
+
 def _git_show(spec):
     """(text, reason). Exactly one of the two is None."""
     try:
@@ -577,68 +773,145 @@ def missing_required_claims(manifest, present):
     that is CannotEvaluate rather than a silent skip. The structured-data job
     checks out with fetch-depth: 0 for this reason.
 
-    Residue, per OBL-30: one commit can still move the pin and delete the claim
-    together. This removes the SILENT deletion and forces it to appear in a
-    diff as a retirement record; it is not an external trust anchor.
+    Residue, per OBL-30: one commit can still move the pin and rewrite the
+    manifest together. This removes the SILENT change and forces it to appear in
+    a diff as a retirement or amendment record; it is not an external trust
+    anchor.
     """
     baseline = manifest.get("required_claims_baseline")
     if not isinstance(baseline, dict):
         raise CannotEvaluate(
             "the manifest declares no 'required_claims_baseline', so there is "
-            "no authoritative base to compare its claim IDs against and a "
-            "deletion could not be detected")
-    commit = baseline.get("commit")
-    if not isinstance(commit, str) or not HEX_NAME.fullmatch(commit):
-        raise CannotEvaluate(
-            f"required_claims_baseline.commit {commit!r} is not a 7-to-40 "
-            f"character lowercase hexadecimal object name")
+            "no authoritative base to compare its claims against and a "
+            "deletion or weakening could not be detected")
     path = baseline.get("path")
     if not isinstance(path, str) or not path.strip():
         raise CannotEvaluate(
             "required_claims_baseline.path is missing, blank, or not a string")
 
-    raw, reason = _git_show(f"{commit}:{path}")
-    if reason is not None:
+    # A tag is tried before a bare commit because a bare commit does not
+    # survive this repository's own merge strategy. GIT_STANDARD.md prefers
+    # squash merges, after which the pinned branch commit is unreachable from
+    # the default branch, `fetch-depth: 0` cannot fetch it, and the job exits 2
+    # on every run until someone moves the pin -- teaching reviewers that pin
+    # moves are routine maintenance, which launders the one act this design
+    # depends on being conspicuous. An annotated tag survives a squash merge.
+    refs = []
+    tag = baseline.get("tag")
+    if tag is not None:
+        if not isinstance(tag, str) or not tag.strip():
+            raise CannotEvaluate(
+                "required_claims_baseline.tag is blank or not a string")
+        refs.append(("tag", tag))
+    commit = baseline.get("commit")
+    if commit is not None:
+        if not isinstance(commit, str) or not HEX_NAME.fullmatch(commit):
+            raise CannotEvaluate(
+                f"required_claims_baseline.commit {commit!r} is not a 7-to-40 "
+                f"character lowercase hexadecimal object name")
+        refs.append(("commit", commit))
+    if not refs:
         raise CannotEvaluate(
-            f"the baseline manifest at {commit[:12]}:{path} could not be read "
-            f"({reason}), so the required claim IDs are unknown. In CI, check "
-            f"out with fetch-depth: 0")
+            "required_claims_baseline names neither a tag nor a commit, so "
+            "there is no base to read")
+
+    raw = resolved = None
+    reasons = []
+    for kind, ref in refs:
+        raw, reason = _git_show(f"{ref}:{path}")
+        if reason is None:
+            resolved = (kind, ref)
+            break
+        reasons.append(f"{kind} {ref}: {reason}")
+    if resolved is None:
+        raise CannotEvaluate(
+            f"the baseline manifest at {path} could not be read from any "
+            f"declared ref ({'; '.join(reasons)}), so the required claims are "
+            f"unknown. In CI, check out with fetch-depth: 0 and fetch-tags")
+    kind, ref = resolved
+
+    # The pin must be behind us. Without this it can be moved BACKWARD to a
+    # commit predating a claim's introduction, which drops that claim with no
+    # retirement record at all.
+    if not _is_ancestor(ref):
+        raise CannotEvaluate(
+            f"the baseline {kind} {ref} is not an ancestor of HEAD, so it does "
+            f"not describe a state this commit descends from and a claim could "
+            f"have been dropped by moving the pin backward")
+
     try:
         base = json.loads(raw)
     except ValueError as error:
         raise CannotEvaluate(
-            f"the baseline manifest at {commit[:12]}:{path} is not parseable "
-            f"JSON ({error}), so the required claim IDs are unknown") from error
+            f"the baseline manifest at {ref}:{path} is not parseable JSON "
+            f"({error}), so the required claims are unknown") from error
     base_claims = base.get("claims")
     if not isinstance(base_claims, list) or not base_claims:
         raise CannotEvaluate(
-            f"the baseline manifest at {commit[:12]}:{path} has no non-empty "
-            f"'claims' list, so the required claim IDs are unknown")
-    required = {c.get("id") for c in base_claims
+            f"the baseline manifest at {ref}:{path} has no non-empty 'claims' "
+            f"list, so the required claims are unknown")
+    required = {c["id"]: claim_body(c) for c in base_claims
                 if isinstance(c, dict) and isinstance(c.get("id"), str)}
     if not required:
         raise CannotEvaluate(
-            f"the baseline manifest at {commit[:12]}:{path} yielded no usable "
-            f"claim ids")
+            f"the baseline manifest at {ref}:{path} yielded no usable claim ids")
 
-    retired = manifest.get("retired_claims", [])
-    if not isinstance(retired, list):
-        raise CannotEvaluate("'retired_claims' is present but is not a list")
-    authorized = set()
-    for index, record in enumerate(retired):
+    retired = _authorized(manifest, "retired_claims")
+    amended = _authorized(manifest, "amended_claims")
+
+    gone = sorted(set(required) - set(present) - retired)
+    redefined = sorted(
+        identifier for identifier, body in required.items()
+        if identifier in present and identifier not in amended
+        and present[identifier] != body)
+    return gone, redefined, len(required) - len(retired)
+
+
+def _is_ancestor(ref):
+    try:
+        out = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"],
+                             capture_output=True)
+    except OSError as error:
+        raise CannotEvaluate(
+            f"git could not be executed ({error}), so the baseline's "
+            f"relationship to HEAD is unknown") from error
+    if out.returncode == 0:
+        return True
+    if out.returncode == 1:
+        return False
+    detail = " ".join(out.stderr.decode("utf-8", errors="replace").split())
+    raise CannotEvaluate(
+        f"`git merge-base --is-ancestor {ref} HEAD` failed with exit "
+        f"{out.returncode} ({detail or 'no diagnostic output'}), so the "
+        f"baseline's relationship to HEAD is unknown")
+
+
+def _authorized(manifest, field):
+    """Ids excused by an explicit record in `field`.
+
+    A record must say what changed, why, and on whose authority. Presence of
+    those three strings is all that can be checked here -- `authorized_by` is
+    self-asserted, which is squarely inside the OBL-30 residue -- but it forces
+    the change to appear in a diff as a claim about authority that a reviewer
+    can refuse.
+    """
+    records = manifest.get(field, [])
+    if not isinstance(records, list):
+        raise CannotEvaluate(f"'{field}' is present but is not a list")
+    excused = set()
+    for index, record in enumerate(records):
         if not isinstance(record, dict):
-            raise CannotEvaluate(f"retired_claims #{index} is not an object")
+            raise CannotEvaluate(f"{field} #{index} is not an object")
         blank = [f for f in RETIREMENT_FIELDS
                  if not isinstance(record.get(f), str)
                  or not record[f].strip()]
         if blank:
             raise CannotEvaluate(
-                f"retired_claims #{index} is missing {', '.join(blank)}; a "
-                f"retirement that does not say what was retired, why, and on "
-                f"whose authority is not a reviewed retirement")
-        authorized.add(record["id"])
-
-    return sorted(required - set(present) - authorized), len(required)
+                f"{field} #{index} is missing {', '.join(blank)}; a record "
+                f"that does not say what was changed, why, and on whose "
+                f"authority is not a reviewed authorization")
+        excused.add(record["id"])
+    return excused
 
 
 def evaluate(claim):
@@ -652,6 +925,7 @@ def evaluate(claim):
             f"probe type {probe!r} is not implemented by this verifier "
             f"(known: {', '.join(sorted(PROBES))})")
     try:
+        check_args(probe, claim["args"])
         holds, detail = PROBES[probe](claim["args"])
     except CannotEvaluate as reason:
         return "unevaluated", str(reason)
@@ -701,21 +975,24 @@ def main():
     # unreadable baseline still prints every per-claim verdict alongside it. A
     # run learns as much as it can before deciding it cannot conclude.
     missing = []
+    redefined = []
     coverage_note = None
     try:
-        missing, required_count = missing_required_claims(
-            manifest, {claim["id"] for claim in claims})
+        missing, redefined, required_count = missing_required_claims(
+            manifest, {claim["id"]: claim_body(claim) for claim in claims})
         coverage_note = (f"{len(claims)} claim(s) present; "
-                         f"{required_count} required at the pinned baseline")
+                         f"{required_count} still required at the pinned "
+                         f"baseline")
     except CannotEvaluate as reason:
         unevaluated.append(({"id": "(manifest coverage)",
                              "document": args.manifest,
                              "statement": "the manifest still carries every "
-                                          "claim required at its baseline"},
+                                          "claim required at its baseline, "
+                                          "each still meaning what it meant"},
                             str(reason)))
         print(f"\n::error::CANNOT EVALUATE manifest coverage: {reason}")
-        print("  Whether a required claim was deleted is UNKNOWN. This must "
-              "not be read as evidence that none was.")
+        print("  Whether a required claim was deleted or redefined is UNKNOWN. "
+              "This must not be read as evidence that none was.")
 
     for identifier in missing:
         print(f"\n::error::REQUIRED CLAIM DELETED {identifier}")
@@ -726,19 +1003,37 @@ def main():
               "is never correct. Restore it, or record an authorized "
               "retirement naming the claim, the reason, and the authority.")
 
+    for identifier in redefined:
+        print(f"\n::error::REQUIRED CLAIM REDEFINED {identifier}")
+        print(f"  This id still appears in {args.manifest}, but its probe or "
+              f"args no longer match the baseline, so it does not decide what "
+              f"it decided before. This check cannot tell a strengthening from "
+              f"a weakening -- it reports that the meaning MOVED, and a human "
+              f"decides which it was.")
+        print("  Keeping the id while replacing what it measures is a deletion "
+              "that does not change the claim count. Restore the body, or "
+              "record an authorized amended_claims entry naming the claim, the "
+              "reason, and the authority.")
+
     print()
     if unevaluated:
         # Deliberately dominant over the red exit code below. A run that did
         # not measure every claim has not produced a complete verdict about
         # any of them, and must not be reported as one.
+        absent = ""
+        if missing or redefined:
+            absent = (f" {len(missing)} required claim(s) are missing and "
+                      f"{len(redefined)} were redefined.")
         print(f"RESULT: {len(unevaluated)} claim(s) COULD NOT BE EVALUATED and "
-              f"{len(red)} no longer hold. Exiting 2: this run is not a "
+              f"{len(red)} no longer hold.{absent} Exiting 2: this run is not a "
               f"complete measurement.")
         sys.exit(2)
-    if red or missing:
-        if missing:
-            print(f"RESULT: {len(missing)} required claim(s) are MISSING from "
-                  f"the manifest ({', '.join(missing)}) and {len(red)} of "
+    if red or missing or redefined:
+        if missing or redefined:
+            print(f"RESULT: {len(missing)} required claim(s) MISSING from the "
+                  f"manifest ({', '.join(missing) or 'none'}) and "
+                  f"{len(redefined)} REDEFINED "
+                  f"({', '.join(redefined) or 'none'}); {len(red)} of "
                   f"{len(claims)} present claim(s) no longer hold.")
         else:
             print(f"RESULT: {len(red)} of {len(claims)} documented claim(s) no "
@@ -762,23 +1057,29 @@ def main():
           "is static: it reads the tree and git refs, and executes none of the "
           "behaviour a claim describes. This is strong evidence of consistency "
           "and NOT proof. What remains weak:")
-    print("  * `no-truncation` searches for the truncating OPERATION applied "
-          "to a named collection, so it catches a cap written by any of "
-          "slice/splice/pop/shift/length-assignment -- but an alias bound to "
-          "another variable first, or eviction performed in a different file, "
-          "would still evade it;")
-    print("  * comment-only lines are excluded line-by-line, so a token "
-          "hidden inside a /* ... */ body whose continuation lines do not "
-          "begin with '*' is still read as code;")
+    print("  * `no-truncation` treats any REBIND of the collection as suspect "
+          "rather than listing spellings, but an alias bound to another "
+          "variable first (`const e = store.events; e.length = 0`), eviction "
+          "performed in a different file, or a shortening call passed as a "
+          "callback would still evade it;")
+    print("  * comment stripping tracks quotes and /* ... */ spans, but NOT "
+          "regex literals containing '//', and a template literal spanning "
+          "several lines is only tracked within each line;")
     print("  * claims still written as whole-file greps prove that text "
           "exists somewhere in the file, not that it binds to the claimed "
-          "site; `grep-scoped` is what binds one, and it is used only where a "
-          "claim names a site.")
+          "site; `grep-scoped` and `grep-scoped-absent` bind one, and they are "
+          "used only where a claim names a site;")
+    print("  * a scoped claim proves PROXIMITY, not data flow. Requiring the "
+          "CSPRNG near the generator and forbidding the predictable counter "
+          "there is what makes that pair decisive; proximity alone is "
+          "satisfiable by an unused decoy.")
     print("A green run here does not certify any security or audit property. "
           "Closure additionally requires the OBL-30 external trust anchor: the "
-          "manifest's required-claim baseline is read from git history, which "
-          "makes a silent deletion fail, but one commit can still move the pin "
-          "and drop the claim together.")
+          "baseline is read from git history and compares each claim's probe "
+          "and args, so a silent deletion or in-place weakening fails -- but "
+          "one commit can still move the pin and rewrite the manifest "
+          "together, and `authorized_by` on a retirement or amendment record "
+          "is self-asserted.")
 
 
 if __name__ == "__main__":

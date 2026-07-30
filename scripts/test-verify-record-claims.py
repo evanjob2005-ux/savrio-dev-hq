@@ -162,6 +162,12 @@ def fixture_manifest(pinned_sha):
              "args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
                       "pattern": NEEDLE, "within": 0},
              "red_means": "fixture"},
+            {"id": "gsa-scoped", "document": "FIXTURE.md",
+             "statement": "the forbidden needle is not on the anchor's line",
+             "probe": "grep-scoped-absent",
+             "args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+                      "pattern": FORBIDDEN, "within": 0},
+             "red_means": "fixture"},
             {"id": "nt-events", "document": "FIXTURE.md",
              "statement": "nothing shortens store.events in the fixture module",
              "probe": "no-truncation",
@@ -401,6 +407,194 @@ def _(root):
         handle.write("store.events.length = 200;\n")
 
 
+# ------------------------------- what independent review found still bypassable
+#
+# Every case below is a mutation an independent reviewer executed against the
+# FIRST version of this repair, each of which exited 0. They are the reason the
+# repair changed shape, so they stay as regressions.
+
+@case("REVIEW/1 a cap by .filter rebind, naming no listed operation", 1,
+      "is TRUNCATED")
+def _(root):
+    # The first no-truncation enumerated six spellings. `.filter` rebinds the
+    # collection to a shorter copy and was in none of them.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store.events = store.events.filter((_, i) => i < 200);\n")
+
+
+@case("REVIEW/1 the maximal truncation, store.events = []", 1, "is TRUNCATED")
+def _(root):
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store.events = [];\n")
+
+
+@case("REVIEW/1 a spread-then-slice rebind", 1, "is TRUNCATED")
+def _(root):
+    # The idiom already used in the very file the real claim is about.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store.events = [...store.events].slice(0, 200);\n")
+
+
+@case("REVIEW/3 a read-only .length === guard is NOT a cap (must PASS)", 0)
+def _(root):
+    # `\\.length\\s*=` also matched `===`, so a correct guard clause was
+    # reported as a live retention cap. A control that cries wolf on correct
+    # code teaches readers to ignore it.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("const first = store.events.length === 0;\n")
+
+
+@case("REVIEW/3 a no-argument .slice() defensive copy is NOT a cap (PASS)", 0)
+def _(root):
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("const copy = store.events.slice();\n")
+
+
+@case("REVIEW/2 a /* ... */ body is not code", 1, "does NOT match within")
+def _(root):
+    # Comment stripping was line-local, so any line inside a block comment that
+    # did not itself begin with `*` was read as code. Two lines re-opened the
+    # CSPRNG bypass on the real tree.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}",
+                        f"{ANCHOR}\n/*\nwas {NEEDLE}\n*/", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("REVIEW/2 a one-line /* ... */ comment is not code", 1,
+      "does NOT match within")
+def _(root):
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR} /* {NEEDLE} */", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("REVIEW/3 `anchor://needle` is a comment, not a match", 1,
+      "does NOT match within")
+def _(root):
+    # `key://value` is valid JavaScript with the value on the next line. The
+    # `(?<!:)` lookbehind added to spare URLs spared this too.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR}://{NEEDLE}", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("REVIEW/5 a protocol-relative string is not a comment (must PASS)", 0)
+def _(root):
+    # The mirror. Over-stripping truncates the line, which HIDES text from an
+    # absent-style claim -- the direction a control may not fail in.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}",
+                        f'const host = "//cdn.example.invalid";'
+                        f' {ANCHOR} {NEEDLE}', 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("REVIEW/2 grep-scoped-absent catches a forbidden call at the site", 1,
+      "now MATCHES within")
+def _(root):
+    # Proximity alone is decoy-satisfiable: an unused correct call three lines
+    # away kept a claim green while the generator returned a counter. Requiring
+    # the WRONG call to be absent at the site is what excludes that.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}",
+                        f"{ANCHOR} {NEEDLE} {FORBIDDEN}", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("grep-scoped-absent when the anchor is gone: red, not satisfied", 1,
+      "no longer exists")
+def _(root):
+    # Deleting the site must not prove a claim about that site.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    (root / "lib" / "scoped.txt").write_text(
+        text.replace(ANCHOR, "renamed-anchor"), encoding="utf-8", newline="")
+
+
+@case("REVIEW/4 an arg the probe does not read is REFUSED, not ignored", 2,
+      "does not read args")
+def _(root):
+    # Renaming `within` to `withn` silently restored the permissive default and
+    # the claim went on reporting that it held. One character re-opened a
+    # closed bypass.
+    def mutate(claim):
+        claim["args"]["withn"] = claim["args"].pop("within")
+    amend(root, "g-scoped", mutate)
+
+
+@case("REVIEW/5 CTL-02 gutting a claim's BODY while keeping its id", 1,
+      "REQUIRED CLAIM REDEFINED f-present")
+def _(root):
+    # Cheaper and quieter than deletion: the claim count is unchanged and the
+    # coverage line is byte-identical to a clean run.
+    def mutate(claim):
+        claim["probe"] = "file-present"
+        claim["args"] = {"path": "second.txt"}
+    amend(root, "f-present", mutate)
+
+
+@case("CTL-02 an AUTHORIZED amendment is accepted (must PASS)", 0)
+def _(root):
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    for claim in data["claims"]:
+        if claim["id"] == "f-present":
+            claim["args"] = {"path": "second.txt"}
+    data["amended_claims"] = [{
+        "id": "f-present",
+        "reason": "the fixture now tracks a different file on purpose",
+        "authorized_by": "harness fixture",
+    }]
+    write_manifest(root, data)
+
+
+@case("CTL-02 an amendment with no reason or authority: exit 2", 2,
+      "not a reviewed authorization")
+def _(root):
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    for claim in data["claims"]:
+        if claim["id"] == "f-present":
+            claim["args"] = {"path": "second.txt"}
+    data["amended_claims"] = [{"id": "f-present"}]
+    write_manifest(root, data)
+
+
+@case("CTL-02 the pin moved BACKWARD past a claim: exit 2", 2,
+      "is not an ancestor of HEAD")
+def _(root):
+    # Without an ancestry check the pin can be moved back to a commit predating
+    # a claim's introduction, dropping it with no retirement record at all.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    pin = git(["rev-parse", "HEAD"], root)
+    # Move HEAD back FIRST -- checking out an earlier commit would otherwise
+    # revert the manifest this case is about -- then rewrite it in place.
+    # --force because scratch() rewrites the manifest after committing it, so
+    # the working copy always differs. The manifest is rewritten below anyway.
+    git(["checkout", "--quiet", "--force", "HEAD~1"], root)
+    data["required_claims_baseline"]["commit"] = pin
+    write_manifest(root, data)
+
+
+@case("CTL-02 a baseline pinned by TAG is accepted (must PASS)", 0)
+def _(root):
+    # A bare branch commit does not survive a squash merge; an annotated tag
+    # does. Both forms must resolve.
+    git(["tag", "-a", "fixture-baseline-tag", "-m", "baseline"], root)
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["required_claims_baseline"] = {
+        "tag": "fixture-baseline-tag", "path": "claims.json"}
+    write_manifest(root, data)
+
+
 @case("no-truncation also catches splice", 1, "is TRUNCATED")
 def _(root):
     with (root / "lib" / "collection.ts").open(
@@ -463,7 +657,7 @@ def _(root):
 
 
 @case("CTL-02 a retirement with no reason or authority: exit 2", 2,
-      "not a reviewed retirement")
+      "not a reviewed authorization")
 def _(root):
     data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
     data["claims"] = [c for c in data["claims"] if c["id"] != "f-present"]
@@ -661,7 +855,7 @@ def _(root):
         {"args": {"tag": "fixture-pinned-tag", "commit": "HEAD"}}))
 
 
-@case("grep-scoped with no anchor: exit 2", 2, "missing, blank, or not a string")
+@case("grep-scoped with no anchor: exit 2", 2, "requires args anchor")
 def _(root):
     amend(root, "g-scoped", lambda c: c.update(
         {"args": {"path": "lib/scoped.txt", "pattern": NEEDLE}}))
@@ -692,7 +886,7 @@ def _(root):
 
 
 @case("no-truncation with no collection named: exit 2", 2,
-      "missing, blank, or not a string")
+      "requires args collection")
 def _(root):
     amend(root, "nt-events", lambda c: c.update(
         {"args": {"path": "lib/collection.ts"}}))
@@ -810,6 +1004,13 @@ GREP_ABSENT_VIOLATIONS = {
 # reads the file and nothing about whether it binds to the claimed line. Each
 # entry below leaves the searched-for text in the file and moves it OFF the
 # site, which is the CTL-01 bypass itself.
+# What to place AT the site to violate a scoped-absent claim. Written out per
+# claim because the forbidden text is the point of the claim and no generic
+# rule derives it from a regular expression.
+SCOPED_ABSENT_VIOLATIONS = {
+    "capability-token-not-from-nextid": "return nextId(prefix);",
+}
+
 SCOPED_VIOLATIONS = {
     "sec6-review-token-from-csprng": (
         '    token: nextCapabilityToken("rvt"),',
@@ -828,6 +1029,12 @@ SCOPED_VIOLATIONS = {
     "timeline-retention-test-appends-205": (
         "for (let index = 0; index < 205; index += 1)",
         "for (let index = 0; index < 1; index += 1)",
+    ),
+    # Dropping the node project stops the retention test executing anywhere,
+    # while the two claims that pin its TEXT stay green.
+    "retention-test-executes-in-ci": (
+        "run: npx vitest run --project node",
+        "run: npx vitest run --project dom",
     ),
 }
 
@@ -951,6 +1158,20 @@ def invert(root, claim):
                         newline="")
         return (f"moved the claimed text off its site in {args['path']}",
                 restore_tracked)
+    if probe == "grep-scoped-absent":
+        # Derived, not tabulated: the claim says a pattern must not appear at a
+        # site, so the inversion is to put it there. The anchor line is the
+        # site, so appending to it is the minimal violation.
+        lines = path.read_text(encoding="utf-8").splitlines()
+        anchor = re.compile(args["anchor"])
+        for number, line in enumerate(lines):
+            if anchor.search(line):
+                lines[number] = line + " " + SCOPED_ABSENT_VIOLATIONS[claim["id"]]
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8",
+                                newline="")
+                return (f"put the forbidden text on the claimed site in "
+                        f"{args['path']}"), restore_tracked
+        return None, None
     if probe == "no-truncation":
         # Derived from the claim rather than tabulated: the probe looks for the
         # truncating operation, so the inversion is to perform one.
@@ -993,6 +1214,16 @@ def live():
     print(f"  [{'PASS' if ok else '*** FAIL ***'}] every grep-scoped claim has "
           f"a site-bound violating fixture"
           + (f" (unproven: {', '.join(unscoped)})" if unscoped else ""))
+
+    unforbidden = [c["id"] for c in claims
+                   if c.get("probe") == "grep-scoped-absent"
+                   and c["id"] not in SCOPED_ABSENT_VIOLATIONS]
+    ok = not unforbidden
+    passed += ok
+    failed += not ok
+    print(f"  [{'PASS' if ok else '*** FAIL ***'}] every grep-scoped-absent "
+          f"claim has a forbidden-text fixture"
+          + (f" (unproven: {', '.join(unforbidden)})" if unforbidden else ""))
 
     with tempfile.TemporaryDirectory() as tmp:
         root = clone(tmp)
@@ -1041,7 +1272,9 @@ def main():
         raise SystemExit(f"unknown argument(s): {' '.join(sorted(unknown))}")
 
     passed = failed = 0
-    if not flags or flags == {"--matrix-only"}:
+    # `in flags`, not `== flags`: `--matrix-only --live` used to run only the
+    # live phase and silently skip the matrix it named.
+    if not flags or "--matrix-only" in flags:
         p, f = matrix()
         passed, failed = passed + p, failed + f
     if not flags or "--null-audit" in flags:
