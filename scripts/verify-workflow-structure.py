@@ -287,7 +287,6 @@ def main():
             print(line)
 
     # A workflow added since base is reported, not silently accepted.
-    import pathlib
     try:
         current = sorted(p.name for p in pathlib.Path(WORKFLOW_DIR).glob("*.y*ml"))
     except OSError as error:

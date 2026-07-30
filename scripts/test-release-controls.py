@@ -569,7 +569,7 @@ def tag_lifecycle_cases(doc, old_doc):
     with tempfile.TemporaryDirectory() as tmp:
         origin, work, stub, env, sha = sandbox(tmp)
         push_annotated(work, "v1.1.0", sha)
-        snap = run_bash(digest_snap, env, cwd=work)
+        run_bash(digest_snap, env, cwd=work)      # writes tag_digest to GITHUB_OUTPUT
         digest = step_outputs(env).get("tag_digest", "")
         proc = run_bash(digest_check, {**env, "EXPECTED": digest}, cwd=work)
         expect("null arm: nothing published during the wait", proc, 0)
@@ -657,8 +657,8 @@ def gh_cli_contract_cases(text, probe):
             "live `gh` CLI contract probe: does the installed gh still print "
             f"{GH_NOT_FOUND!r} for an absent release? (re-run with --gh-probe; "
             "needs network and an authenticated gh)")
-        print(f"  [skip] live gh contract probe NOT RUN (hermetic by default; "
-              f"pass --gh-probe)")
+        print("  [skip] live gh contract probe NOT RUN (hermetic by default; "
+              "pass --gh-probe)")
         return
 
     absent = "v0.0.0-harness-probe-does-not-exist"
@@ -964,8 +964,8 @@ def main():
     args = parser.parse_args()
 
     doc, verify_src, publish_src, verify_env, publish_env = release_pieces()
-    required = [l.strip() for l in verify_env["REQUIRED_CHECKS"].splitlines()
-                if l.strip()]
+    required = [line.strip() for line in verify_env["REQUIRED_CHECKS"].splitlines()
+                if line.strip()]
     app_env = {"REQUIRED_CHECKS": verify_env["REQUIRED_CHECKS"],
                "REQUIRED_CHECK_APP": verify_env["REQUIRED_CHECK_APP"]}
 
