@@ -644,8 +644,8 @@ jobs:
           #     property put a quote character between the identifier and the
           #     colon and the pattern matched nothing at all:
           #
-          #         {"password": "Zx91QpLm44TvBnRw"}     zero matches
-          #         {'apiKey': 'Zx91QpLm44TvBnRw'}       zero matches
+          #         {"password": "xxxxxxxxxxxxxxxx"}     zero matches
+          #         {'apiKey': 'xxxxxxxxxxxxxxxx'}       zero matches
           #
           #     UNQUOTED_SECRET could not pick these up either, because its
           #     value must be bare. That is not a narrowing of the rule -- it is
@@ -666,8 +666,8 @@ jobs:
           # binding the quoted form to the bare charset meant a quoted property
           # name outside it produced ZERO matches rather than an unflagged one:
           #
-          #     {"2fa_secret": "Zx91QpLm44TvBnRw02"}     zero matches
-          #     {"api key":    "Zx91QpLm44TvBnRw02"}     zero matches
+          #     {"2fa_secret": "xxxxxxxxxxxxxxxx"}       zero matches
+          #     {"api key":    "xxxxxxxxxxxxxxxx"}       zero matches
           #
           # while {"secret": "..."} was caught -- so one digit at the front of a
           # JSON key was a complete bypass, and 2fa/oauth2/x509 names are exactly
@@ -692,7 +692,7 @@ jobs:
               return match.groupdict().get("quotedname") or match.group("name")
 
           # Unquoted assignments outside .env files: YAML, TOML, INI, shell.
-          # `api_token: 9aQXZ1mLpR44TvBnKd` in a committed config file is the
+          # `api_token: xxxxxxxxxxxxxxxx` in a committed config file is the
           # same leak as the quoted form, and nothing looked at it -- the
           # unquoted rule below existed but ran only on files named .env*.
           # The value must be the entire remainder of the line, so this cannot
@@ -748,8 +748,8 @@ jobs:
           # shaped like a version was exempt in TypeScript, in YAML, in .env
           # templates, anywhere.
           #
-          #     const apiToken = "1-Zx91QpLm44TvBnRw02"        undetected
-          #     const apiToken = "1.2.3-Zx91QpLm44TvBnRw02"    undetected
+          #     const apiToken = "1-xxxxxxxxxxxxxxxx"          undetected
+          #     const apiToken = "1.2.3-xxxxxxxxxxxxxxxx"      undetected
           #     const apiToken = "12345678901234567890"        undetected
           #
           # all three of which the scanner caught before the exemption existed.
@@ -768,7 +768,7 @@ jobs:
           #      all-numeric value can be and still reach this rule. The
           #      prerelease tail is now dot-separated identifiers that are each
           #      numeric or short and lowercase, so `-beta.1`, `-rc.2` and
-          #      `-canary.20260729` pass while `-Zx91QpLm44TvBnRw02` does not.
+          #      `-canary.20260729` pass while `-xxxxxxxxxxxxxxxx` does not.
           #
           # Honest residual: inside a manifest, a value that genuinely parses as
           # a set of dotted numeric versions is still exempt under any name. A

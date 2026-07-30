@@ -84,7 +84,7 @@
     {
       "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
       "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:f0218017b86a98032b62a74e60c46b1837a61725d6b713c6aac355840093e439",
+      "candidate_workflow_tree": "sha256:333fa200c94e1abbbb8545a2abd6d5665366e9a6fe8311201150711827563fd3",
       "changed_files": [
         "ci.yml",
         "dependencies.yml",
@@ -94,9 +94,9 @@
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:819fa0904f5413ead4686675b703bd8911b0815324a0438b29635af879a0b994",
-      "rationale": "Aggregate workflow delta from 79dd9edf, re-recorded to add one item. Previously recorded and Founder-authorized: reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; locked Playwright and Next binaries required through an executable precondition with red/null coverage; and Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition. NEW IN THIS RECORD AND NOT PRE-AUTHORIZED BY THE FOUNDER: a pr.yml prohibited-file defect repair made in response to an observed live failure on PR #11, where the environment-file allowlist refused this repository's tracked .env.local.example template; the allowlist is now anchored on the trailing template marker (.example/.sample/.template) so real environment files such as .env, .env.local and .env.development.local are still refused. That item is a defect repair pending independent review, not an approved change.",
-      "fingerprint": "sha256:a7cb135d2d9006f9dfcc670a98636061fd3929621596fc0f3b7d950b48e64486"
+      "diff_digest": "sha256:f79d8a5019ddbc823f7007284b9d348ecc2fab91577b82f73d9ccf5618ef2a36",
+      "rationale": "Aggregate workflow delta from 79dd9edf, re-recorded to add one item. Previously recorded and Founder-authorized: reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; locked Playwright and Next binaries required through an executable precondition with red/null coverage; and Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition. PREVIOUSLY RECORDED AND NOT PRE-AUTHORIZED BY THE FOUNDER, still pending independent review: the pr.yml prohibited-file defect repair made in response to an observed live failure on PR #11, where the environment-file allowlist refused this repository's tracked .env.local.example template; the allowlist is now anchored on the trailing template marker (.example/.sample/.template) so real environment files such as .env, .env.local and .env.development.local are still refused. NEW IN THIS RECORD AND NOT PRE-AUTHORIZED BY THE FOUNDER: a security.yml defect-prevention change made by the coordinator, lowering the entropy of the placeholder strings at the eight sites that exist ONLY as documentation prose inside Python comments in the credential-scanner step (lines 647, 648, 669, 670, 695, 751, 752 and 771), so that future commits stop producing new gitleaks findings which would otherwise have to be suppressed by commit-pinned fingerprint in .gitleaksignore. The three KNOWN_BAD code occurrences at lines 224, 270 and 1061 are deliberately untouched and remain high-entropy, so the control still exercises entropy detection; no scanner rule, regex, threshold or fixture was changed, and .gitleaksignore was not touched. That item is a defect-prevention change pending independent review, not an approved change.",
+      "fingerprint": "sha256:47437c9691e161d89370346a78d05d8b8cddda95ffc63fae19280a9e122ea896"
     }
   ]
 }
