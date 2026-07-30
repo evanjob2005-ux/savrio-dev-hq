@@ -1,5 +1,10 @@
 # Open at handoff — 2026-07-29
 
+> **Superseded as the current handoff.** This file is retained as the historical
+> 2026-07-29 remediation record. The active handoff is
+> [`HANDOFF_2026-07-30.md`](./HANDOFF_2026-07-30.md), reviewed against branch
+> `chore/close-open-obligations` at `0dd1684`.
+
 **Document ID:** HANDOFF-002
 **Branch:** `chore/close-open-obligations` @ `86df84d`
 **Status:** Tree clean, all validation green. Nothing in flight.

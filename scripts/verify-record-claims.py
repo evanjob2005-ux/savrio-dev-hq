@@ -412,7 +412,30 @@ def main():
               f"longer hold. Each is a record and the repository disagreeing. "
               f"Correct whichever is wrong; do not delete the claim.")
         sys.exit(1)
-    print(f"RESULT: all {len(claims)} documented claim(s) still hold.")
+    print(f"RESULT: {len(claims)} documented claim(s) reported CONSISTENT "
+          f"with the repository.")
+    print()
+    # Stated on every green run, deliberately, and NOT only in a handoff
+    # document. A control whose caveat lives somewhere else reads as stronger
+    # than it is, which is the exact defect this control exists to catch --
+    # and the exact defect CTL-01 charges it with. Until CTL-01 lands, the
+    # limitation travels with the output.
+    print("LIMITATION -- read before relying on this result. Several probes "
+          "match TEXT, not the property the claim asserts, so this is "
+          "evidence of consistency and NOT proof. Confirmed false-green "
+          "paths (CTL-01/CTL-02, docs/plans/HANDOFF_2026-07-30.md):")
+    print("  * a retention cap written without the searched-for identifier "
+          "passes `event-store-has-no-retention-cap`;")
+    print("  * a matching string elsewhere in the same file satisfies a "
+          "whole-file grep, without binding to the claimed call site;")
+    print("  * `tag-present` does not check that the tag is ANNOTATED, so a "
+          "lightweight tag satisfies a claim that names an annotation;")
+    print("  * DELETING an entry from the manifest lowers the claim count and "
+          "still exits 0 -- the manifest is not itself protected.")
+    print("A green run here does not certify any security or audit property. "
+          "Closure additionally requires the OBL-30 external trust anchor, "
+          "because a candidate can edit this control and its manifest "
+          "together.")
 
 
 if __name__ == "__main__":
