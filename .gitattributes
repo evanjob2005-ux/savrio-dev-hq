@@ -22,7 +22,16 @@
 *.html    text
 *.json    text
 *.jsonc   text
-*.md      text
+# -whitespace: two trailing spaces are a HARD LINE BREAK in Markdown, not an
+# error. Without this, `git diff --check` reports every one of them, which
+# failed pr.yml's "Detect merge conflict markers and whitespace errors" step
+# on PR #11 with 59 findings across ADR-0003, ADR-0004 and nine handbooks --
+# none of them a defect, and none introduced by the change under review.
+# Verified in a scratch repository that this suppresses ONLY the whitespace
+# half: a leftover conflict marker in a .md file is still reported and still
+# exits 2. Conflict-marker detection is what that step exists for and it is
+# unaffected.
+*.md      text -whitespace
 *.yml     text
 *.yaml    text
 *.xml     text

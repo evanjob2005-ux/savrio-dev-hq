@@ -63,4 +63,3 @@ describe("shipped agent registry seed", () => {
     expect(agent?.availability).toBe("available");
   });
 });
-
