@@ -228,6 +228,26 @@ def _(root):
     p.write_text(updated, encoding="utf-8", newline="")
 
 
+@case("narrow the pull-request .env template allowlist", 1)
+def _(root):
+    # The allowlist lives inside a `run:` block scalar, so it is only covered
+    # if that scalar is part of the compared surface. It refused this
+    # repository's tracked ".env.local.example" until the trailing-marker form
+    # replaced the three-name list; narrowing it back reintroduces that live
+    # failure. The flip is written both ways so the case measures its own
+    # mutation whichever form the base carries.
+    p = root / ".github/workflows/pr.yml"
+    text = p.read_text(encoding="utf-8")
+    widened = "*.example|*.sample|*.template) ;;"
+    narrowed = ".env.example|.env.sample|.env.template) ;;"
+    if widened in text:
+        updated = text.replace(widened, narrowed, 1)
+    else:
+        assert narrowed in text, "selected baseline fixture has no .env allowlist"
+        updated = text.replace(narrowed, widened, 1)
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
 @case("rename a step", 1)
 def _(root):
     edit(root, "ci.yml", "- name: Verify required repository files",

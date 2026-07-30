@@ -71,22 +71,6 @@
       "fingerprint": "sha256:9ab144d134de49682250b7fcd9de26e567142b0ea8ec12e436c320a9629a960a"
     },
     {
-      "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
-      "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:df891c9920a84a8be266e5fae8f90f0ff656d0eeb968327f06cac8071436da6a",
-      "changed_files": [
-        "ci.yml",
-        "dependencies.yml",
-        "frontend-tests.yml",
-        "lint.yml",
-        "release.yml",
-        "security.yml"
-      ],
-      "diff_digest": "sha256:656775d92898d47b7530e0de9dad469304c4cc558535d6509f1d4cf2ef5a285b",
-      "rationale": "Aggregate Founder-authorized workflow delta from 79dd9edf: retain reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; require locked Playwright and Next binaries through an executable precondition with red/null coverage; and complete Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition.",
-      "fingerprint": "sha256:a70dea6b659fe94a9c60a07ae5ca3a1c36c32361d759ca9f49f82f3441c7f223"
-    },
-    {
       "base_commit": "28882b33bb5d9590910e898f569c552d9f010f3e",
       "base_workflow_tree": "35529e13681ca273a70eb372919c63b7a496ae12",
       "candidate_workflow_tree": "sha256:df891c9920a84a8be266e5fae8f90f0ff656d0eeb968327f06cac8071436da6a",
@@ -96,6 +80,23 @@
       "diff_digest": "sha256:f1160a13cbd476647717f0d89b9d6ee328dbc56700e765a34faeac930ba6aae9",
       "rationale": "Founder-authorized Package E safe-local CI hardening: warn on absent artifacts, make shared repository hygiene cancellation-aware and outcome-honest, isolate concurrency by event and ref, and remove the redundant named smoke-file precondition while retaining fail-closed Playwright collection.",
       "fingerprint": "sha256:51669d9da6889d7f55cecf2d812caad539bdb5e5255989d149a66959d10bd1b7"
+    },
+    {
+      "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
+      "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
+      "candidate_workflow_tree": "sha256:f0218017b86a98032b62a74e60c46b1837a61725d6b713c6aac355840093e439",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
+        "lint.yml",
+        "pr.yml",
+        "release.yml",
+        "security.yml"
+      ],
+      "diff_digest": "sha256:819fa0904f5413ead4686675b703bd8911b0815324a0438b29635af879a0b994",
+      "rationale": "Aggregate workflow delta from 79dd9edf, re-recorded to add one item. Previously recorded and Founder-authorized: reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; locked Playwright and Next binaries required through an executable precondition with red/null coverage; and Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition. NEW IN THIS RECORD AND NOT PRE-AUTHORIZED BY THE FOUNDER: a pr.yml prohibited-file defect repair made in response to an observed live failure on PR #11, where the environment-file allowlist refused this repository's tracked .env.local.example template; the allowlist is now anchored on the trailing template marker (.example/.sample/.template) so real environment files such as .env, .env.local and .env.development.local are still refused. That item is a defect repair pending independent review, not an approved change.",
+      "fingerprint": "sha256:a7cb135d2d9006f9dfcc670a98636061fd3929621596fc0f3b7d950b48e64486"
     }
   ]
 }

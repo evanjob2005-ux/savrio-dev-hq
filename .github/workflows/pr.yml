@@ -216,7 +216,13 @@ jobs:
           set -euo pipefail
 
           # Files that must never be committed. Matching is anchored to the
-          # path so a legitimate ".env.example" is allowed while ".env" is not.
+          # basename so a legitimate environment TEMPLATE is allowed while a
+          # real environment file is not. The template test is anchored on the
+          # trailing marker, not on the whole name, because this repository's
+          # committed template is ".env.local.example": ".env.example",
+          # ".env.sample", ".env.template" and any ".env.<scope>.<marker>"
+          # variant pass, while ".env", ".env.local", ".env.production" and
+          # ".env.development.local" are still refused.
           prohibited=0
           while IFS= read -r file; do
             [[ -z "$file" ]] && continue
@@ -231,7 +237,7 @@ jobs:
             case "$base" in
               .env|.env.*)
                 case "$base" in
-                  .env.example|.env.sample|.env.template) ;;
+                  *.example|*.sample|*.template) ;;
                   *) reason="environment file";;
                 esac
                 ;;
