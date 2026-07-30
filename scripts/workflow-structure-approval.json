@@ -73,7 +73,7 @@
     {
       "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
       "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:80c39079c37441feef66b3bdc0489bf7429fce3dc2b7fc9835e609eaf6c2c54c",
+      "candidate_workflow_tree": "sha256:df891c9920a84a8be266e5fae8f90f0ff656d0eeb968327f06cac8071436da6a",
       "changed_files": [
         "ci.yml",
         "dependencies.yml",
@@ -82,9 +82,20 @@
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:c1c2f0217556cf38894a6f2cc7000a014bf54937d7ceb088aa68abd751089751",
-      "rationale": "Aggregate Founder-authorized workflow delta from 79dd9edf: retain reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair, and require locked Playwright and Next binaries through an executable precondition with red/null coverage.",
-      "fingerprint": "sha256:fb4816fddcb8ece71a197d8657dadb3bee5aad69ba3167f8e9161305627b5943"
+      "diff_digest": "sha256:656775d92898d47b7530e0de9dad469304c4cc558535d6509f1d4cf2ef5a285b",
+      "rationale": "Aggregate Founder-authorized workflow delta from 79dd9edf: retain reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; require locked Playwright and Next binaries through an executable precondition with red/null coverage; and complete Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition.",
+      "fingerprint": "sha256:a70dea6b659fe94a9c60a07ae5ca3a1c36c32361d759ca9f49f82f3441c7f223"
+    },
+    {
+      "base_commit": "28882b33bb5d9590910e898f569c552d9f010f3e",
+      "base_workflow_tree": "35529e13681ca273a70eb372919c63b7a496ae12",
+      "candidate_workflow_tree": "sha256:df891c9920a84a8be266e5fae8f90f0ff656d0eeb968327f06cac8071436da6a",
+      "changed_files": [
+        "frontend-tests.yml"
+      ],
+      "diff_digest": "sha256:f1160a13cbd476647717f0d89b9d6ee328dbc56700e765a34faeac930ba6aae9",
+      "rationale": "Founder-authorized Package E safe-local CI hardening: warn on absent artifacts, make shared repository hygiene cancellation-aware and outcome-honest, isolate concurrency by event and ref, and remove the redundant named smoke-file precondition while retaining fail-closed Playwright collection.",
+      "fingerprint": "sha256:51669d9da6889d7f55cecf2d812caad539bdb5e5255989d149a66959d10bd1b7"
     }
   ]
 }

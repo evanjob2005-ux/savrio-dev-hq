@@ -55,9 +55,10 @@ hollowing the workflow, verifier, harness, or manifest. The trust boundary must
 therefore be external to the candidate -- either a verified repository- or
 organization-level required workflow/ruleset whose implementation the
 candidate cannot change, or independently enforced path ownership/review over
-this workflow and all three control files. Closure additionally requires an
-observed mutation showing that hollowing the implementation or invocation
-cannot preserve the required green check.
+this workflow and every load-bearing control file, including the verifier,
+harness, approval manifest, and `scripts/verify-repository-hygiene.mjs`.
+Closure additionally requires an observed mutation showing that hollowing the
+implementation or invocation cannot preserve the required green check.
 """
 
 import argparse

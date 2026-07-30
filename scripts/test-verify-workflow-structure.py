@@ -144,6 +144,90 @@ def _(root):
     )
 
 
+@case("change a frontend hygiene cancellation guard", 1)
+def _(root):
+    p = root / ".github/workflows/frontend-tests.yml"
+    text = p.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r"(?m)^(\s+- name: Verify repository hygiene\n\s+if:\s*)(.+)$"
+    )
+    match = pattern.search(text)
+    assert match, "selected baseline fixture has no frontend hygiene guard"
+    replacement = (
+        "${{ !cancelled() }}" if match.group(2) != "${{ !cancelled() }}"
+        else "always()"
+    )
+    p.write_text(
+        text[:match.start(2)] + replacement + text[match.end(2):],
+        encoding="utf-8", newline="",
+    )
+
+
+@case("change frontend missing-artifact handling", 1)
+def _(root):
+    p = root / ".github/workflows/frontend-tests.yml"
+    text = p.read_text(encoding="utf-8")
+    match = re.search(r"(?m)^(\s+if-no-files-found:\s*)(\S+)\s*$", text)
+    assert match, "selected baseline fixture has no if-no-files-found input"
+    replacement = "warn" if match.group(2) != "warn" else "ignore"
+    p.write_text(
+        text[:match.start(2)] + replacement + text[match.end(2):],
+        encoding="utf-8", newline="",
+    )
+
+
+@case("change frontend event-isolated concurrency grouping", 1)
+def _(root):
+    p = root / ".github/workflows/frontend-tests.yml"
+    text = p.read_text(encoding="utf-8")
+    marker = "-${{ github.event_name }}-${{ github.ref }}"
+    if marker in text:
+        replacement = "-${{ github.ref }}"
+        updated = text.replace(marker, replacement, 1)
+    else:
+        marker = "-${{ github.ref }}"
+        replacement = "-${{ github.event_name }}-${{ github.ref }}"
+        assert marker in text, "selected baseline fixture has no frontend concurrency group"
+        updated = text.replace(marker, replacement, 1)
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
+@case("change frontend hygiene verifier enforcement", 1)
+def _(root):
+    p = root / ".github/workflows/frontend-tests.yml"
+    text = p.read_text(encoding="utf-8")
+    verifier = "node scripts/verify-repository-hygiene.mjs"
+    if verifier in text:
+        updated = text.replace(verifier, f"{verifier} || true", 1)
+    else:
+        original = "if ! git diff --check HEAD --; then"
+        assert original in text, "selected baseline fixture has no frontend hygiene gate"
+        updated = text.replace(
+            original, "if ! git diff --quiet HEAD --; then", 1
+        )
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
+@case("change frontend E2E file precondition surface", 1)
+def _(root):
+    p = root / ".github/workflows/frontend-tests.yml"
+    text = p.read_text(encoding="utf-8")
+    smoke = "          --file e2e/smoke.spec.ts\n"
+    anchor = "          --file playwright.config.ts\n"
+    if anchor in text:
+        updated = (
+            text.replace(smoke, "", 1)
+            if smoke in text
+            else text.replace(anchor, anchor + smoke, 1)
+        )
+    else:
+        inline = "for file in playwright.config.ts e2e/smoke.spec.ts; do"
+        narrowed = "for file in playwright.config.ts; do"
+        assert inline in text, "selected baseline fixture has no E2E file precondition"
+        updated = text.replace(inline, narrowed, 1)
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
 @case("rename a step", 1)
 def _(root):
     edit(root, "ci.yml", "- name: Verify required repository files",
