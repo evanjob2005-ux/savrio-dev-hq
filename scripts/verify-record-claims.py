@@ -933,12 +933,25 @@ def missing_required_claims(manifest, present):
             "required_claims_baseline.path is missing, blank, or not a string")
 
     # A tag is tried before a bare commit because a bare commit does not
-    # survive this repository's own merge strategy. GIT_STANDARD.md prefers
+    # survive this repository's own merge strategy: GIT_STANDARD.md prefers
     # squash merges, after which the pinned branch commit is unreachable from
-    # the default branch, `fetch-depth: 0` cannot fetch it, and the job exits 2
-    # on every run until someone moves the pin -- teaching reviewers that pin
-    # moves are routine maintenance, which launders the one act this design
-    # depends on being conspicuous. An annotated tag survives a squash merge.
+    # the default branch and `fetch-depth: 0` cannot fetch it.
+    #
+    # An annotated tag survives a squash merge AS A READABLE OBJECT, but NOT as
+    # an ancestor. The `_is_ancestor` guard below and a squash merge are
+    # therefore mutually exclusive: after the squash the pinned commit is not an
+    # ancestor of the merged commit, the guard raises, and this job exits 2 on
+    # every default-branch run until the pin is re-anchored. That is fail-closed
+    # -- never a false green -- but it IS a red gate, and it is the known cost of
+    # keeping the backward-pin-move guard. The re-anchor procedure is recorded in
+    # docs/claims.json under required_claims_baseline._why.
+    #
+    # Both refs are declared, but note the ORDER of checks: when a tag is
+    # declared and cannot be resolved, the peel check below raises before the
+    # commit is ever tried, so a declared-but-missing tag is NOT silently
+    # covered by the commit. That is deliberate -- a pin whose named anchor has
+    # vanished is not a pin -- but it means the tag must exist wherever this
+    # runs, including CI.
     refs = []
     tag = baseline.get("tag")
     if tag is not None:
