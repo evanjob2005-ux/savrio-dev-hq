@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "_readme": [
+    "Executable form of the factual claims this repository's records make about",
+    "itself. Every entry pairs a documented statement with a probe that decides",
+    "it. scripts/verify-record-claims.py runs them all and exits non-zero when",
+    "any claim stops holding, or when any probe cannot reach a verdict.",
+    "",
+    "This file guards records; it does not amend them. A red result means a",
+    "record and the repository now disagree. Read the claim, decide which is",
+    "wrong, and correct that one. Deleting the entry to restore green is never",
+    "the right response.",
+    "",
+    "Only add a claim you have personally executed at the commit you add it on.",
+    "Probe types: tag-present, tag-absent, tag-at-commit, file-present,",
+    "file-absent, grep-present, grep-absent. Patterns are Python regular",
+    "expressions searched against the whole file; paths are repository-relative",
+    "and use forward slashes."
+  ],
+  "claims": [
+    {
+      "id": "pkg3-approval-tag-exists",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "The CORRECTION of 2026-07-29 supersedes the register's sentence \"sprint-1f-pkg3-approved does not exist\": the tag exists and is annotated.",
+      "probe": "tag-present",
+      "args": { "tag": "sprint-1f-pkg3-approved" },
+      "red_means": "The tag was deleted. The correction becomes the stale record and the register's original NOT YET APPROVED sentence becomes true again; the conflict routed for Founder decision has changed shape and must be re-read before anyone relies on either statement."
+    },
+    {
+      "id": "pkg3-approval-tag-target",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "sprint-1f-pkg3-approved points at commit b7386f0521f296a5411e77e15d4dd385eb65691d, the same commit the register names as candidate 1, so the checkpoint was created against the frozen candidate and not a new one.",
+      "probe": "tag-at-commit",
+      "args": {
+        "tag": "sprint-1f-pkg3-approved",
+        "commit": "b7386f0521f296a5411e77e15d4dd385eb65691d"
+      },
+      "red_means": "The approval checkpoint was moved onto different content. The register's basis for saying the tag was created against the frozen candidate no longer holds, and the unresolved approval conflict must be re-opened rather than re-read."
+    },
+    {
+      "id": "pkg3-candidate-freeze-unmoved",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "PKG-3-CORRECTION-1: candidate-1f-pkg3-1 must not be moved, recreated, replaced, or re-frozen. It still resolves to commit b7386f0521f296a5411e77e15d4dd385eb65691d.",
+      "probe": "tag-at-commit",
+      "args": {
+        "tag": "candidate-1f-pkg3-1",
+        "commit": "b7386f0521f296a5411e77e15d4dd385eb65691d"
+      },
+      "red_means": "An immutable freeze was destroyed. PKG-3-CORRECTION-1 exists because the tag annotation carries a false claim that must be corrected in the register rather than by re-tagging; a moved tag means the audit trail that correction depends on is gone."
+    },
+    {
+      "id": "pkg2-approval-tag-target",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "The PKG-2 source of authority is Founder approval of commit 5c1fd6590160dd9bf41212868ed946bb9fb12123 at protected checkpoint sprint-1f-pkg2-approved.",
+      "probe": "tag-at-commit",
+      "args": {
+        "tag": "sprint-1f-pkg2-approved",
+        "commit": "5c1fd6590160dd9bf41212868ed946bb9fb12123"
+      },
+      "red_means": "The PKG-2 baseline that PKG-3 and every deferred MINOR finding are stated against no longer identifies the approved tree, so the whole PKG-2 follow-up section is reasoning from a checkpoint that has moved."
+    },
+    {
+      "id": "icr-handbook-present",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "AR N-8 / ICR NOTE-6 CORRECTION 2026-07-29: handbooks/INDEPENDENT_CODE_REVIEWER.md exists, so the reference at agents/independent-code-reviewer/AGENT.md:7 is no longer dangling. Closed by OBL-19.",
+      "probe": "file-present",
+      "args": { "path": "handbooks/INDEPENDENT_CODE_REVIEWER.md" },
+      "red_means": "OBL-19's closure is undone and the original absence finding is live again. Dependency D-8 in docs/plans/SPRINT_1F_ENTRY_PACKAGE.md carries the same correction and would go stale with it."
+    },
+    {
+      "id": "sec6-review-token-from-csprng",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "SEC-6 / CR-1 CORRECTION 2026-07-29: the review callback token is minted by nextCapabilityToken(\"rvt\") in lib/dev-hq/review-service.ts.",
+      "probe": "grep-present",
+      "args": {
+        "path": "lib/dev-hq/review-service.ts",
+        "pattern": "nextCapabilityToken\\(\\s*\"rvt\"\\s*\\)"
+      },
+      "red_means": "SEC-6, a HIGH pre-deployment blocker recorded as Closed, is reopened. The register would still read Closed while the CSPRNG requirement it claims is met no longer is."
+    },
+    {
+      "id": "sec6-review-token-not-nextid",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "SEC-6's superseded claim -- that review-service.ts mints the token with nextId(\"rvt\") -- is no longer true of the file.",
+      "probe": "grep-absent",
+      "args": {
+        "path": "lib/dev-hq/review-service.ts",
+        "pattern": "nextId\\(\\s*\"rvt\"\\s*\\)"
+      },
+      "red_means": "The predictable prefix-epoch-counter minting an independent reviewer brute-forced in roughly 250k guesses is back in the review path. This is the exact defect SEC-6 was closed on."
+    },
+    {
+      "id": "capability-token-uses-node-crypto",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "SEC-6 correction: lib/dev-hq/id.ts implements nextCapabilityToken over randomUUID() from node:crypto.",
+      "probe": "grep-present",
+      "args": {
+        "path": "lib/dev-hq/id.ts",
+        "pattern": "randomUUID\\(\\)"
+      },
+      "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim."
+    },
+    {
+      "id": "event-store-has-no-retention-cap",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "RAT-5 CORRECTION 2026-07-29: there is no slice, splice, shift, or cap of any kind in lib/dev-hq/store.ts, so nothing is evicted and RAT-5's stated consequence cannot occur.",
+      "probe": "grep-absent",
+      "args": {
+        "path": "lib/dev-hq/store.ts",
+        "pattern": "EVENT_BUFFER_SIZE|\\.slice\\(|\\.splice\\(|\\.shift\\(|\\.pop\\("
+      },
+      "red_means": "Truncation was reintroduced into the store. That reverses ADR-0004 Section 2's append-only ruling, reopens the ARCH-07 data-loss defect, and makes RAT-5's correctness consequence live again -- the state OBL-41 explicitly warns is not licensed by the obligation."
+    },
+    {
+      "id": "event-buffer-size-is-a-page-limit",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "RAT-5 correction: EVENT_BUFFER_SIZE = 200 still exists in lib/dev-hq/constants.ts, where it now bounds only the limit parameter of /api/dev-hq/events rather than retention.",
+      "probe": "grep-present",
+      "args": {
+        "path": "lib/dev-hq/constants.ts",
+        "pattern": "EVENT_BUFFER_SIZE\\s*=\\s*200"
+      },
+      "red_means": "The constant the correction points at moved or changed value, so the correction's account of where the 200 lives and what it now bounds no longer describes the tree."
+    },
+    {
+      "id": "timeline-retention-guarded-by-test",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "RAT-5 correction: the append-only timeline is guarded by lib/dev-hq/audit-timeline.test.ts, which asserts 205 distinct events are retained.",
+      "probe": "grep-present",
+      "args": {
+        "path": "lib/dev-hq/audit-timeline.test.ts",
+        "pattern": "toHaveLength\\(205\\)"
+      },
+      "red_means": "The only executable guard on ADR-0004 Section 2's append-only ruling was weakened or removed, leaving event-store-has-no-retention-cap as the sole thing standing between this repository and a silent reintroduction of the cap."
+    },
+    {
+      "id": "next-config-not-standalone",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "PKG-2 verdict-flipping condition, checked at approval and not met: output: \"standalone\" is not set in next.config.ts.",
+      "probe": "grep-absent",
+      "args": {
+        "path": "next.config.ts",
+        "pattern": "output\\s*:\\s*[\"']standalone[\"']"
+      },
+      "red_means": "One of the three named conditions that convert the PKG-2 Architecture Review's verdict to REJECT -- REMEDIATION REQUIRED is now true. The register states in terms that the deferral of M-1 through M-4 must be revisited if this happens."
+    },
+    {
+      "id": "smoke-heading-match-is-exact",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "AR N-2: e2e/smoke.spec.ts is load-bearing documentation and its exact: true must not be deleted by a future maintainer \"repairing\" the test.",
+      "probe": "grep-present",
+      "args": {
+        "path": "e2e/smoke.spec.ts",
+        "pattern": "exact:\\s*true"
+      },
+      "red_means": "Accessible-name matching falls back to case-insensitive substring, so an unrelated heading merely containing the words satisfies the assertion. That is the false positive that failed candidate-1f-pkg2-1, reinstated with both gates still green."
+    },
+    {
+      "id": "playwright-spec-collection-widened",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "PKG-2 M-1, closed by b32caec: playwright.config.ts collects the widened spec-only pattern **/*.spec.?(c|m)[jt]s?(x), admitting further spec forms without permitting .test.* files.",
+      "probe": "grep-present",
+      "args": {
+        "path": "playwright.config.ts",
+        "pattern": "spec\\.\\?\\(c\\|m\\)\\[jt\\]s\\?\\(x\\)"
+      },
+      "red_means": "M-1 is reopened: an e2e/foo.spec.tsx is executed by nothing while both gates report green. The register records that silent omission as the highest-consequence of the four deferred MINOR findings."
+    },
+    {
+      "id": "vitest-projects-exclude-e2e",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "PKG-2 M-2 and M-3, closed by b32caec: vitest.config.ts composes the installed version's configDefaults.exclude and excludes e2e/** from both projects.",
+      "probe": "grep-present",
+      "args": {
+        "path": "vitest.config.ts",
+        "pattern": "\\.\\.\\.configDefaults\\.exclude[\\s\\S]*\"e2e/\\*\\*\""
+      },
+      "red_means": "The \"e2e/ belongs to Playwright\" invariant stops being enforced on the Vitest side, or the default exclusions are replaced by a partial copy again -- both are the exact drift M-3 was raised about."
+    }
+  ]
+}

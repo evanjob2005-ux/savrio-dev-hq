@@ -482,6 +482,56 @@ def _(root):
         encoding="utf-8", newline="")
 
 
+# ---------------------------------------------------------------------------
+# The record-claims control (scripts/verify-record-claims.py) is invoked from
+# ci.yml, and an invocation is only worth as much as the workflow that carries
+# it. Both cases are written to flip whichever way the base happens to sit, so
+# each measures its own mutation once the step reaches base.
+# ---------------------------------------------------------------------------
+
+
+@case("add/remove the record-claims verification step", 1)
+def _(root):
+    p = root / ".github/workflows/ci.yml"
+    text = p.read_text(encoding="utf-8")
+    step = ("      - name: Verify documented record claims\n"
+            "        run: python scripts/verify-record-claims.py\n\n")
+    anchor = "      - name: Validate YAML and JSON syntax\n"
+    if "Verify documented record claims" in text:
+        updated = re.sub(
+            r"(?m)^(?:[ \t]+#.*\n|\n)*[ \t]+- name: Verify documented record "
+            r"claims\n[ \t]+run: .*\n\n",
+            "", text, count=1)
+        assert updated != text, "the record-claims step could not be removed"
+    else:
+        assert anchor in text, "selected baseline fixture has no JSON syntax step"
+        updated = text.replace(anchor, step + anchor, 1)
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
+@case("add/remove fetch-tags on the structured-data checkout", 1)
+def _(root):
+    # Without tags the record-claims verifier refuses to judge any tag claim
+    # and exits 2. Removing this input therefore does not weaken the control
+    # quietly -- but it does turn CI red for a reason unrelated to any claim,
+    # so the input is structural and is compared like one.
+    p = root / ".github/workflows/ci.yml"
+    text = p.read_text(encoding="utf-8")
+    anchor = "# v7.0.1\n\n      - name: Set up Python\n"
+    tagged = ("# v7.0.1\n        with:\n          fetch-tags: true\n\n"
+              "      - name: Set up Python\n")
+    if "fetch-tags: true" in text:
+        updated = re.sub(
+            r"(?m)^[ \t]+with:\n(?:[ \t]+#.*\n)*[ \t]+fetch-tags: true\n",
+            "", text, count=1)
+        assert updated != text, "fetch-tags could not be removed"
+    else:
+        assert anchor in text, "selected baseline fixture has no bare "\
+                               "structured-data checkout"
+        updated = text.replace(anchor, tagged, 1)
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
 def null_audit():
     """Rule 2, applied to every case rather than to one baseline.
 
