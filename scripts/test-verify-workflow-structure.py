@@ -522,11 +522,16 @@ def _(root):
               "      - name: Set up Python\n")
     if "fetch-tags: true" in text:
         # Only the one input line. This used to remove the whole `with:` block,
-        # which worked while fetch-tags was its sole member -- but the block now
-        # also carries fetch-depth: 0 (CTL-02), and taking `with:` away while
-        # leaving fetch-depth behind produces a step whose YAML does not parse.
-        # The verifier would then exit 2, "cannot evaluate", and this case would
-        # be measuring a broken fixture rather than a detected structural change.
+        # which was right while fetch-tags was its sole member -- but the block
+        # now also carries fetch-depth: 0 (CTL-02), and taking `with:` away
+        # while leaving fetch-depth behind produces a step whose YAML does not
+        # parse. The verifier would then exit 2, "cannot evaluate", and this
+        # case would be measuring a broken fixture rather than a detected
+        # structural change.
+        #
+        # Latent at the current BASE, which carries no `with:` at all, so the
+        # else-branch is what runs today. Corrected anyway: the branch that is
+        # not exercised is exactly the one that rots.
         updated = re.sub(r"(?m)^[ \t]+fetch-tags: true\n", "", text, count=1)
         assert updated != text, "fetch-tags could not be removed"
     else:
@@ -539,15 +544,27 @@ def _(root):
 @case("add/remove fetch-depth on the structured-data checkout", 1)
 def _(root):
     # The record-claims verifier reads its required-claims baseline from a
-    # pinned commit (CTL-02). A shallow checkout does not have that commit, so
-    # dropping this input does not quietly weaken the control -- it exits 2 --
-    # but it does stop the manifest being checked at all, which is structural.
+    # pinned tag or commit (CTL-02). A shallow checkout does not have that
+    # object, so dropping this input does not quietly weaken the control -- it
+    # exits 2 -- but it does stop the manifest being checked at all, which is
+    # structural and is compared like it.
+    #
+    # Symmetric, like the fetch-tags case above and for the same reason: the
+    # fixture is rebuilt from BASE, and whether BASE already carries this input
+    # depends on where BASE is. Asserting one direction would make the case
+    # fail on a baseline that simply predates the input.
     p = root / ".github/workflows/ci.yml"
     text = p.read_text(encoding="utf-8")
-    assert "fetch-depth: 0" in text, \
-        "selected baseline fixture has no fetch-depth on structured-data"
-    updated = re.sub(r"(?m)^[ \t]+fetch-depth: 0\n", "", text, count=1)
-    assert updated != text, "fetch-depth could not be removed"
+    anchor = "# v7.0.1\n\n      - name: Set up Python\n"
+    added = ("# v7.0.1\n        with:\n          fetch-depth: 0\n\n"
+             "      - name: Set up Python\n")
+    if "fetch-depth: 0" in text:
+        updated = re.sub(r"(?m)^[ \t]+fetch-depth: 0\n", "", text, count=1)
+        assert updated != text, "fetch-depth could not be removed"
+    else:
+        assert anchor in text, ("selected baseline fixture has no bare "
+                                "structured-data checkout")
+        updated = text.replace(anchor, added, 1)
     p.write_text(updated, encoding="utf-8", newline="")
 
 
