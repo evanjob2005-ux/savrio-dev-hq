@@ -2,7 +2,7 @@
   "version": 1,
   "required_claims_baseline": {
     "tag": "claims-baseline-1",
-    "commit": "5064526bd32007575303e94c7bfab522b3308734",
+    "commit": "bab6613b1c9d99494f2e159cd8ee076550ade19d",
     "path": "docs/claims.json",
     "_why": [
       "CTL-02: nothing checked this manifest, so deleting an entry took",
@@ -33,74 +33,7 @@
     ]
   },
   "retired_claims": [],
-  "amended_claims": [
-    {
-      "id": "capability-token-uses-node-crypto",
-      "reason": "CTL-01 bypass 2, twice. Whole-file grep-present -> grep-scoped at the generator, because randomUUID() surviving anywhere in id.ts kept this green after the generator was replaced by a predictable counter. Then bound to the RETURNED expression, because a line radius is not a function body: padding the body moved the forbidden nextId( outside the paired absent-window while an unused randomUUID() stayed inside the present-window.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:ab0ec716a36a708aeacffa3cda5a025d44fe0674b20cb5f010ad70cd9a8f3a6c"
-    },
-    {
-      "id": "event-buffer-size-is-a-page-limit",
-      "reason": "code_only added: a commented-out declaration must not satisfy a claim about a live constant.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:09305e63ad0984acf4d3a9bdd4dee20dd7ca0a0a98c7a63647f3bb85f83a1706"
-    },
-    {
-      "id": "event-store-has-no-retention-cap",
-      "reason": "CTL-01 bypass 1: grep-absent over five identifiers -> no-truncation over the operation applied to store.events. The old probe searched for the identifier a PREVIOUS cap happened to use, so an equivalent cap written any other way passed while evicting audit history.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:06cc4b073104cd408d9af045e0d085efa3799f085636456ed6f1bbc2165109bb"
-    },
-    {
-      "id": "next-config-not-standalone",
-      "reason": "code_only removed, for the same reason as sec6-review-token-not-nextid.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:c02d7bd5b0db2a882c5fd0e35fff4b8d1b33d69228a79d8001e98bea635faef1"
-    },
-    {
-      "id": "pkg3-approval-tag-exists",
-      "reason": "CTL-01 bypass 4: tag-present -> tag-annotated. The statement says the tag 'exists and is annotated', but tag-present is satisfied by a lightweight ref carrying no annotation at all.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:8d7775452a556d16ccdc4e772bb9f40cb3b2f1f7f70a7b80ae04ce882f7cba83"
-    },
-    {
-      "id": "playwright-spec-collection-widened",
-      "reason": "code_only added: a commented-out spec glob must not satisfy this claim.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:e487c2e0aab90368e75766a5a422f78669f571cd07b5821d9fd631e215ad89d7"
-    },
-    {
-      "id": "sec6-review-token-from-csprng",
-      "reason": "CTL-01 bypass 5: whole-file grep-present -> grep-scoped bound to the reserveCallbackToken call. A whole-file grep proved only that the text existed somewhere in a ~945-line file, which a decoy satisfies.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:3688c76674ce14ca12929c15743ee08068ffd5fbc1c68dbc56f2f87f684c74b9"
-    },
-    {
-      "id": "sec6-review-token-not-nextid",
-      "reason": "code_only removed. On an absent claim, stripping text can only hide a violation, so the option's failure direction is 'reads as satisfied'.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:1d2ebec552e32fea37404cce176d865f3f8008a2d933ca02ee28cce12c9f1d33"
-    },
-    {
-      "id": "smoke-heading-match-is-exact",
-      "reason": "code_only added: a commented-out exact:true must not satisfy this claim.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:6ef830fabcacffb71aa34de2fe0ca576e4b6f5a8ff254b0f245f1b979fc42732"
-    },
-    {
-      "id": "timeline-retention-guarded-by-test",
-      "reason": "CTL-01 bypass 3: whole-file grep-present -> grep-scoped with within:0 on the assertion line. An unrelated toHaveLength(205) added as filler satisfied the whole-file grep while the guard asserted 1.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:dc68faab3acd67f44e20e2c38554649641c5d2616ce8e3c91d69fadea1d076fe"
-    },
-    {
-      "id": "vitest-projects-exclude-e2e",
-      "reason": "code_only added: a commented-out exclusion must not satisfy this claim.",
-      "authorized_by": "Batch 1 CTL-01 remediation (docs/plans/HANDOFF_2026-07-30.md), candidate-initiated and pending independent review; NOT Founder-authorized",
-      "body": "sha256:088bec0c986c381799b0123369e3f3d3d193abec00c9263556a6cf235959de62"
-    }
-  ],
+  "amended_claims": [],
   "_readme": [
     "Executable form of the factual claims this repository's records make about",
     "itself. Every entry pairs a documented statement with a probe that decides",
