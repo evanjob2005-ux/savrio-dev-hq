@@ -48,6 +48,7 @@ Exit:   0 every claim holds | 1 one or more no longer hold | 2 cannot evaluate
 """
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -189,7 +190,7 @@ def repo_path(args, field="path"):
 def compiled(args, field="pattern"):
     raw = require(args, field)
     try:
-        return raw, re.compile(raw)
+        return raw, re.compile(raw, re.MULTILINE)
     except re.error as error:
         raise CannotEvaluate(
             f"args.{field} {raw!r} is not a valid regular expression: {error}"
@@ -741,6 +742,10 @@ def claim_body(claim):
                       sort_keys=True, separators=(",", ":"))
 
 
+def body_digest(body):
+    return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def _git_show(spec):
     """(text, reason). Exactly one of the two is None."""
     try:
@@ -856,14 +861,14 @@ def missing_required_claims(manifest, present):
         raise CannotEvaluate(
             f"the baseline manifest at {ref}:{path} yielded no usable claim ids")
 
-    retired = _authorized(manifest, "retired_claims")
-    amended = _authorized(manifest, "amended_claims")
+    retired = set(_authorized(manifest, "retired_claims"))
+    amended = _authorized(manifest, "amended_claims", pin_body=True)
 
     gone = sorted(set(required) - set(present) - retired)
     redefined = sorted(
         identifier for identifier, body in required.items()
-        if identifier in present and identifier not in amended
-        and present[identifier] != body)
+        if identifier in present and present[identifier] != body
+        and amended.get(identifier) != body_digest(present[identifier]))
     return gone, redefined, len(required) - len(retired)
 
 
@@ -886,7 +891,7 @@ def _is_ancestor(ref):
         f"baseline's relationship to HEAD is unknown")
 
 
-def _authorized(manifest, field):
+def _authorized(manifest, field, pin_body=False):
     """Ids excused by an explicit record in `field`.
 
     A record must say what changed, why, and on whose authority. Presence of
@@ -898,11 +903,12 @@ def _authorized(manifest, field):
     records = manifest.get(field, [])
     if not isinstance(records, list):
         raise CannotEvaluate(f"'{field}' is present but is not a list")
-    excused = set()
+    wanted = RETIREMENT_FIELDS + (("body",) if pin_body else ())
+    excused = {}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise CannotEvaluate(f"{field} #{index} is not an object")
-        blank = [f for f in RETIREMENT_FIELDS
+        blank = [f for f in wanted
                  if not isinstance(record.get(f), str)
                  or not record[f].strip()]
         if blank:
@@ -910,7 +916,7 @@ def _authorized(manifest, field):
                 f"{field} #{index} is missing {', '.join(blank)}; a record "
                 f"that does not say what was changed, why, and on whose "
                 f"authority is not a reviewed authorization")
-        excused.add(record["id"])
+        excused[record["id"]] = record.get("body")
     return excused
 
 

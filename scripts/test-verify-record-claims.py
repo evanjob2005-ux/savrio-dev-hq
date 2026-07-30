@@ -36,6 +36,7 @@ happens inside a temporary directory, asserted before each git call.
 Pass --matrix-only, --null-audit, or --live to run one phase.
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -546,13 +547,67 @@ def _(root):
 
 @case("CTL-02 an AUTHORIZED amendment is accepted (must PASS)", 0)
 def _(root):
+    # The escape hatch has to work, or the only way to legitimately re-point a
+    # claim would be to disable the check.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    for claim in data["claims"]:
+        if claim["id"] == "f-present":
+            claim["args"] = {"path": "second.txt"}
+            body = json.dumps(
+                {"probe": claim["probe"], "args": claim["args"]},
+                sort_keys=True, separators=(",", ":"))
+    data["amended_claims"] = [{
+        "id": "f-present",
+        "reason": "the fixture now tracks a different file on purpose",
+        "authorized_by": "harness fixture",
+        "body": "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest(),
+    }]
+    write_manifest(root, data)
+
+
+@case("a pattern anchored with ^ binds to a LINE, not the window", 1,
+      "does NOT match within")
+def _(root):
+    # Patterns compile MULTILINE, so `^\\s*needle` means "the needle begins its
+    # line". That is what stops a conditional prefix -- `if (x) await log(...)`
+    # -- from satisfying a claim that the call is unconditional.
+    amend(root, "g-scoped", lambda c: c["args"].update(
+        {"pattern": f"^\\s*{NEEDLE}"}))
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR}\nif (x) {NEEDLE}", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("CTL-02 an amendment does not exempt the id FOREVER", 1,
+      "REQUIRED CLAIM REDEFINED f-present")
+def _(root):
+    # An amendment authorizes ONE body, not the slot. Treating it as a standing
+    # exemption would have left this batch's own twelve amended claims
+    # permanently unguarded -- most of the manifest, as unprotected as before
+    # CTL-02. Here the record pins one body and the claim carries another.
     data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
     for claim in data["claims"]:
         if claim["id"] == "f-present":
             claim["args"] = {"path": "second.txt"}
     data["amended_claims"] = [{
         "id": "f-present",
-        "reason": "the fixture now tracks a different file on purpose",
+        "reason": "authorized for a different body than the one now present",
+        "authorized_by": "harness fixture",
+        "body": "sha256:" + "0" * 64,
+    }]
+    write_manifest(root, data)
+
+
+@case("CTL-02 an amendment with no body pinned: exit 2", 2,
+      "not a reviewed authorization")
+def _(root):
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    for claim in data["claims"]:
+        if claim["id"] == "f-present":
+            claim["args"] = {"path": "second.txt"}
+    data["amended_claims"] = [{
+        "id": "f-present", "reason": "no body pinned",
         "authorized_by": "harness fixture",
     }]
     write_manifest(root, data)
