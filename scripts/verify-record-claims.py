@@ -432,6 +432,24 @@ def main():
           "lightweight tag satisfies a claim that names an annotation;")
     print("  * DELETING an entry from the manifest lowers the claim count and "
           "still exits 0 -- the manifest is not itself protected.")
+    print("  * three further false-green paths were demonstrated on 2026-07-30 "
+          "and are NOT fixed, only disclosed in each claim's statement: the "
+          "explanatory COMMENT about `exact: true` satisfies "
+          "`smoke-heading-match-is-exact` even with the executable assertion "
+          "deleted; `vitest-projects-exclude-e2e` matches one shared list and "
+          "decides nothing about either project; and a second `testMatch` "
+          "entry admitting .test.* satisfies "
+          "`playwright-spec-collection-widened`.")
+    print("  * NO claim decides that capability tokens are drawn from a "
+          "CSPRNG. The claim that appeared to (capability-token-uses-node-"
+          "crypto) was retired on 2026-07-30 because its whole-file grep was "
+          "satisfied by a comment and decided nothing about the generator. "
+          "lib/dev-hq/capability-token.test.ts executes in the Vitest node "
+          "project and is real evidence against the PREVIOUS predictable "
+          "generator, but it does not prove CSPRNG derivation -- a "
+          "deterministic 32-hex counter satisfies every assertion in it -- and "
+          "no claim pins it, so deleting it reddens nothing here. See "
+          "docs/governance/CTL-CLAIM-DISPOSITION-001.md.")
     print("A green run here does not certify any security or audit property. "
           "Closure additionally requires the OBL-30 external trust anchor, "
           "because a candidate can edit this control and its manifest "

@@ -21,7 +21,7 @@
     {
       "id": "pkg3-approval-tag-exists",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "The CORRECTION of 2026-07-29 supersedes the register's sentence \"sprint-1f-pkg3-approved does not exist\": the tag exists and is annotated.",
+      "statement": "The CORRECTION of 2026-07-29 supersedes the register's sentence \"sprint-1f-pkg3-approved does not exist\": the tag exists. Whether it is ANNOTATED is not decided by this probe -- a lightweight ref satisfies it.",
       "probe": "tag-present",
       "args": { "tag": "sprint-1f-pkg3-approved" },
       "red_means": "The tag was deleted. The correction becomes the stale record and the register's original NOT YET APPROVED sentence becomes true again; the conflict routed for Founder decision has changed shape and must be re-read before anyone relies on either statement."
@@ -29,7 +29,7 @@
     {
       "id": "pkg3-approval-tag-target",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "sprint-1f-pkg3-approved points at commit b7386f0521f296a5411e77e15d4dd385eb65691d, the same commit the register names as candidate 1, so the checkpoint was created against the frozen candidate and not a new one.",
+      "statement": "sprint-1f-pkg3-approved currently resolves to commit b7386f0521f296a5411e77e15d4dd385eb65691d, the same commit the register names as candidate 1. This probe decides where the tag points NOW and not how it got there: a tag force-moved onto that commit satisfies it identically, so it is not evidence that the checkpoint was CREATED against the frozen candidate.",
       "probe": "tag-at-commit",
       "args": {
         "tag": "sprint-1f-pkg3-approved",
@@ -40,7 +40,7 @@
     {
       "id": "pkg3-candidate-freeze-unmoved",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "PKG-3-CORRECTION-1: candidate-1f-pkg3-1 must not be moved, recreated, replaced, or re-frozen. It still resolves to commit b7386f0521f296a5411e77e15d4dd385eb65691d.",
+      "statement": "PKG-3-CORRECTION-1 requires that candidate-1f-pkg3-1 not be moved, recreated, replaced, or re-frozen. This probe decides only the FIRST of those -- that the tag has not been moved: it still resolves to commit b7386f0521f296a5411e77e15d4dd385eb65691d. Deleting and re-creating it at the same commit, or replacing the annotated tag with a lightweight ref, both satisfy this check.",
       "probe": "tag-at-commit",
       "args": {
         "tag": "candidate-1f-pkg3-1",
@@ -51,7 +51,7 @@
     {
       "id": "pkg2-approval-tag-target",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "The PKG-2 source of authority is Founder approval of commit 5c1fd6590160dd9bf41212868ed946bb9fb12123 at protected checkpoint sprint-1f-pkg2-approved.",
+      "statement": "The register records the PKG-2 source of authority as Founder approval of commit 5c1fd6590160dd9bf41212868ed946bb9fb12123 at checkpoint sprint-1f-pkg2-approved. This probe decides only that the tag resolves to that commit. Neither the Founder approval nor the checkpoint being PROTECTED is decided here; no ruleset covers these tags.",
       "probe": "tag-at-commit",
       "args": {
         "tag": "sprint-1f-pkg2-approved",
@@ -62,7 +62,7 @@
     {
       "id": "icr-handbook-present",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "AR N-8 / ICR NOTE-6 CORRECTION 2026-07-29: handbooks/INDEPENDENT_CODE_REVIEWER.md exists, so the reference at agents/independent-code-reviewer/AGENT.md:7 is no longer dangling. Closed by OBL-19.",
+      "statement": "AR N-8 / ICR NOTE-6 CORRECTION 2026-07-29: handbooks/INDEPENDENT_CODE_REVIEWER.md exists. This probe does NOT open agents/independent-code-reviewer/AGENT.md, so it decides nothing about whether the reference there still resolves or is still at line 7; scripts/verify-agent-references.py is what checks that. The register records OBL-19 as closed on this basis.",
       "probe": "file-present",
       "args": { "path": "handbooks/INDEPENDENT_CODE_REVIEWER.md" },
       "red_means": "OBL-19's closure is undone and the original absence finding is live again. Dependency D-8 in docs/plans/SPRINT_1F_ENTRY_PACKAGE.md carries the same correction and would go stale with it."
@@ -70,7 +70,7 @@
     {
       "id": "sec6-review-token-from-csprng",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "SEC-6 / CR-1 CORRECTION 2026-07-29: the review callback token is minted by nextCapabilityToken(\"rvt\") in lib/dev-hq/review-service.ts.",
+      "statement": "SEC-6 / CR-1 CORRECTION 2026-07-29: the text nextCapabilityToken(\"rvt\") occurs somewhere in lib/dev-hq/review-service.ts. This is a whole-file search and does NOT bind the call to the mint site, so it is occurrence evidence and not proof that the callback token is minted by it.",
       "probe": "grep-present",
       "args": {
         "path": "lib/dev-hq/review-service.ts",
@@ -81,7 +81,7 @@
     {
       "id": "sec6-review-token-not-nextid",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "SEC-6's superseded claim -- that review-service.ts mints the token with nextId(\"rvt\") -- is no longer true of the file.",
+      "statement": "The literal call nextId(\"rvt\") does not occur in lib/dev-hq/review-service.ts. This decides the spelling, not the behaviour: minting through a variable -- const p = \"rvt\"; nextId(p) -- evades it. After capability-token-uses-node-crypto was retired, this and sec6-review-token-from-csprng are the manifest's only guards against the brute-forced generator returning to the review path. They are complementary rather than nested -- one reddens if the predictable call appears, the other if the CSPRNG call text disappears -- and both are text matches.",
       "probe": "grep-absent",
       "args": {
         "path": "lib/dev-hq/review-service.ts",
@@ -90,20 +90,9 @@
       "red_means": "The predictable prefix-epoch-counter minting an independent reviewer brute-forced in roughly 250k guesses is back in the review path. This is the exact defect SEC-6 was closed on."
     },
     {
-      "id": "capability-token-uses-node-crypto",
-      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "SEC-6 correction: lib/dev-hq/id.ts implements nextCapabilityToken over randomUUID() from node:crypto.",
-      "probe": "grep-present",
-      "args": {
-        "path": "lib/dev-hq/id.ts",
-        "pattern": "randomUUID\\(\\)"
-      },
-      "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim."
-    },
-    {
       "id": "event-store-has-no-retention-cap",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "RAT-5 CORRECTION 2026-07-29: there is no slice, splice, shift, or cap of any kind in lib/dev-hq/store.ts, so nothing is evicted and RAT-5's stated consequence cannot occur.",
+      "statement": "RAT-5 CORRECTION 2026-07-29: none of the identifiers EVENT_BUFFER_SIZE, .slice(, .splice(, .shift( or .pop( occurs in lib/dev-hq/store.ts. This does NOT decide that no cap of any kind exists: a cap written by other means -- assigning to .length, rebinding the array, or evicting from another file -- passes this probe unchanged.",
       "probe": "grep-absent",
       "args": {
         "path": "lib/dev-hq/store.ts",
@@ -114,18 +103,18 @@
     {
       "id": "event-buffer-size-is-a-page-limit",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "RAT-5 correction: EVENT_BUFFER_SIZE = 200 still exists in lib/dev-hq/constants.ts, where it now bounds only the limit parameter of /api/dev-hq/events rather than retention.",
+      "statement": "RAT-5 correction: the text EVENT_BUFFER_SIZE = 200 occurs in lib/dev-hq/constants.ts -- a comment satisfies this equally, and so does a LARGER value, because the pattern is unanchored and matches 200 as a prefix of 2000. What the constant BOUNDS is not decided by this probe; the register's account of it as a page limit rather than a retention policy rests on ADR-0004 Section 2, not on this check.",
       "probe": "grep-present",
       "args": {
         "path": "lib/dev-hq/constants.ts",
         "pattern": "EVENT_BUFFER_SIZE\\s*=\\s*200"
       },
-      "red_means": "The constant the correction points at moved or changed value, so the correction's account of where the 200 lives and what it now bounds no longer describes the tree."
+      "red_means": "The constant the correction points at was removed or renamed. Note this probe does NOT detect a change of VALUE: the pattern is unanchored, so EVENT_BUFFER_SIZE = 2000 satisfies it. Only disappearance of the text is caught."
     },
     {
       "id": "timeline-retention-guarded-by-test",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "RAT-5 correction: the append-only timeline is guarded by lib/dev-hq/audit-timeline.test.ts, which asserts 205 distinct events are retained.",
+      "statement": "RAT-5 correction: the literal toHaveLength(205) occurs in lib/dev-hq/audit-timeline.test.ts. This does NOT decide that the test retains 205 distinct events -- an unrelated assertion of the same shape satisfies it. The executed guard is the test itself, which runs in the Vitest node project; this claim detects only the file going missing or the literal being removed.",
       "probe": "grep-present",
       "args": {
         "path": "lib/dev-hq/audit-timeline.test.ts",
@@ -136,7 +125,7 @@
     {
       "id": "next-config-not-standalone",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "PKG-2 verdict-flipping condition, checked at approval and not met: output: \"standalone\" is not set in next.config.ts.",
+      "statement": "PKG-2 verdict-flipping condition, checked at approval and not met: the literal output: \"standalone\" (or single-quoted) does not occur in next.config.ts. A computed value assigned to output would not be seen by this probe.",
       "probe": "grep-absent",
       "args": {
         "path": "next.config.ts",
@@ -147,7 +136,7 @@
     {
       "id": "smoke-heading-match-is-exact",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "AR N-2: e2e/smoke.spec.ts is load-bearing documentation and its exact: true must not be deleted by a future maintainer \"repairing\" the test.",
+      "statement": "AR N-2 requires that the exact: true in e2e/smoke.spec.ts not be deleted by a future maintainer \"repairing\" the test. This probe does NOT enforce that: it matches the text anywhere in the file, and the file's explanatory COMMENT about exact: true satisfies it, so the executable assertion can be deleted with this claim still green. Independently demonstrated 2026-07-30; recorded in docs/governance/CTL-CLAIM-DISPOSITION-001.md.",
       "probe": "grep-present",
       "args": {
         "path": "e2e/smoke.spec.ts",
@@ -158,7 +147,7 @@
     {
       "id": "playwright-spec-collection-widened",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "PKG-2 M-1, closed by b32caec: playwright.config.ts collects the widened spec-only pattern **/*.spec.?(c|m)[jt]s?(x), admitting further spec forms without permitting .test.* files.",
+      "statement": "PKG-2 M-1, closed by b32caec: the widened pattern **/*.spec.?(c|m)[jt]s?(x) occurs in playwright.config.ts. This does NOT decide that .test.* files are excluded -- adding a second testMatch entry that admits them satisfies this claim unchanged.",
       "probe": "grep-present",
       "args": {
         "path": "playwright.config.ts",
@@ -169,7 +158,7 @@
     {
       "id": "vitest-projects-exclude-e2e",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
-      "statement": "PKG-2 M-2 and M-3, closed by b32caec: vitest.config.ts composes the installed version's configDefaults.exclude and excludes e2e/** from both projects.",
+      "statement": "PKG-2 M-2 and M-3, closed by b32caec: vitest.config.ts contains ...configDefaults.exclude followed somewhere later by \"e2e/**\". This matches the shared exclude list once and decides NOTHING about either project: removing exclude from the dom project entirely satisfies this claim. Independently demonstrated 2026-07-30.",
       "probe": "grep-present",
       "args": {
         "path": "vitest.config.ts",
