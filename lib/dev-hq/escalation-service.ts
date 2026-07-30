@@ -447,9 +447,9 @@ async function ensureEscalationEvent(input: {
     message: input.message,
     actorId: input.actorId,
     actorLabel: input.actorLabel,
-    // Keyed on the escalation itself. The previous message-substring search over
-    // the bounded event buffer would re-emit a raise/resolve entry once the
-    // original had been evicted by unrelated traffic.
+    // Keyed on the escalation itself. The previous message-substring search tied
+    // correctness to the prose of the event message and to a scan of the log; the
+    // key depends on neither, so a repeated raise/resolve sweep is idempotent.
     dedupeKey: `${input.type}:${input.escalationId}`,
   });
 }

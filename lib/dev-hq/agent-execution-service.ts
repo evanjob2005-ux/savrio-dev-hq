@@ -294,9 +294,12 @@ async function ensureClaimLostEvent(
  * requeue transition and the event would otherwise lose that entry permanently.
  *
  * Keyed per attempt rather than counted from the timeline, so the reconstruction
- * is correct even after the bounded event buffer has evicted the originals. Events
- * stay out of the business of being a second state machine: the execution's
- * `attempt` remains authoritative and the entries are rebuilt to match it.
+ * never has to read the event log to decide what to write. The log is append-only
+ * with no retention cap (ADR-0004 §2), so this is not about surviving eviction —
+ * it is about not deriving state from a growing list whose ordering and message
+ * text are not a contract. Events stay out of the business of being a second state
+ * machine: the execution's `attempt` remains authoritative and the entries are
+ * rebuilt to match it.
  */
 async function ensureRetryEvents(
   execution: Execution,
@@ -314,9 +317,10 @@ async function ensureRetryEvents(
       }.`,
       actorId: agentId,
       actorLabel: agent?.name ?? "System",
-      // Keyed per attempt: the retry that produced attempt N+1 happened once, and
-      // the marker outlives the bounded event buffer, so a sweep long after the
-      // entry was evicted cannot recreate it.
+      // Keyed per attempt: the retry that produced attempt N+1 happened once, so
+      // every later sweep re-derives the same key and the append is suppressed.
+      // The key and the event it guards live in the same in-memory store and are
+      // neither trimmed nor evicted, so they are present or absent together.
       dedupeKey: `${EXECUTION_EVENT_TYPE.retried}:${execution.id}:${attempt}`,
     });
   }
@@ -324,8 +328,8 @@ async function ensureRetryEvents(
 
 /**
  * Ensure exactly one terminal lifecycle event for an execution, deduped by type
- * (an execution terminates once) through a durable key rather than a search of
- * the trimmed event buffer. Safe to re-run during reconciliation.
+ * (an execution terminates once) through an identity-derived key rather than a
+ * search of the event log. Safe to re-run during reconciliation.
  */
 async function ensureTerminalEvent(
   execution: Execution,
@@ -341,9 +345,9 @@ async function ensureTerminalEvent(
     message,
     actorId: agentId,
     actorLabel: agent?.name ?? "System",
-    // An execution terminates once per type, and the keyed marker is durable —
-    // unlike a search of the bounded event buffer, which silently forgets and
-    // would let a later sweep re-emit a long-evicted terminal event.
+    // An execution terminates once per type, and the key is derived from that
+    // identity — unlike a search of the event log, which would tie correctness to
+    // message prose and to a linear scan of a list that only ever grows.
     dedupeKey: `${type}:${execution.id}`,
   });
 }
