@@ -10,8 +10,10 @@ import {
   ConflictingDispatchRequestError,
   dispatchAgentExecution,
   dispatchExecutionIdFor,
+  UndispatchableRequestError,
   type DispatchAgentExecutionResult,
 } from "@/lib/dev-hq/agent-execution-service";
+import { getDevHqDeploymentMode } from "@/lib/dev-hq/deployment-mode";
 
 /**
  * A dispatch outcome the browser can act on.
@@ -39,14 +41,15 @@ export async function dispatchAgentExecutionAction(input: {
    */
   idempotencyKey?: string;
 }): Promise<DispatchActionResult> {
-  // Simulated agents are a development-only capability (ADR-0001 D4/D7), matching
-  // the prod-disabled internal dispatch route.
-  if (process.env.NODE_ENV === "production") {
+  // Phase 1 agents are deterministic simulations (ADR-0001 D4). ADR-0004 alone
+  // makes explicit local deployment mode the boundary: optimized local builds
+  // remain testable, while unset and unknown modes fail closed.
+  if (getDevHqDeploymentMode() !== "local") {
     // Rejected before any state could exist: definitively nothing to recover.
     return {
       ok: false,
       resolved: true,
-      error: "Agent dispatch is disabled in production.",
+      error: "Agent dispatch is disabled for this deployment.",
       executionId: null,
     };
   }
@@ -70,12 +73,26 @@ export async function dispatchAgentExecutionAction(input: {
     });
     return { ok: true, resolved: true, result };
   } catch (error) {
-    // A conflicting replay is definitive: the stored request differs, so this
-    // identity will never accept these parameters and holding it helps nobody.
-    const conflicting = error instanceof ConflictingDispatchRequestError;
+    // Two definitive refusals, and only one of them was classified (NBF-1).
+    //
+    // A conflicting replay is definitive because the stored request differs, so
+    // this identity will never accept these parameters. An undispatchable request
+    // is definitive for a stronger reason: both eligibility asserts run *before*
+    // `ensureExecution`, and only when the canonical execution does not yet
+    // exist, so nothing was created and there is provably nothing to recover.
+    //
+    // Leaving it unclassified had a concrete cost on the shipped path. The
+    // founder ticks `validation` and `routing` in DispatchAgentPanel — two
+    // adjacent checkboxes the capability-partitioned roster cannot satisfy
+    // together — the request is refused, this returned `resolved: false`, the
+    // panel never retired the pending key, and it showed a retryable-looking hold
+    // on a request that will be refused identically forever.
+    const definitive =
+      error instanceof ConflictingDispatchRequestError ||
+      error instanceof UndispatchableRequestError;
     return {
       ok: false,
-      resolved: conflicting,
+      resolved: definitive,
       error: error instanceof Error ? error.message : "Dispatch failed.",
       // The canonical id is derived from the key, so the browser can be told
       // which execution to look at even when the call failed part-way through.

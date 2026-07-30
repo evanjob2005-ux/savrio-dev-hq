@@ -16,6 +16,10 @@ export const COLORS = {
   run: "#60a5fa",
   warn: "#fbbf24",
   err: "#f87171",
-  idle: "#6b7280",
+  // Raised from #6b7280, which rendered as small text in ~20 places at
+  // 3.55:1 (--surface-3) to 4.17:1 (--bg) and failed WCAG 2.1 AA (1.4.3) on
+  // every app surface. #8a92a0 measures 5.47:1 to 6.43:1. Held under test by
+  // lib/mission-control/contrast.test.ts.
+  idle: "#8a92a0",
   wait: "#f2b84b",
 } as const;

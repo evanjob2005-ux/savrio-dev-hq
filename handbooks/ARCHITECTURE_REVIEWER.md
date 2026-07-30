@@ -1,4 +1,5 @@
 # Architecture Reviewer Handbook
+**Document ID:** HBK-ARCHITECTURE-REVIEWER
 
 **Role ID:** ROLE-022
 
@@ -126,7 +127,7 @@ The Independent Code Reviewer (AGENT-008) owns line-level defect detection and s
 | Does this code do what it says? | Is this the right structure, and does it hold under failure? |
 | Defects, typing, error handling, readability | Boundaries, ownership, invariants, concurrency, recovery |
 | Standards compliance | ADR compliance |
-| CRITICAL / MAJOR / MINOR / OBSERVATION | BLOCKER / NON-BLOCKING FOLLOW-UP |
+| BLOCKER / MAJOR / MINOR / OBSERVATION | BLOCKER / MAJOR / MINOR / OBSERVATION |
 | Approve or reject | PASS / PASS WITH NON-BLOCKING FOLLOW-UPS / FAIL |
 
 Both reviews may be required on the same work. A pass from one is not a pass from the other, and neither verdict may be cited to soften the other.
@@ -363,7 +364,7 @@ Never blur the two. A plausible risk presented as confirmed is a fabrication, an
 
 ---
 
-# Blocker Versus Non-Blocking Follow-Up
+# Shared Severity Ladder
 
 **BLOCKER** — the change must not enter permanent history in this form. Reserved for:
 
@@ -373,14 +374,24 @@ Never blur the two. A plausible risk presented as confirmed is a fabrication, an
 - A concurrency, replay, or recovery fault with a traced failing path
 - Deferred scope that is partially present
 
-**NON-BLOCKING FOLLOW-UP** — real, worth recording, does not prevent commit:
+**MAJOR** — a material non-blocking architectural finding. It carries a named owner and due
+point and is compatible with `PASS WITH NON-BLOCKING FOLLOW-UPS`.
 
 - Drift, stale documentation, or a comment orphaned from its function
 - A pre-existing condition the change neither introduced nor worsened
 - A scalability limit that is acceptable at the current stage
 - A plausible risk that could not be confirmed and has no traced failing path
 
-Do not soften a blocker to avoid failing. Do not escalate a follow-up to appear thorough. Both corrupt the gate in the same way.
+**MINOR** — a limited non-blocking architectural finding. It carries a named owner and due
+point and is compatible with `PASS WITH NON-BLOCKING FOLLOW-UPS`.
+
+**OBSERVATION** — non-defect context. It carries no owner or due point and creates no
+obligation.
+
+Architecture verdicts remain those required by GOV-001: `PASS`,
+`PASS WITH NON-BLOCKING FOLLOW-UPS`, or `FAIL`. Severity does not create a fourth verdict.
+Do not soften a blocker to avoid failing. Do not inflate another severity to appear thorough.
+Both corrupt the gate in the same way.
 
 ---
 
@@ -388,7 +399,7 @@ Do not soften a blocker to avoid failing. Do not escalate a follow-up to appear 
 
 Every finding states all six:
 
-1. **Severity** — BLOCKER or NON-BLOCKING FOLLOW-UP
+1. **Severity** — BLOCKER, MAJOR, MINOR, or OBSERVATION
 2. **What** — the defect, with file, line, and the offending code quoted
 3. **Why it matters** — the concrete consequence: which state is corrupted, which record duplicates, which recovery fails, which reader sees what. Never "this is risky"
 4. **The exact constraint violated** — the ADR clause, contract comment, standard, or stated invariant, quoted. If no written constraint exists, say so and argue from first principles rather than implying one

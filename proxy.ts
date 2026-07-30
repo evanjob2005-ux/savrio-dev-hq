@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
+import { getDevHqDeploymentMode } from "@/lib/dev-hq/deployment-mode";
 
 /**
- * Dev HQ is development-only. Nothing under /api/dev-hq/* authenticates the
+ * Dev HQ is local-only. Nothing under /api/dev-hq/* authenticates the
  * caller yet — including the founder approve/reject endpoints — so the whole
- * surface fails closed in production until a real authentication boundary
- * exists. The per-route guard in lib/dev-hq/internal-guard.ts still protects
- * the worker callbacks; this is the outer boundary for everything else.
+ * surface fails closed unless the deployment is explicitly marked local.
+ * Optimized-build status is not a network trust boundary. The per-route guard
+ * still protects worker callbacks; this is the outer boundary for everything
+ * else.
  */
 export function proxy() {
-  if (process.env.NODE_ENV === "production") {
+  if (getDevHqDeploymentMode() !== "local") {
     return NextResponse.json(
-      { error: "Dev HQ APIs are disabled in production." },
+      { error: "Dev HQ APIs are disabled for this deployment." },
       { status: 403 },
     );
   }

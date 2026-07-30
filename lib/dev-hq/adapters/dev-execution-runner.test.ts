@@ -12,7 +12,7 @@ import type { AgentResult, Task } from "@/types/domain";
 
 const TS = "2026-07-24T21:00:00.000Z";
 
-function seedTask(): Task {
+function seedTask(overrides: Partial<Task> = {}): Task {
   return saveTask({
     id: "task-runner-1",
     projectId: "proj-x",
@@ -26,6 +26,7 @@ function seedTask(): Task {
     createdAt: TS,
     updatedAt: TS,
     dueAt: null,
+    ...overrides,
   });
 }
 
@@ -139,15 +140,20 @@ describe("DevExecutionRunner", () => {
   it("surfaces no_agent_available from the manager", async () => {
     const task = seedTask();
     const decision = await runner.assignExecution(task.id, {
-      requiredCapabilities: ["qa"],
+      requiredCapabilities: ["no-such-capability"],
     });
     expect(decision.assigned).toBe(false);
     expect(decision.reason).toBe("no_agent_available");
   });
 
-  it("lists ready work", async () => {
+  it("lists active work without treating the inert assignee field as readiness", async () => {
     seedTask();
+    seedTask({ id: "task-owned", assigneeAgentId: "historical-owner" });
+    seedTask({ id: "task-inactive", status: "completed" });
     const ready = await runner.listReadyWork();
-    expect(ready.map((t) => t.id)).toContain("task-runner-1");
+    expect(ready.map((t) => t.id).sort()).toEqual([
+      "task-owned",
+      "task-runner-1",
+    ]);
   });
 });

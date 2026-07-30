@@ -118,23 +118,26 @@ Review every change for:
 
 # Severity Levels
 
-## Critical
+The shared Founder-recorded severity ladder is:
+`BLOCKER` · `MAJOR` · `MINOR` · `OBSERVATION`.
 
-Must be corrected before approval.
+## BLOCKER
+
+An unresolved `BLOCKER` prevents the verdict from being anything but `FAIL`.
 
 Examples:
 
 - Security vulnerabilities
 - Data loss
 - Authentication failures
-- Broken functionality
-- Major architectural violations
+- Broken core functionality
+- Reachable violations of mandatory architectural constraints
 
 ---
 
-## Major
+## MAJOR
 
-Should be corrected before QA.
+A material non-blocking finding. It carries a named owner and due point.
 
 Examples:
 
@@ -146,9 +149,9 @@ Examples:
 
 ---
 
-## Minor
+## MINOR
 
-Improvement recommended.
+A limited non-blocking finding. It carries a named owner and due point.
 
 Examples:
 
@@ -159,9 +162,9 @@ Examples:
 
 ---
 
-## Informational
+## OBSERVATION
 
-No action required.
+Non-defect context. It carries no owner or due point and creates no obligation.
 
 Examples:
 
@@ -171,43 +174,30 @@ Examples:
 
 ---
 
-# Approval Decisions
+# Review Verdicts
 
-The reviewer may issue:
+The reviewer issues exactly one verdict:
 
-## Approved
+## PASS
 
-No blocking findings.
-
----
-
-## Approved with Recommendations
-
-Safe to proceed.
-
-Non-blocking improvements documented.
+No blocking findings and no non-blocking findings worth recording.
 
 ---
 
-## Changes Required
+## PASS WITH NON-BLOCKING FINDINGS
 
-Blocking issues exist.
-
-Engineering must address findings before re-review.
-
----
-
-## Rejected
-
-Implementation is fundamentally unsuitable.
-
-Requires redesign or major correction.
+No blocking findings. One or more `MAJOR` or `MINOR` findings are recorded with
+their owner and due point.
 
 ---
 
-## Escalated
+## FAIL
 
-Technical disagreement or risk exceeds reviewer authority.
+At least one unresolved `BLOCKER` exists. Engineering must address it before
+re-review.
+
+`Escalated` remains a GOV-001 routing state when authority or required
+information is missing; it is not a fourth Independent Code Review verdict.
 
 ---
 
@@ -265,9 +255,9 @@ Avoid:
 
 # Standard Review Format
 
-## Decision
+## Verdict
 
-Approved / Approved with Recommendations / Changes Required / Rejected / Escalated
+PASS / PASS WITH NON-BLOCKING FINDINGS / FAIL
 
 ## Summary
 

@@ -140,10 +140,10 @@ passes today would prove nothing.
 | Sprint 1E ratified baseline | ✅ **Satisfied** — `d922f379`, 0 blockers | Everything |
 | **D-1** Sprint 1E remediation disposition | ✅ **DISCHARGED** — the plan lists this as `AWAITING FOUNDER APPROVAL`; it is now ratified and committed | 1F-3, 1F-12, 1F-15 |
 | **D-2 / Q-1** deployment, persistence, transport, auth ADR | ❌ **OPEN** | All Track B phases B–E |
-| **D-6** new dependencies (auth, web-push, jsdom) | ❌ **OPEN** | 1F-6, 1F-10, 1F-19 |
-| **D-8** missing handbooks and standards | ❌ **OPEN** | **G-2 completeness** |
+| **D-6** new dependencies (auth, web-push, jsdom) | ❌ **OPEN** — **fact recorded 2026-07-29:** the jsdom leg is materially satisfied; `jsdom@30.0.0` is installed and `package.json:33` declares `"jsdom": "^30"`. **Not declared discharged here.** AR N-7 in the 1F follow-up register recommends recording the jsdom leg as discharged by PKG-2's authorization and states this is a **Founder decision**; this correction records the measured fact only. The auth and web-push legs are untouched and remain open | 1F-6, 1F-10, 1F-19 |
+| **D-8** missing handbooks and standards | ❌ **OPEN** — **CORRECTION 2026-07-29:** the underlying files now exist (`handbooks/INDEPENDENT_CODE_REVIEWER.md` plus the `NAMING`/`LOGGING`/`ERROR_HANDLING` standards; `verify-agent-references.py` resolves 19/19 handbooks and 111 standard references), closed by **OBL-19** and **OBL-31**. Whether that discharges D-6/D-8 as *dependencies* is the dependency owner's call, not this correction's | **G-2 completeness** |
 | **D-9** ADR-0002 E5 amendment; Sprint 1E PE-1 amendment | ❌ **OPEN** | 1F-0 closure |
-| Frontend test infrastructure | ❌ **ABSENT** — `vitest.config.ts` is `environment: "node"`, `include: ["**/*.test.ts"]`; no `.tsx` collected, no Playwright config | All Track B UI validation |
+| Frontend test infrastructure | ✅ **PRESENT — CORRECTION 2026-07-29.** Superseded: ~~"❌ **ABSENT** — `vitest.config.ts` is `environment: "node"`, `include: ["**/*.test.ts"]`; no `.tsx` collected, no Playwright config"~~. `vitest.config.ts` now defines a `node` project **and** a `dom` project (`environment: "jsdom"`, `include: ["**/*.test.tsx"]`); `playwright.config.ts` exists with three specs under `e2e/`; `jsdom@30.0.0` is installed. Delivered by PKG-2 | All Track B UI validation |
 
 **Track A has no open dependencies.** It can proceed while Track B's decisions are pending.
 
@@ -331,10 +331,10 @@ session writing files.
 | Gap | Owner | Status |
 |---|---|---|
 | **In-session agent delivery failure** | Unknown | **UNRESOLVED.** 7 consecutive failures; 3 hypotheses proposed and all 3 eliminated by test. Mitigation (external sessions) works; **cause does not**. Will recur |
-| Missing handbooks and standards | Director of Operations | OPEN — `INDEPENDENT_CODE_REVIEWER.md` absent though referenced; no `NAMING`/`LOGGING`/`ERROR_HANDLING` standards |
+| Missing handbooks and standards | Director of Operations | **CLOSED — CORRECTION 2026-07-29.** Superseded: ~~"OPEN — `INDEPENDENT_CODE_REVIEWER.md` absent though referenced; no `NAMING`/`LOGGING`/`ERROR_HANDLING` standards"~~. All four files exist: `handbooks/INDEPENDENT_CODE_REVIEWER.md`, `standards/NAMING_STANDARD.md`, `standards/LOGGING_STANDARD.md`, `standards/ERROR_HANDLING_STANDARD.md`. `python scripts/verify-agent-references.py` reports "19 roles, 19 handbooks, 111 standard references" with nothing unresolved. Closed by **OBL-19** (handbook) and **OBL-31** (standards) |
 | Negative-outcome policy lives only in a review artifact | Lead Software Engineer | OPEN — plan's 1E-F1 |
 | ADR-0003 not authored | Founder + LSE | OPEN — blocks Track B |
-| Frontend test infrastructure absent | Lead Software Engineer | OPEN — no `.tsx` collection, no Playwright config |
+| Frontend test infrastructure absent | Lead Software Engineer | **CLOSED — CORRECTION 2026-07-29.** Superseded: ~~"OPEN — no `.tsx` collection, no Playwright config"~~. Both premises are false at `c52039e`. `vitest.config.ts` defines two projects; the `dom` project sets `environment: "jsdom"`, `include: ["**/*.test.tsx"]`, `setupFiles: ["./test/setup-dom.ts"]`. `playwright.config.ts` exists and `e2e/` holds `smoke.spec.ts`, `mission-control-live.spec.ts`, `mission-control-viewport.spec.ts`. `jsdom@30.0.0` is installed. Delivered by PKG-2 |
 | Trigger.dev idempotency semantics unverified | Lead Software Engineer | OPEN — several Sprint 1E correctness arguments depend on it, taken as stated |
 
 ---
@@ -416,8 +416,14 @@ authorized."* This package neither begins nor authorizes Phase 2 work.
 
 **READY TO IMPLEMENT TRACK A — conditional on three Founder decisions (F-A1, F-A2, F-A3).**
 
-**NOT READY for Track B** — blocked on D-2/Q-1 (ADR-0003), D-6, D-7, and absent frontend
-test infrastructure.
+**NOT READY for Track B** — blocked on D-2/Q-1 (ADR-0003), D-6, D-7, and ~~absent frontend
+test infrastructure~~.
+
+> **CORRECTION 2026-07-29 — the frontend-infrastructure leg no longer holds.** Frontend
+> test infrastructure is present (`vitest.config.ts` `dom` project collecting `**/*.test.tsx`
+> under `jsdom@30.0.0`; `playwright.config.ts` with three `e2e/` specs), delivered by PKG-2.
+> **This correction touches that leg only.** D-2/Q-1 (ADR-0003), D-6, and D-7 are unexamined
+> here and remain open, so **Track B remains NOT READY.**
 
 **Unresolved blockers to Track A: 0 technical, 3 decision.** No technical blocker exists;
 the baseline is ratified, all five gates are green, and the work is well-specified. What is
@@ -640,7 +646,7 @@ B deliverables.
 
 | Item | Status |
 |---|---|
-| **Track B** | **BLOCKED** — ADR-0003 (D-2/Q-1), D-6, D-7, absent frontend test infrastructure |
+| **Track B** | **BLOCKED** — ADR-0003 (D-2/Q-1), D-6, D-7. **CORRECTION 2026-07-29:** the fourth blocker ~~"absent frontend test infrastructure"~~ no longer holds — the `dom` Vitest project, `playwright.config.ts`, three `e2e/` specs, and `jsdom@30.0.0` are all present, delivered by PKG-2. **The remaining three blockers are untouched by this correction and Track B stays BLOCKED** |
 | **Mission Control implementation** | **NOT AUTHORIZED** |
 | **Roadmap Phase 2** | **NOT STARTED** — re-confirmed; no code, scaffolding, dependency, or schema |
 | **Candidate freeze** | **NOT AUTHORIZED** (§B.2) |

@@ -10,6 +10,32 @@ export const DEV_HQ_ACTORS = {
 } as const;
 
 /**
+ * Agents that exist so records join to a real identity, and which must never be
+ * given work. **Membership here is the ineligibility**, not a consequence of
+ * what the agent happens to hold.
+ *
+ * The executive orchestrator RAISES escalations (it is persisted as
+ * `raisedByAgentId`, `createdByAgentId` and `actorId`); it does not perform
+ * them. It was registered in commit e5aac96 with an empty capability set on the
+ * reasoning that an empty set makes it unselectable. That reasoning is wrong:
+ * `hasCapabilities` is `required.every(...)`, and `[].every(...)` is `true` for
+ * every agent by definition, so a dispatch that names NO capabilities matches it
+ * like any other. It was unselectable only for as long as every dispatch
+ * happened to name its capabilities — an unenforced assumption about callers,
+ * not a property of the registry. `dispatchAgentExecution` makes
+ * `requiredCapabilities` optional, so the assumption is violable from the
+ * shipped entry point, and once the roster's real workers are busy selection
+ * reaches the orchestrator and hands it the job.
+ *
+ * A capability set is a statement about what an agent CAN do. Whether an actor
+ * may be dispatched at all is a different question, and it is answered here so
+ * that it cannot be re-opened by editing capabilities.
+ */
+export const SYSTEM_ACTOR_AGENT_IDS: readonly string[] = [
+  EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+];
+
+/**
  * Canonical Phase 1 agent capability vocabulary (ADR-0001 O3), frozen from the
  * existing roster so the UI and the selection engine share one set. A fuller
  * department-mapped taxonomy is deferred to Phase 2.
@@ -58,6 +84,36 @@ export const AGENT_HEALTH_STALE_AFTER_MS = EXECUTION_LEASE_TTL_MS;
  * relative to dispatch latency, and recovery costs no business attempt.
  */
 export const EXECUTION_CLAIM_DEADLINE_MS = EXECUTION_LEASE_TTL_MS * 2;
+
+/**
+ * How long an execution may sit queued with no agent before the stall is
+ * escalated to the founder (P0-5).
+ *
+ * **Lifecycle policy, landed under a Founder-delegated decision on 2026-07-29.**
+ * It amends ADR-0001 O6, which resolved that "no available capability match
+ * leaves the execution `queued` with a logged event". O6 makes queued a resting
+ * state; this makes it a terminating one after a bound. The amendment was put to
+ * the Founder as a decision precisely because it is not an engineering call.
+ *
+ * What O6 did not anticipate: dispatch a satisfiable capability, then let the
+ * satisfying agent leave the roster, and the execution sits queued at attempt 1
+ * with no agent forever. Nothing increments `attempt` for a queued execution —
+ * the only increments are inside `applyFailedAttempt`, reachable only from a
+ * `running` execution — so `MAX_EXECUTION_ATTEMPTS` is unreachable, the terminal
+ * finalization never runs, and no escalation is ever raised. The deferred event
+ * is keyed per (execution, attempt), and `attempt` is frozen, so even the
+ * timeline entry stops after the first sweep. That is the SVC-01 shape (commit
+ * e5aac96): work that neither completes nor fails.
+ *
+ * Derived, not invented. `REVIEW_RESPONSE_DEADLINE_MS` is set to the same value
+ * for the same structural reason, stated there: a review holds no lease, so
+ * nothing else would ever free it. A queued execution with no agent holds no
+ * lease either — reclaim only sees `running` attempts, and the claim deadline
+ * only sees dispatched ones — so this deadline is likewise the only thing that
+ * can notice it. Three deadlines in this file share one value because they are
+ * three instances of one condition.
+ */
+export const EXECUTION_QUEUE_STALL_DEADLINE_MS = EXECUTION_CLAIM_DEADLINE_MS;
 
 /**
  * Typed execution lifecycle event names emitted from the service layer
@@ -124,6 +180,14 @@ export const DEFAULT_REVIEW_POLICY = "basic";
 /**
  * Review lifecycle event names, emitted from the review service (ADR-0002 E3).
  * One event per accepted transition; none are emitted for a no-op callback.
+ *
+ * `revisionDeferred` records that a `changes_requested` review's revision was
+ * NOT created because the task already held live agent work (MAJOR-1). The
+ * review is decided and the revision is still owed — reconciliation creates it
+ * once the task is free — so this is a postponement, not an outcome, and the
+ * timeline is the only thing that can say a decided review is waiting rather
+ * than finished. Keyed per review, so the sweep that re-attempts it every minute
+ * appends one entry rather than one per pass.
  */
 export const REVIEW_EVENT_TYPE = {
   started: "review.started",
@@ -131,7 +195,17 @@ export const REVIEW_EVENT_TYPE = {
   passed: "review.passed",
   changesRequested: "review.changes_requested",
   escalated: "review.escalated",
+  revisionDeferred: "review.revision_deferred",
 } as const;
+
+/**
+ * Maximum page size accepted by the event feed. This bounds one response; it
+ * does not bound the append-only audit timeline itself.
+ */
+export const EVENT_BUFFER_SIZE = 200;
+
+/** Events returned by `GET /api/dev-hq/events` when the caller states no limit. */
+export const EVENT_FEED_DEFAULT_LIMIT = 20;
 
 /**
  * Escalation lifecycle event names, emitted from the service layer (ADR-0002 E2/E3).
@@ -140,6 +214,15 @@ export const ESCALATION_EVENT_TYPE = {
   raised: "escalation.raised",
   resolved: "escalation.resolved",
 } as const;
+
+/**
+ * Recorded when a flow's conditional `Task.status` write was refused by its
+ * precondition (ARCH-02). The refusal is the correct outcome — another
+ * orchestrator's decision stands — but a workflow that finalizes while the task
+ * keeps a different status is a divergence, and an unrecorded divergence is
+ * indistinguishable from one that never happened.
+ */
+export const TASK_STATUS_REFUSED_EVENT_TYPE = "task.status_write_refused";
 
 /** Base URL for Trigger.dev worker callbacks into the Next.js dev store. */
 export function getDevHqBaseUrl(): string {

@@ -1,0 +1,67 @@
+# gitleaks findings that are deliberately ignored.
+#
+# Format: one gitleaks Fingerprint per line, `commit:file:rule:line`.
+# A fingerprint pins an ignore to ONE secret, in ONE commit, at ONE line,
+# for ONE rule. It is the narrowest suppression gitleaks offers: it cannot
+# hide a different secret, a later commit, or another line of the same file.
+#
+# Deliberately NOT used here:
+#   * a `paths` allowlist for .github/workflows/security.yml -- that would
+#     blind the scanner to any real credential later committed to that file.
+#   * disabling the `generic-api-key` rule -- that would blind the scanner
+#     repository-wide.
+#
+# Every entry below must state what the value is and why it is not a
+# credential. An entry that cannot be justified must be removed and the
+# underlying secret rotated instead.
+#
+# KNOWN FRAGILITY -- a fingerprint pins to a COMMIT SHA, so it survives only
+# as long as that SHA does. The active ruleset permits `merge`, `squash`, and
+# `rebase`, and both squash and rebase REWRITE these commits: the same lines
+# reappear under new SHAs, no fingerprint matches, and Secret Scan goes red on
+# the target branch. This is the cost of choosing the narrow mechanism over a
+# path allowlist, and it is the right trade -- but it means:
+#
+#   * prefer a MERGE commit for any branch carrying entries in this file, or
+#   * re-derive the fingerprints from the rewritten commits immediately after,
+#     re-justifying each one rather than copying it forward unread.
+#
+# A red Secret Scan after a squash is this fragility, not a new leak. Confirm
+# that by checking the reported line is still one of the documented fixtures
+# below -- and if it is NOT, treat it as a real finding.
+#
+# ---------------------------------------------------------------------------
+# .github/workflows/security.yml -- the credential scanner's own documentation
+# ---------------------------------------------------------------------------
+# security.yml implements Dev HQ's credential scanner. To explain and to test
+# that scanner, the workflow embeds example credential SHAPES inside YAML `#`
+# comment blocks and inside its positive-control fixture builder. They are
+# invented, high-entropy placeholders chosen to look like real keys, because a
+# known-bad input is exactly what a scanner control has to be fed.
+#
+# They are not credentials: they authenticate nothing, name no real account,
+# host or tenant, are read by no code, and were never issued by any provider.
+# Suppressing them here does not weaken the control -- the fixtures remain in
+# the workflow and the scanner still asserts against them.
+
+# NOTE ON THIS FILE'S OWN CONTENT -- the placeholder values are described
+# below, never reproduced. Quoting them here made this file itself trip the
+# repository's Credential and Artifact Audit ("Generic secret assignment
+# detected"), which was the scanner behaving correctly: a high-entropy
+# assignment in a newly committed file is exactly what it exists to catch.
+# SECURITY.md offers a `scanner:allow-secret <reason>` pragma, but also warns
+# that several pragmas in one file means the values do not belong there. They
+# do not. Read the cited line in security.yml to see the actual fixture.
+
+# security.yml:114 -- prose inside a YAML comment, quoting an unquoted
+# `<name>: <value>` assignment as the leak shape that the UNQUOTED_SECRET
+# regex was added to catch. Illustrative; nothing reads it.
+508609c03738fc3c2afc65cdf62aba55b75656ad:.github/workflows/security.yml:generic-api-key:114
+
+# security.yml:485-486 -- two worked examples inside a YAML comment block,
+# each a quoted-key mapping (JSON-style, then single-quoted) annotated
+# "zero matches". They document a real gap in the GENERIC_SECRET regex --
+# quoted property names matched nothing, so JSON-shaped config was
+# unscannable -- which was then fixed. The annotation is the point.
+b7b6d4b317b29aa8bcccc0296bf0326eee06bdf3:.github/workflows/security.yml:generic-api-key:485
+b7b6d4b317b29aa8bcccc0296bf0326eee06bdf3:.github/workflows/security.yml:generic-api-key:486

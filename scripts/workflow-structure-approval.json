@@ -1,0 +1,102 @@
+{
+  "version": 2,
+  "approvals": [
+    {
+      "base_commit": "7079779f69a9ec0edf6d92a3f4124599ac1b2a2d",
+      "base_workflow_tree": "3d59ff7eab4ef53972dc2c5501e98316ab631239",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
+        "lint.yml",
+        "release.yml",
+        "security.yml"
+      ],
+      "diff_digest": "sha256:d82c3e88f2e538f9670b8045b228e80d85d964fc17714f0fa10c92c3d3b064c1",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:9c63167e3541160e558fd5a70af779b8ce2b4b5c58c4f5447e776bbc0b78d801"
+    },
+    {
+      "base_commit": "a32d04048c4b0127316c65704c7c12e5cf22167d",
+      "base_workflow_tree": "a0026081fadafb942f0b607fc8647a77469d50c4",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
+        "lint.yml",
+        "release.yml"
+      ],
+      "diff_digest": "sha256:4d0e26a5b7aef6661cb0202dd3e3ecaa8b9a24ef0aa1870358d3e3a1c4964e46",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:e03659819f2d3e4e13ce8b00d1dacc540d8cc8fb24faba211c6b3402fd4e3903"
+    },
+    {
+      "base_commit": "029f8b3886f67c23b156f99528a27f4577ba639c",
+      "base_workflow_tree": "cad9a161b8c4c9c629f812de130d3294d9fdd968",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
+        "release.yml"
+      ],
+      "diff_digest": "sha256:eef64e4efad716f5cb78f250c464a7b07d4898d26df118f83b7b82c0e95b29f5",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:2eca322327abdae03941235568e73b35fd2a3321dd12bab4c1b4cd0a4549cdb1"
+    },
+    {
+      "base_commit": "78428bb455eed403f0807a20776603e4322118b7",
+      "base_workflow_tree": "731dca7ff61d48390a568f796d5a1d176d8734f8",
+      "candidate_workflow_tree": "sha256:cfb91c003bf2ba51e6f3d1e54fa18dee408d0d297ab576f11174a6d60100e717",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml"
+      ],
+      "diff_digest": "sha256:6d1ee7350123a429eda9d293c569a76cfb9b702801e1f9686fbd2505d43e6354",
+      "rationale": "Founder-authorized dependency-tooling repair: remove redundant global npm replacements after byte-identical bundled-npm lock regeneration and clean npm ci proof.",
+      "fingerprint": "sha256:a76adc79536b0c70e8d211432d25770e69dc41838eb1489a68994363262cac92"
+    },
+    {
+      "base_commit": "115378bcde14c04b940f17c6ed05768cd928921c",
+      "base_workflow_tree": "75ef1c45b5af4382c9e5d5435f68075a9e02e4c7",
+      "candidate_workflow_tree": "sha256:80c39079c37441feef66b3bdc0489bf7429fce3dc2b7fc9835e609eaf6c2c54c",
+      "changed_files": [
+        "frontend-tests.yml"
+      ],
+      "diff_digest": "sha256:b5314299dc09eda3f9a17e421402c032f9bc7d79b2854788d6df8506eef9116a",
+      "rationale": "Founder-authorized local test-infrastructure repair: require locked Playwright and Next binaries through an executable precondition with red/null coverage.",
+      "fingerprint": "sha256:9ab144d134de49682250b7fcd9de26e567142b0ea8ec12e436c320a9629a960a"
+    },
+    {
+      "base_commit": "28882b33bb5d9590910e898f569c552d9f010f3e",
+      "base_workflow_tree": "35529e13681ca273a70eb372919c63b7a496ae12",
+      "candidate_workflow_tree": "sha256:df891c9920a84a8be266e5fae8f90f0ff656d0eeb968327f06cac8071436da6a",
+      "changed_files": [
+        "frontend-tests.yml"
+      ],
+      "diff_digest": "sha256:f1160a13cbd476647717f0d89b9d6ee328dbc56700e765a34faeac930ba6aae9",
+      "rationale": "Founder-authorized Package E safe-local CI hardening: warn on absent artifacts, make shared repository hygiene cancellation-aware and outcome-honest, isolate concurrency by event and ref, and remove the redundant named smoke-file precondition while retaining fail-closed Playwright collection.",
+      "fingerprint": "sha256:51669d9da6889d7f55cecf2d812caad539bdb5e5255989d149a66959d10bd1b7"
+    },
+    {
+      "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
+      "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
+      "candidate_workflow_tree": "sha256:19ebc7ff269e5746bc3eb8c2366867067a7e73c2edd8cfb996d56aa8a98f1232",
+      "changed_files": [
+        "ci.yml",
+        "dependencies.yml",
+        "frontend-tests.yml",
+        "lint.yml",
+        "pr.yml",
+        "release.yml",
+        "security.yml"
+      ],
+      "diff_digest": "sha256:5e5d6dfac48e27850914550831f2c4d6ba7efa6c33e6b10b1c5f428d9487c563",
+      "rationale": "Aggregate workflow delta from 79dd9edf, re-recorded to add one item. Previously recorded and Founder-authorized: reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; locked Playwright and Next binaries required through an executable precondition with red/null coverage; and Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition. PREVIOUSLY RECORDED AND NOT PRE-AUTHORIZED BY THE FOUNDER, still pending independent review: the pr.yml prohibited-file defect repair made in response to an observed live failure on PR #11, where the environment-file allowlist refused this repository's tracked .env.local.example template, with the allowlist now anchored on the trailing template marker (.example/.sample/.template) so real environment files such as .env, .env.local and .env.development.local are still refused; and the security.yml defect-prevention change lowering the entropy of the placeholder strings at the eight sites that exist ONLY as documentation prose inside Python comments in the credential-scanner step, where the three KNOWN_BAD code occurrences remain high-entropy so the control still exercises entropy detection, no scanner rule, regex, threshold or fixture was changed, and .gitleaksignore was not touched. NEW IN THIS RECORD, COORDINATOR-INITIATED AND NOT PRE-AUTHORIZED BY THE FOUNDER, pending independent review: two additions to the ci.yml structured-data job that install a record-claims control. (1) A \"Verify documented record claims\" step running scripts/verify-record-claims.py, which evaluates docs/claims.json, a manifest pairing each factual claim this repository's governance records make about themselves with an executable probe over tag existence, tag target commit, file presence or absence, and regex presence or absence in a named file. It exits 1 when a documented claim no longer holds and 2 when any probe could not be evaluated, and exit 2 dominates exit 1 so an incomplete measurement is never reported as a completed verdict. (2) fetch-tags: true on that job's actions/checkout, because a checkout without tags reports zero tags and cannot distinguish an absent tag from an unfetched one; without it every tag claim would be refused and the step would exit 2 on every run. No existing step, guard, permission, trigger, concurrency group or pinned action SHA was changed, and no workflow other than ci.yml was touched. The control is additive: it adds a new failure mode to CI and removes none. Its coverage is proved by scripts/test-verify-record-claims.py, whose matrix, null-audit and live-discrimination phases invert every seeded claim inside a throwaway clone and require it to go red naming itself. This item is a coordinator-initiated control addition pending independent review, not an approved change.",
+      "fingerprint": "sha256:f893822ff4d5d34643540503097f48fbf73abf2eb4276cdfbd781d7d7d3cc28f"
+    }
+  ]
+}

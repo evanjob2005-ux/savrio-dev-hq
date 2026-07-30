@@ -8,6 +8,7 @@ import type { Escalation } from "@/types/domain";
 import {
   getDevHqStore,
   getEscalation,
+  recordEscalationResolution,
   saveEscalation,
 } from "@/lib/dev-hq/store";
 import { nextId, nowIso } from "@/lib/dev-hq/id";
@@ -36,10 +37,18 @@ export class DevEscalationStore implements EscalationStore {
     );
   }
 
-  async findByExecution(executionId: string): Promise<Escalation | null> {
+  async findByExecution(
+    executionId: string,
+    origin: Escalation["origin"],
+  ): Promise<Escalation | null> {
+    // Matched on the same pair `createEscalation` dedupes on, so this lookup and
+    // that write agree about what "already escalated" means. Without the origin
+    // they did not: one escalation of any origin hid every other.
     return (
       [...getDevHqStore().escalations.values()].find(
-        (escalation) => escalation.executionId === executionId,
+        (escalation) =>
+          escalation.executionId === executionId &&
+          escalation.origin === origin,
       ) ?? null
     );
   }
@@ -85,12 +94,21 @@ export class DevEscalationStore implements EscalationStore {
     if (!existing || existing.status !== "open") {
       return null;
     }
-    return saveEscalation({
+    const resolved = saveEscalation({
       ...existing,
       status: "resolved",
       resolution: input.resolution,
       resolvedAt: input.at ?? nowIso(),
     });
+    // Take the next position in the store's total order of founder decisions,
+    // synchronously with the write above (P0-3). This is the only place a
+    // resolution is committed, so it is the only place that can say which
+    // decision came last — and the escalation service reads it back to refuse a
+    // superseded replay's task write. Deliberately not derived from
+    // `resolvedAt`: at millisecond resolution two resolutions can tie, and a tie
+    // reads as "nothing newer exists", which is how the older decision wins.
+    recordEscalationResolution(resolved.id);
+    return resolved;
   }
 
   async reserveRevisionExecution(

@@ -24,7 +24,9 @@
   --run: #60a5fa;
   --warn: #fbbf24;
   --err: #f87171;
-  --idle: #6b7280;
+  /* Mirrors COLORS.idle in lib/theme.ts. Raised from #6b7280, which failed
+     WCAG AA as small text on every surface here (3.55:1–4.17:1). */
+  --idle: #8a92a0;
   --wait: #f2b84b;
 
   --background: var(--bg);

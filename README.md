@@ -48,57 +48,126 @@ Development should always prioritize:
 
 # Repository Structure
 
+Every path below exists. This tree is a description of the repository, not a
+plan for it — if a directory is named here and `ls` disagrees, the tree is the
+defect.
+
 ```
-DevHQ/
+savrio-dev-hq/
 
 ├── AGENTS.md
 ├── README.md
 ├── CONTRIBUTING.md
+├── ONBOARDING_GUIDE.md
 ├── SECURITY.md
-├── BOOTSTRAP.md
+├── RELEASE_PROCESS.md
+├── VERSIONING_POLICY.md
 
-├── constitution/
-├── governance/
-├── handbooks/
-├── agents/
-├── workflows/
-├── templates/
-├── standards/
-├── playbooks/
-├── checklists/
-├── runbooks/
-├── adr/
-├── metrics/
-├── automation/
-├── scripts/
-├── .github/
-└── .vscode/
+Governance and process
+├── docs/
+│   ├── company/          Constitution, core values, governance, organization
+│   ├── governance/       Operating handbook, progress update, authority register
+│   ├── decisions/        Architecture Decision Records
+│   ├── workflows/        Standard operating procedures
+│   ├── plans/            Sprint plans, obligations register, review handoffs
+│   ├── roadmap/          Registered Master Roadmap
+│   ├── research/         Research backlog
+│   └── validation/       Dated validation evidence
+├── standards/            Engineering standards
+├── handbooks/            Role-specific operating manuals
+├── employees/            Active/supporting role documents, by department
+├── agents/               Executable AI agent definitions and their outputs
+├── templates/            Reusable engineering templates
+
+Application
+├── app/                  Next.js App Router pages and API route handlers
+├── components/           React components
+├── lib/                  Service layer, repositories, and Dev HQ domain logic
+├── types/                Shared contracts and type definitions
+├── trigger/              Trigger.dev task definitions
+├── data/                 Mock and placeholder data
+├── public/               Static assets
+
+Verification
+├── e2e/                  Playwright end-to-end specs
+├── test/                 Test setup and shared fixtures
+├── scripts/              Roadmap conversion and control-verification scripts
+├── .semgrep/             Semgrep rules and their fixtures
+└── .github/              Workflows, issue and PR templates, CODEOWNERS
 ```
+
+There is no `constitution/` directory. **The Company Constitution that
+`AGENTS.md` requires as startup step 2 is at
+`docs/company/COMPANY_CONSTITUTION.md`.**
 
 ---
 
 # Directory Guide
 
-## constitution/
+## docs/company/
 
-Defines the organization's foundational principles.
+The organization's foundational documents.
 
 Contains:
 
-- Constitution
-- Core Values
+- `COMPANY_CONSTITUTION.md` — the Constitution (CONST-001)
+- `CORE_VALUES.md`
+- `GOVERNANCE.md` — organizational structure and decision authority (GOV-001)
+- `ORGANIZATION.md` — roles and departments (ORG-001)
 
 ---
 
-## governance/
+## docs/governance/
 
-Defines organizational structure and decision making.
+Live governance records.
 
 Contains:
 
-- Governance
-- Organization
-- Decision authority
+- Permanent Operating Handbook (POH-001)
+- Current Progress Update (CPU-001)
+- Authority and Contradiction Register (ACR-001)
+- Governance Baseline Review Packet
+
+---
+
+## docs/decisions/
+
+Architecture Decision Records.
+
+Every significant engineering decision is recorded as an ADR.
+
+---
+
+## docs/workflows/
+
+Standard operating procedures.
+
+Examples:
+
+- Feature Development
+- Bug Fix
+- Release
+- Architecture Review
+- Hotfix
+- Incident Response
+- Dependency Update
+
+---
+
+## docs/plans/
+
+Sprint plans, entry packages, decision records, and the Open Obligations
+Register (`OPEN_OBLIGATIONS.md`) — known work that is accepted and not yet done.
+
+---
+
+## docs/roadmap/
+
+The registered Master Roadmap, together with the registration record that
+records its provenance.
+
+The roadmap states approved direction. It is not evidence that a capability has
+been implemented.
 
 ---
 
@@ -106,21 +175,46 @@ Contains:
 
 Role-specific operating manuals.
 
-Examples:
+Present today:
 
-- Lead Software Engineer
-- QA Engineer
-- Security Engineer
+- AI Agent Orchestrator
+- AI/LLM Engineer
+- Architecture Reviewer
+- Associate Software Engineer
+- Database Architect
+- Data Engineer
+- Design Engineer
 - DevOps Engineer
-- AI Engineer
+- Growth Engineer
+- Independent Code Reviewer
+- Lead Software Engineer
+- Observability Engineer
+- Product Owner
+- Prompt Engineering Specialist
+- QA Engineer
+- Reliability Engineer
+- Research Analyst
+- Security Engineer
+- UI Prototyping Engineer
+
+All 19 `agents/*/AGENT.md` handbook references resolve. A focused structural
+audit checks that inventory; it does not replace substantive governance review.
+
+---
+
+## employees/
+
+Active/supporting role documents, organized by department: database, design,
+engineering, operations, product, quality, reliability, research, security.
 
 ---
 
 ## agents/
 
-Executable AI agent definitions.
+Executable AI agent definitions, one directory per role, each holding an
+`AGENT.md` and any review outputs that role has produced.
 
-Each agent contains:
+Each `AGENT.md` contains:
 
 - Purpose
 - Responsibilities
@@ -131,29 +225,19 @@ Each agent contains:
 
 ---
 
-## workflows/
-
-Standard operating procedures.
-
-Examples:
-
-- Feature Development
-- Bug Fix
-- Release
-- Architecture Review
-
----
-
 ## templates/
 
 Reusable engineering templates.
 
 Examples:
 
-- Technical Design
-- Sprint Planning
-- Code Review
+- Technical Plan
+- Architecture Decision Record
+- Code Review Report
+- QA Report
+- Security Review
 - Incident Report
+- Post Mortem
 
 ---
 
@@ -171,79 +255,44 @@ Examples:
 - Security
 - Performance
 - AI Engineering
+- Control Verification
 
 ---
 
-## playbooks/
+## app/, components/, lib/, types/, trigger/
 
-Mission-specific AI execution guides.
+The application itself.
 
-These define step-by-step procedures for common engineering tasks.
-
----
-
-## checklists/
-
-Production readiness verification.
-
-Examples:
-
-- API Checklist
-- Frontend Checklist
-- Deployment Checklist
+- `app/` — Next.js App Router pages and `/api/dev-hq/*` route handlers
+- `components/` — React components, including the Mission Control panels
+- `lib/` — service layer, repositories, and Dev HQ domain logic
+- `types/` — shared contracts and type definitions
+- `trigger/` — Trigger.dev task definitions
 
 ---
 
-## runbooks/
+## e2e/, test/
 
-Incident response documentation.
-
-Examples:
-
-- API outage
-- Database failure
-- Rollback
-- Disaster recovery
-
----
-
-## adr/
-
-Architecture Decision Records.
-
-Every significant engineering decision should be documented using an ADR.
-
----
-
-## metrics/
-
-Engineering measurement standards.
-
-Examples:
-
-- Quality
-- Reliability
-- AI Performance
-- DORA Metrics
-
----
-
-## automation/
-
-Repository automation documentation.
-
-Examples:
-
-- Labels
-- Branch Protection
-- Dependabot
-- PR Automation
+`e2e/` holds the Playwright specs. `test/` holds test setup and shared
+fixtures. Unit tests live beside the code they cover, as `*.test.ts(x)`.
 
 ---
 
 ## scripts/
 
-Developer setup and bootstrap scripts.
+Verification and conversion scripts.
+
+Contains:
+
+- `roadmap-conversion/` — roadmap conversion, fidelity, and registered-hash checks
+- `verify-workflow-structure.py` and its negative-control harness
+
+---
+
+## .semgrep/
+
+Semgrep rules enforcing the Dev HQ boundaries, together with the fixtures that
+prove each rule fires and does not over-fire.
 
 ---
 
@@ -253,15 +302,10 @@ GitHub automation.
 
 Contains:
 
+- Workflows (`ci`, `lint`, `frontend-tests`, `security`, `dependencies`, `pr`, `release`)
 - Issue Templates
-- Pull Request Templates
-- GitHub Actions
-
----
-
-## .vscode/
-
-Recommended workspace configuration.
+- Pull Request Template
+- CODEOWNERS
 
 ---
 

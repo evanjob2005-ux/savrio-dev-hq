@@ -1,12 +1,21 @@
 # Authority and Contradiction Register
 
 **Document ID:** ACR-001
-**Version:** 1.0.0
-**Status:** **OPEN REGISTER.** Every item is recorded, none is resolved. This document
-decides nothing.
-**As of:** 2026-07-26 · verified at HEAD `9069c12`, branch `validation/sprint-1e-overnight-2026-07-26`
+**Version:** 1.2.0
+**Status:** **ACTIVE REGISTER.** Open items and closed/discharged history are both
+retained. This document records decisions made by the authorized owner; it does
+not create decision authority.
+**As of:** 2026-07-29. Original compilation was verified at HEAD `9069c12` without
+decision authority. Later closed/decided entries are narrow Founder-authorized decisions
+recorded in the `chore/close-open-obligations` working tree; they do not retroactively
+authorize the original compiler or re-verify unrelated carried entries.
+The dated `GOVERNANCE_BASELINE_REVIEW_PACKET.md` retains historical submission claims; that
+is preserved review input, not current state. This active register and CPU-001 carry later
+dispositions. This revision was reconciled against branch `chore/close-open-obligations` at
+HEAD `b32caec`.
 **Owner:** Director of Operations (maintenance); Founder (every decision below)
-**Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap v8.0
+**Authority:** CONST-001, GOV-001, ORG-001, AGENT-001, ADR-0001, ADR-0002, Master Roadmap
+(registered **v10.4** at `docs/roadmap/MASTER_ROADMAP.md`)
 
 ---
 
@@ -17,7 +26,8 @@ routed** rather than silently resolved by whichever agent notices it last.
 
 **Rules:**
 
-1. **Nothing here is resolved.** Recording is not deciding.
+1. Recording an open item is not deciding it. A closed item must cite the
+   authorized decision and remains retained as history.
 2. Every entry names **both sides with an exact citation**, per GOV-001:369-371 — *"An
    asserted ADR, standard, or contract violation quotes the text being applied. A constraint
    may not be paraphrased into existence."*
@@ -62,7 +72,8 @@ Source: **CONST-001 Article IX** and **AGENT-001 (`AGENTS.md`) §Governing Autho
 
 ## 1.2 Axis B — source-of-truth precedence (which artifact is right about a fact)
 
-Source: **Master Roadmap v8.0, §Authority Rule**.
+Source: **Master Roadmap §Authority Rule** — registered **v10.4**,
+`docs/roadmap/MASTER_ROADMAP.md:230`.
 
 | Source | Authoritative for |
 |---|---|
@@ -70,14 +81,33 @@ Source: **Master Roadmap v8.0, §Authority Rule**.
 | Current Progress Update (CPU-001) | Current sprint, candidate, owners, reviews, blockers, next gate |
 | Approved ADRs and recorded decisions | Architecture, security, policy, governance constraints |
 | Permanent Operating Handbook (POH-001) | Stable operating rules, authority boundaries, review behaviour, prompt standards |
-| Master Roadmap v8.0 | Long-term capability direction, dependencies, phase promises, completion gates |
+| Master Roadmap (registered v10.4) | Long-term capability direction, dependencies, phase promises, completion gates |
 
-## 1.3 The unresolved seam between the two axes
+**Citation corrected 2026-07-29.** Both rows above previously read *"Master Roadmap v8.0."*
+**No document named v8.0 exists at any path in this repository** — `docs/roadmap/MASTER_ROADMAP.md`
+is v10.4, and v8.1 through v10.3 were never present. The version was re-pointed to the
+registered file; the table's content is unchanged.
 
-Axis A contains **no roadmap tier and no handbook tier**. Axis B asserts a position for both.
-This is **X-8** below, and it is the register's root item: several other entries cannot be
-weighed until it is answered, because they turn on whether a roadmap statement outranks,
-underranks, or sits outside the eight-tier model.
+**Two known gaps, neither closed here:**
+
+1. **v10.4's own table carries a fifth row this one does not** — *Section 23 Binding Operating
+   Kernel: mandatory coordination, prompt, review, remediation, evidence, authority, handoff,
+   and Founder-facing output rules.* It is **deliberately not adopted into Axis B**, because
+   the kernel supplements `AGENT-001` and cannot override its hierarchy (X-8).
+2. **The four historical blocks diverge and remain preserved.** POH-001, ACR-001, and the
+   dated governance-baseline packet carried the v10.4 correction while CPU-001's historical
+   snapshot still named v8.0. Commit `029f8b3` did revise CPU-001, but only to apply the
+   `claude-design` → `design-engineer` role-reference correction required by `OBL-14` and
+   related already-decided governance state; it did **not** update Axis B. The packet's note
+   that `OBL-14` required CPU-001 to remain wholly unedited was therefore wrong, but the
+   packet is retained byte-for-byte as dated review evidence. CPU-001 v1.2.0 now names the
+   registered v10.4 roadmap in its current header and §0.5; its older §1 block remains
+   byte-identical to HEAD and explicitly falls below the historical-snapshot boundary.
+
+## 1.3 Resolution between the two axes
+
+Axis A controls governing authority. Axis B supplements it for source-of-truth questions and
+cannot create a higher or conflicting tier. Conflicts escalate. See decided item X-8.
 
 ## 1.4 The rule that governs all of the above
 
@@ -91,11 +121,27 @@ passes, a review happened, or a gate closed.
 
 | State | Count |
 |---|---|
-| **Open — blocking** | 4 (X-3, X-6, X-7, X-8) |
-| **Open — material** | 15 |
-| **Open — low** | 3 |
+| **Open — blocking** | 3 (X-3, X-6, X-7) |
+| **Open — material** | 13 |
+| **Open — low** | 2 (X-18, X-22) |
+| **Closed/decided, retained** | 8 (X-7b, X-8, X-12, X-21, X-24, X-27, X-28, X-29) |
 | **Discharged, retained** | 3 (X-1b, X-2, X-4) |
-| **Total** | 25 |
+| **Total** | 29 |
+
+**+3 material on 2026-07-29:** X-26, X-27, X-28. All three are governance questions the
+roadmap registration record routed to this register
+(`docs/roadmap/MASTER_ROADMAP.md:166-206`) and that never arrived. Two were tracked in
+`docs/plans/OPEN_OBLIGATIONS.md` as obligations to *record a decision here* (`OBL-15`,
+`OBL-16`) without the contradiction itself ever being recorded; the fourth question,
+**v8.0 → v10.4 supersession**, was tracked in no document at all. X-27 and X-28 are now
+decided; X-26 remains open.
+
+**X-29 history.** It was added as one material item on 2026-07-29 from the
+remediation range `0d83525..638e45c` at HEAD `638e45c`, when only an implementing
+author's attestation of delegation existed and the superseding ADR was missing.
+The later Founder instruction **“do these, all of them”** and ADR-0003 closed it.
+It is counted once under **Closed/decided, retained**, not among the open material
+items.
 
 **Two ID spaces collided during this pass.** Two concurrent writers each appended an entry
 numbered **X-23**; the tag-identity entry was renumbered **X-24** and the agent-authority entry
@@ -106,7 +152,7 @@ alongside **X-23** (shared-working-tree writes), and is recorded rather than sil
 
 # 3. Contradictions register
 
-## X-7 — Reviewer verdict vocabulary: five incompatible sets in force **[V] BLOCKING**
+## X-7 — Reviewer verdict vocabulary: cross-role sets remain incompatible **[V] BLOCKING**
 
 The sharpest item in the register, and it grew rather than shrank when the roadmap was
 registered.
@@ -114,52 +160,55 @@ registered.
 | # | Source | Vocabulary | Status of that source |
 |---|---|---|---|
 | 1 | **GOV-001:284-302** (Architecture Reviewer) | `PASS` · `PASS WITH NON-BLOCKING FOLLOW-UPS` · `FAIL` — *"No other verdict string is valid."* | **Approved governance** |
-| 2 | **Founder decision, 2026-07-26** (Independent Code Reviewer) | `PASS` · `PASS WITH NON-BLOCKING FINDINGS` · `FAIL` | **Tier-2 recorded decision**, held at `PHASE_2_PROGRAM_PLAN.md:140-149` — see **X-21** |
-| 3 | **Master Roadmap v8.0 §8, Standard Verdicts** | `APPROVE` · `APPROVE WITH NON-BLOCKING FINDINGS` · `CHANGES REQUIRED` · `REJECT CANDIDATE` · `ESCALATE` · `UNABLE TO VERIFY` | **Founder-supplied canonical roadmap** |
+| 2 | **Founder decision, 2026-07-26** (Independent Code Reviewer) | `PASS` · `PASS WITH NON-BLOCKING FINDINGS` · `FAIL` | **Tier-2 recorded decision**, tracked at `PHASE_2_PROGRAM_PLAN.md:167-176`; the ICR agent, handbook, and employee documents now conform |
+| 3 | **Master Roadmap registered v10.4, Standard Verdicts** (`MASTER_ROADMAP.md:691-698`) | `APPROVE` · `APPROVE WITH NON-BLOCKING FINDINGS` · `CHANGES REQUIRED` · `REJECT CANDIDATE` · `ESCALATE` · `UNABLE TO VERIFY` | **Current registered roadmap** |
 | 4 | **GOV-001:122-145**, Approval States | Approved · Approved with **Limitations** · Changes Required · Rejected · Escalated | **Approved governance** |
-| 5 | **EMP-QA-001** | Approved · Approved with **Recommendations** · Changes Required · Rejected · Escalated | Approved employee document |
-| 6 | **AGENT-008** / `.claude/agents/independent-code-reviewer.md` | *"explicit approve/reject decision"* | Approved agent definition |
 
-**Why this is blocking rather than cosmetic.** GOV-001:293-294 states *"No other verdict
-string is valid. A verdict may not be qualified, hedged, or combined."* Under that rule, a
-reviewer following the roadmap and a reviewer following GOV-001 both issue invalid verdicts
-in the other's frame. `REJECT CANDIDATE` and `UNABLE TO VERIFY` in particular have **no
-mapping at all** into GOV-001's Approval States — `UNABLE TO VERIFY` is a genuinely new state
-that the approved vocabulary cannot express, and it is exactly the state Sprint 1E's
-candidate-identity `FAIL` was really in.
+**ICR-specific disposition.** The Founder-recorded ICR vocabulary now controls
+`agents/independent-code-reviewer/AGENT.md`,
+`.claude/agents/independent-code-reviewer.md`,
+`handbooks/INDEPENDENT_CODE_REVIEWER.md`, and
+`employees/quality/INDEPENDENT_CODE_REVIEWER.md`. `Escalated` remains a GOV-001 routing
+state when authority or required information is missing, not a fourth ICR verdict.
+
+**Why the universal item remains blocking rather than cosmetic.** GOV-001:293-294 states
+*"No other verdict string is valid. A verdict may not be qualified, hedged, or combined."*
+That clause governs the Architecture Reviewer and requires `FOLLOW-UPS`, while the
+Founder-recorded ICR decision requires `FINDINGS`; the roadmap and GOV-001 Approval States
+add further incompatible strings. `REJECT CANDIDATE` and `UNABLE TO VERIFY` in particular
+have **no mapping at all** into GOV-001's Approval States. Harmonizing those cross-role and
+roadmap/governance vocabularies remains Founder-reserved.
 
 **Not resolved here.** A recommendation exists (`GOVERNANCE_UPDATE_PLAN.md` §9) and is
 **not adopted**. **Owner: Founder.**
 
-### X-7b — Severity ladder: one decided, two still standing **[V] Material**
+### X-7b — Shared severity ladder **[CLOSED 2026-07-29]**
 
-A Founder decision fixes `BLOCKER · MAJOR · MINOR · OBSERVATION`
-(`PHASE_2_PROGRAM_PLAN.md:151-163`). Two approved documents still carry different ladders:
-EMP-QA-001 (*Critical/Major/Minor/Informational*) and `handbooks/ARCHITECTURE_REVIEWER.md:129`
-(*CRITICAL/MAJOR/MINOR/OBSERVATION*). The decision binds; **the retirement of the other two
-has not been recorded.** Leaving them alongside is how four vocabularies became four.
-**Owner: Founder / Director of Operations.**
+The Founder decision fixes `BLOCKER · MAJOR · MINOR · OBSERVATION`
+(`PHASE_2_PROGRAM_PLAN.md:178-190`). The ICR agent definition and executable definition,
+the live Architecture Reviewer definition, EMP-QA-001, and
+`handbooks/ARCHITECTURE_REVIEWER.md` now use that exact ladder.
+Architecture verdicts remain the three GOV-001 strings; changing severity does not change
+that role-specific verdict vocabulary. This closes the severity contradiction only and does
+not close universal X-7.
 
 ---
 
-## X-8 — The roadmap and handbook occupy no tier in `AGENTS.md` **[V] BLOCKING**
+## X-8 — Roadmap authority relative to `AGENTS.md` **[DECIDED 2026-07-29]**
 
 | Side | Text |
 |---|---|
 | **AGENT-001 §Governing Authority** (`AGENTS.md`), and identically **CONST-001:331-341** | Eight tiers: Constitution · CEO-approved decisions · governance documents · standards · approved product requirements · department handbooks · workflow instructions · task instructions. **Neither a roadmap tier nor a handbook tier appears.** |
 | **Master Roadmap v8.0 §Authority Rule** | *"The Permanent Operating Handbook controls stable operating behavior… This roadmap controls long-term capability direction."* |
 
-Three readings are available and they are not equivalent: the roadmap is (i) a **recorded
-Founder decision** (tier 2), (ii) an **approved product-requirements document** (tier 5), or
-(iii) **outside the eight-tier model**, governing a different axis. Under (i) it outranks
-GOV-001; under (ii) it does not; under (iii) the question of which wins is malformed.
+**Decision.** The eight-tier hierarchy in AGENT-001 and CONST-001 controls. The roadmap
+kernel supplements it with planning and long-term capability direction; it cannot create a
+higher tier or override a conflicting Constitution, Founder decision, governance document,
+standard, approved product requirement, department handbook, workflow instruction, or task
+instruction. A material conflict must be escalated rather than reconciled locally.
 
-**Consequence while open:** any claim resting only on the roadmap or only on POH-001 is an
-**unverifiable-tier premise** and must be labelled as such rather than asserted as governed.
-This is not hypothetical — POH-001 marks four rules PROPOSED for exactly this reason (R11,
-R12, R13b, and the L0–L5 grid in R8).
-
-**Owner: Founder.** This is the register's root item.
+This decision does not promote the roadmap body to tier 2 merely because the Founder supplied
+it, and does not approve any rule that remains labelled PROPOSED.
 
 ---
 
@@ -251,7 +300,7 @@ question. **Owner: Founder.**
 
 ---
 
-## X-12 — Review gates whose own standards are absent **[V] Material**
+## X-12 — Review gates whose own standards were absent **[CLOSED 2026-07-29]**
 
 Verified absent at HEAD by directory listing:
 
@@ -265,9 +314,18 @@ Verified absent at HEAD by directory listing:
 > *"A review gate whose own standard is missing cannot certify against it."*
 > — `SPRINT_1F_MISSION_CONTROL_LITE.md` §16.3
 
-Either author them or **record them as accepted absences with the consequence stated**.
-Leaving them referenced-but-absent is the state that produces unfounded gate claims.
-**Owner: Director of Operations**, with Founder ruling on acceptance.
+**Resolution.** All 19 role handbook references and all 111 role standard references now
+resolve. The nine new canonical handbooks derive from their role definitions and higher
+governance. `employees/**` remains an active/supporting document set subject to higher
+authority; conflicts escalate rather than being silently superseded. Naming, logging, and
+error-handling standards now exist.
+This closes missing-document references only. It does not decide the reserved 1E-F1
+service-specific throw/absorb policy, which remains a Track A scope decision.
+`scripts/verify-agent-references.py` applies structural heuristics, not semantic proof:
+existence, heading/role match, Document IDs, length/section/bullet floors, and duplicate IDs.
+Standards additionally require a matching heading, unique `STANDARD-*` ID, and Purpose
+section. Its harness proves ten null/red arms including syntactically valid filler,
+wrong-role/ID, and duplicate handbook/standard IDs.
 
 ---
 
@@ -368,12 +426,20 @@ of `handbooks/`. CPU-001 §6.2 uses the Appendix F set and marks the choice prov
 |---|---|
 | **Recorded Founder decision**, committed at `SPRINT_1F_FOLLOWUP_REGISTER.md:98-99` | *"Protected baselines — `sprint-1e-baseline` → `62f6291` (pre-remediation), `sprint-1e-remediated` → `d922f379` (ratified)."* |
 | **`standards/GIT_STANDARD.md` §Tags** (`:202-214`) | *"Use annotated tags for production releases… Tags should correspond to documented releases."* **No rule on baseline immutability or candidate freeze tags.** |
-| **`standards/GIT_STANDARD.md` §Branch Strategy** (`:44-47`) | Protected branches are `main` and `develop` **only** |
+| **`standards/GIT_STANDARD.md` §Branch Strategy** (`:42-68`) | Names the two long-lived branches — `feature/dev-hq-operating-system` and `main` — and explicitly declines to widen the protected set |
 
 The decision binds as tier 2. The standard does not reflect it, so a reader consulting only
 the standard would not know the tags are protected — and `validation/…`, the branch holding
 the entire Sprint 1E record, is not a protected branch under any rule.
 **Owner: Director of Operations** (standard amendment), **Founder** (approval).
+
+**Amended 2026-07-29 — the contradiction is unchanged, one side of it was factually wrong.**
+This row previously quoted the standard as protecting *"`main` and `develop` only."* `develop`
+has never existed in this repository (`git rev-parse develop` and `origin/develop` both fail),
+and `feature/dev-hq-operating-system` — the branch `origin/HEAD` points at — was named nowhere
+in the standard. The §Branch Strategy text was corrected to the two branches that exist. **No
+decision was taken and the protected set was not widened**; whether baseline tags and
+`validation/…` belong in it is still this entry's open question.
 
 ---
 
@@ -397,11 +463,12 @@ CPU-001 **F-G4**.
 
 ---
 
-## X-21 — Tier-2 Founder decisions held only in an untracked file **[V] Material**
+## X-21 — Tier-2 Founder decisions and ratification record were untracked **[CLOSED 2026-07-29]**
 
 Three binding Founder decisions of 2026-07-26 — **permanent review order**, **ICR verdict
-vocabulary**, and the **shared severity ladder** — exist in this repository only at
-`docs/plans/PHASE_2_PROGRAM_PLAN.md:114-165`, which is **untracked**.
+vocabulary**, and the **shared severity ladder** — were recorded at
+`docs/plans/PHASE_2_PROGRAM_PLAN.md:141-190`, which was **untracked when this entry was
+written**.
 
 The same exposure applies to `RATIFICATION_1E_D922F379.md`, the untracked record that closes
 Sprint 1E with 0 unresolved blockers.
@@ -409,9 +476,16 @@ Sprint 1E with 0 unresolved blockers.
 > *"Review reports are Records under this document and must be retained with the work they
 > gate."* — GOV-001:377-378
 
-An Axis-A tier-2 decision stored in an uncommitted file is one `git clean` from
-unrecoverable. **Owner: Director of Operations** (commit them), **Founder** (approve the
-commit) — CPU-001 **F-G5**.
+**Closure evidence.** Both records are tracked now:
+
+- `docs/plans/PHASE_2_PROGRAM_PLAN.md` entered history in `c062982`; `git ls-files -s`
+  reports blob `44b126c6…`.
+- `docs/validation/sprint-1e-overnight-2026-07-26/RATIFICATION_1E_D922F379.md` entered
+  history in `2ec203e`; `git ls-files -s` reports blob `573a93f5…`.
+
+The risk this entry recorded—loss through an untracked-file cleanup—therefore no longer
+exists. The records' content and later amendments remain subject to their own governance;
+this closure decides only tracked preservation. CPU-001 **F-G5** is discharged.
 
 ---
 
@@ -453,7 +527,7 @@ benefit of a merge at far lower cost. **Owner: Director of Operations.**
 
 ---
 
-## X-24 — Sprint 1E baseline-tag identity: escalated as a mutation, refuted by evidence **[N] Material — evidence complete, ratification pending**
+## X-24 — Sprint 1E baseline-tag identity: escalated as a mutation, refuted by evidence **[CLOSED 2026-07-29]**
 
 **Raised** by the Sprint 1F Track A implementation owner as an unresolved governance integrity
 conflict: that `sprint-1e-baseline` no longer resolves to its documented identity.
@@ -531,11 +605,15 @@ the later `sprint-1e-remediated` tag message asserts the preservation independen
 strong but not reflog-grade. **X-19 remains open** — no standard yet binds baseline-tag
 immutability, so nothing *prevents* a future move.
 
-**Owner: Director of Operations** to ratify this determination and lift the standing
-instruction at `SPRINT_1F_ENTRY_PACKAGE.md` §B.3; **Founder** to close the §B.3 escalation
-routed to the Governance Baseline Agent. **Recorded, not self-closed** — register rule 4.
-**Recommended companion action:** discharge X-19 by amending `standards/GIT_STANDARD.md` to
-require `git rev-parse <tag>^{commit}` (or `show-ref -d`) whenever a tag identity is asserted.
+**Closure.** Entry Package Addendum D records the Operations determination, and Addendum H
+records Founder approval and explicitly supersedes §B.3's standing instruction. Re-verified
+at HEAD `b32caec`: `git rev-parse sprint-1e-baseline^{commit}` returns
+`62f629128e5092f593ff494cd729fe516694bbde`, and
+`git rev-parse sprint-1e-remediated^{commit}` returns
+`d922f3794a6c57f02039ab969e0b98477f4c4c29`. No tag repair or movement is required.
+
+**X-19 remains open.** This closure settles the historical identity escalation; it does not
+create the missing standard for future tag immutability or peeled verification.
 
 ---
 
@@ -559,7 +637,7 @@ occurrences **8 and 9** at `SPRINT_1F_ENTRY_PACKAGE.md:633`, against a total of 
 **This does not resolve the standing delivery-failure risk (CPU-001 §8.4).** Hypothesis 1,
 *"tool boundary — assigned work the role could not perform"*, was already **eliminated** at
 `WORKFLOW_DIAGNOSIS.md:262` by LSE-2 and LSE-3, which were *"tool-compatible, still failed."*
-X-24 is therefore a **separate, independently real configuration defect** — not the root
+X-25 is therefore a **separate, independently real configuration defect** — not the root
 cause, and it must not be reported as one. Occurrences 8 and 9 remain **root cause UNKNOWN**.
 
 **Classification:** authority/definition mismatch. **The tool grant is wrong if the charter
@@ -570,6 +648,144 @@ ORG-001 and the charter are Axis-A tier-3 documents (**F-G8**, §5).
 **Owner: Director of Operations** (draft the conforming amendment), **Founder** (approve).
 Intersects **X-9** (ORG-001 binds roles to named tools). **No agent definition was changed by
 this entry.**
+
+---
+
+## X-26 — v8.0 → v10.4 supersession: may prior claims be carried forward? **[N] Material**
+
+**Recorded 2026-07-29.** The roadmap registration record routes four open governance
+questions to this register (`docs/roadmap/MASTER_ROADMAP.md:166-206`). This was the fourth,
+and **it was tracked in no document at all** — not here, not in `OPEN_OBLIGATIONS.md`.
+
+| Side | Text |
+|---|---|
+| **Master Roadmap v10.4, §v10.4 Change Summary** (`MASTER_ROADMAP.md:236`) | *"This edition preserves the long-term capability roadmap… No Phase 1, Phase 2, Phase 2.5, Phase 2.6, governance, reliability, compliance, commercial-control, or enterprise-platform capability is removed or weakened."* |
+| **Repository** | Versions v8.1 through v10.3 were never present. **Neither was v8.0** — `git log --diff-filter=A -- docs/roadmap/MASTER_ROADMAP.md` returns one commit, `639be4f`, which registered v10.4 directly |
+
+**The question.** This is **X-17 one step further out, and worse.** X-17 asked whether
+v7.1-derived conclusions carry forward on v8.0's own preservation statement. But v8.0 was
+never in this repository either, so the planning documents, POH-001 rules R2/R3/R7/R8/R11/
+R12/R13b/R15, and Axis B that cite *"Master Roadmap v8.0"* rest on a document **no reviewer
+here has ever been able to open**, and are now two undocumented version steps behind the
+registered file.
+
+**Two readings**, exactly parallel to X-17:
+
+| Reading | Consequence |
+|---|---|
+| (a) v10.4's preservation statement is sufficient | v8.0-derived conclusions carry forward; citations are re-pointed to v10.4 sections and re-verified section-by-section |
+| (b) It is not sufficient | Every v8.0-derived conclusion is re-derived against v10.4 before it may gate work |
+
+**What the 2026-07-29 pass did.** Live *authority* citations only — the `Authority:` headers
+and the Axis B table in ACR-001, POH-001 and the governance-baseline packet — were re-pointed
+from "v8.0" to the registered v10.4 file. **No conclusion was carried forward, no section-by-
+section re-derivation was performed, and every historical and evidentiary v8.0 citation was
+left exactly as written.** Reading (a) was not adopted; it was not available to adopt.
+
+**Owner: Founder.** Extends **X-17**; blocks the same three plans.
+
+---
+
+## X-27 — Does the Section 23 Binding Operating Kernel supplement or override `AGENTS.md`? **[DECIDED 2026-07-29]**
+
+**Recorded 2026-07-29**, discharging the roadmap's third routed question
+(`MASTER_ROADMAP.md:194-199`). Previously tracked only as half of `OBL-15`, which records the
+*obligation to decide*; the contradiction itself was recorded nowhere.
+
+| Side | Text |
+|---|---|
+| **Master Roadmap v10.4 §Authority Rule** (`MASTER_ROADMAP.md:232`) | *"The VIYBD HQ — BINDING OPERATING KERNEL in Section 23 controls mandatory coordination, prompting, review, remediation, evidence, authority, handoff, and Founder-facing output behavior"* — for **every** response |
+| **AGENT-001 (`AGENTS.md`)** | Governs the same domain: universal responsibilities, prohibitions, decision boundaries, communication standards, validation, handoff, escalation |
+
+**Decision.** The kernel supplements AGENT-001. It cannot create a higher tier or override a
+conflicting instruction in the eight-tier hierarchy. Material conflicts escalate rather than
+being reconciled locally. This does not independently approve kernel rules marked PROPOSED.
+
+---
+
+## X-28 — Organization rename: Savrio → Viybd **[DECIDED 2026-07-29]**
+
+**Recorded 2026-07-29**, discharging the roadmap's first routed question
+(`MASTER_ROADMAP.md:185-189`). Previously tracked only as `OBL-16`.
+
+| Side | Text |
+|---|---|
+| **Master Roadmap v10.4** | **Zero** occurrences of "Savrio" in the Founder-supplied body, against **24** of "Viybd" (17 `Viybd` + 7 `VIYBD`). Titled *"VIYBD HQ"* |
+| **Everything else** | `AGENTS.md`, CONST-001, GOV-001, ORG-001, the repository name `savrio-dev-hq`, the Mission Control UI, and every other registered governance document say **Savrio** |
+
+Counted over the roadmap body only — everything after the `END REGISTRATION RECORD` marker at
+`MASTER_ROADMAP.md:208`. The registration record above that marker is repository-added and
+says "Savrio" 4 times itself, so a whole-file count answers a different question.
+**Minor correction:** the registration record states *"15 of Viybd"* (`:185-186`); the body
+carries 17 case-sensitive `Viybd` and 24 including `VIYBD`. The zero-Savrio half is exact.
+
+**Decision.** Retain **Savrio** and **Dev HQ** as the current organization and product
+identity. `Viybd` remains the roadmap's source/historical product label. It does not authorize
+a mass rename. A future rebrand requires a separately commissioned, coordinated change
+covering governance, product surfaces, repository identity, compatibility contracts, and
+migration evidence.
+
+---
+
+## X-29 — The queue-stall deadline amends two approved ADRs **[CLOSED 2026-07-29]**
+
+**Recorded 2026-07-29. Verified at HEAD `638e45c`, branch `chore/close-open-obligations`** — a
+different HEAD from the `[V]` marks in §0.1, which were taken at `9069c12`.
+
+This entry originally recorded a **delegation and an outstanding action**, not a
+contradiction awaiting a Founder answer. It is retained because shipped
+behaviour temporarily bound differently from two approved ADRs before ADR-0003
+closed the record gap.
+
+| Side | Text |
+|---|---|
+| **ADR-0001 O6** (`docs/decisions/ADR-0001-execution-manager-and-agent-registry.md:201-204`) | *"Folded into O2: no available capability match leaves the execution `queued` with a logged event; budget exhaustion escalates via approval. **No separate decision needed.**"* |
+| **ADR-0002 E2** (`docs/decisions/ADR-0002-review-escalation-and-work-management.md:107`) | *"`Escalation` (id, origin `retry_exhausted \| review_exhausted`, taskId, …)"* — a **two-member** `EscalationOrigin` domain |
+| **Shipped in `3471658`** | `types/domain/escalation.ts:15-18` declares `EscalationOrigin = "retry_exhausted" \| "review_exhausted" \| "queue_stalled"`, and `isQueueStalled` (`lib/dev-hq/agent-execution-service.ts:1387`) makes `queued` terminating once `EXECUTION_QUEUE_STALL_DEADLINE_MS` elapses |
+
+**What changed, precisely.** O6 makes `queued` a **resting** state: an execution with no
+capability match waits, with a logged event, and O6 states in terms that no separate decision is
+needed. A stall deadline makes `queued` **terminating** — past the deadline the execution raises
+a founder escalation. That is an amendment to O6, not an implementation of it. Separately,
+`queue_stalled` adds a **third member** to E2's `EscalationOrigin` domain, deliberately distinct
+rather than a reuse of `retry_exhausted`: escalations dedupe per `(execution, origin)`, so
+sharing the origin would swallow a later genuine exhaustion — the founder would be told once
+that the work was waiting and never told that it then failed three times.
+
+**The decision, and the evidence for it.** `3471658`'s commit message records that both
+amendments *"were escalated to the Founder, who delegated the decision on 2026-07-29."*
+**At the time this entry was written, that message was the whole of the evidence
+available in this repository.** There was no Founder-signed record, no entry in
+any decision document, and nothing in `git log` beyond the
+assertion carried by the commit that made the change. Under §1.4 and register rule 3 that is
+worth stating rather than smoothing: the delegation is **attested by the implementing author**,
+not independently recorded. The later closure paragraph records the independent
+Founder authorization that resolved this evidence gap.
+
+**The alternative that was weighed and rejected**, recorded under Appendix G so a later reader
+does not mistake it for an option nobody considered: leave O6 alone and fix only the silence, by
+re-firing the assignment-deferral event on a bounded cadence. It needs **no ADR amendment at
+all**, because `queued` stays a resting state. It was rejected on the ground that it makes
+stranding **noisy without ever producing a founder decision** — the work still neither completes
+nor fails, and the founder receives a repeating notice rather than something to act on.
+
+**Historical gap.** Neither original ADR was amended. `git log -- docs/decisions/` shows the
+two files last touched by `df9eb3d` and `4255635`, both far outside the remediation range
+`0d83525..638e45c`, and ADR-0002 E2 still publishes a two-member origin domain that the shipped
+type contradicts. `VERSIONING_POLICY.md:222-232` forbids closing this by editing them —
+*"Architecture Decision Records are immutable historical documents. Do not modify the original
+decision after approval. Instead: create a new ADR, reference the previous ADR, explain why the
+decision changed."* The required action was therefore a **new ADR** superseding ADR-0001 O6
+and ADR-0002 E2's origin domain, not a patch to either. ADR numbers are assigned centrally
+(§7 rule 4), which is why none was proposed in the original entry.
+
+**Closure, 2026-07-29.** The Founder authorized all eight decisions in
+`docs/plans/OPEN_AT_HANDOFF.md` section 3 with **“do these, all of them.”**
+`docs/decisions/ADR-0003-stalled-execution-and-task-terminal-lifecycle.md` now
+supersedes ADR-0001 O6 and extends ADR-0002 E2 without editing either historical
+record. It names the 120-second O5-class deadline, `queue_stalled`, and the
+resolution semantics for linked queued/running work. X-29 is therefore closed;
+the original discrepancy remains here as retained history.
 
 ---
 
@@ -595,16 +811,12 @@ CPU-001 §9.
 
 | # | Decision | Blocks | Register item |
 |---|---|---|---|
-| **F-G1** | Which `AGENTS.md` tier the roadmap and the handbook occupy | POH-001 approval; four PROPOSED rules; X-16, X-18 | X-8 |
 | **F-G2** | Approve POH-001; rule on each PROPOSED rule (R4, R11, R12, R13b, R8's L0–L5 grid) | The governance baseline | §6 |
-| **F-G3** | Canonical reviewer verdict vocabulary, and which sources are retired | Every future review gate | X-7, X-7b |
+| **F-G3** | Canonical cross-role reviewer verdict vocabulary, and which remaining sources are retired | Every future review gate | X-7 |
 | **F-G4** | Identity of the Sprint 1F Preparation Handoff | Baseline completeness | X-20 |
-| **F-G5** | Commit the untracked ratification record and the three untracked Founder decisions | Record integrity | X-21 |
 | **F-G6** | Reviewer independence route for the next candidate | Track A's commit gate | X-3 |
 | **F-G7** | May v7.1-derived conclusions carry forward on v8.0's preservation statement? | Re-verification workload across three plans | X-17 |
-| **F-A1** | 1E-F4 target — already-pinned message branch, or unpinned deferral guard | Track A start | CPU-001 §8.1 |
-| **F-A2** | RAT-5 disposition — record-only or in scope | Track A scope | CPU-001 §8.1 |
-| **F-A3** | 1E-F1 and 1E-F2 — in or out | Track A scope | CPU-001 §8.1 |
+| **F-G9** | May v8.0-derived conclusions carry forward on v10.4's preservation statement — given v8.0 was never in this repository either? | The same three plans, plus POH-001 R2/R3/R7/R8/R11/R12/R13b/R15 and Axis B | X-26 |
 | **F-11** | Scorecards: Phase 2 or Sprint 1F, and which ADR is amended | 1F scope | X-1 |
 | **F-12** | Governed-communication ADR | Phase 2 2A-6, 2G | X-6 |
 | **F-13** | `WorkItem` promotion ownership; ADR-0002 owner of record | Phase 2 2A/2B, 1F Q-3(a) | X-10 |
@@ -612,9 +824,7 @@ CPU-001 §9.
 | **F-16** | ORG-001 conforming amendment on model neutrality | Phase 2 | X-9 |
 | **F-18** | Which sprint owns the Context Lifecycle Manager | 1G/1H/1I sequencing | X-16 |
 | **F-G8** | **Does the `lead-software-engineer` charter or its advisory tool grant control?** Then amend the losing document — either grant `Write`/`Edit`, or strike implementation from its Required Deliverables | Any Track A delegation to that agent | X-25 |
-| **X-12 owner ruling** | Author the missing handbook and three standards, or record accepted absences | Gate completeness | X-12 |
-| **X-19 owner ruling** | Amend `GIT_STANDARD.md` for baseline and freeze-tag protection **and require `^{commit}` peeling whenever a tag identity is asserted** | Tag safety | X-19, X-24 |
-| **X-24 owner ratification** | Ratify that `sprint-1e-baseline` is **unmoved** at `62f629128e…` and lift the §B.3 standing instruction | Sprint 1F tag-identity escalation | X-24 |
+| **X-19 owner ruling** | Amend `GIT_STANDARD.md` for baseline and freeze-tag protection **and require `^{commit}` peeling whenever a tag identity is asserted** | Tag safety | X-19 |
 
 ---
 
@@ -626,10 +836,10 @@ fail a review, or justify a gate.
 | Rule | Subject | Why not controlling |
 |---|---|---|
 | **POH R4** | Candidate freeze and review-session isolation | Rests on `OBSERVATION`-severity findings (RAT-4, RAT-7) and untracked planning drafts. `GIT_STANDARD.md` has no freeze rule. A logged observation is not an approved standard |
-| **POH R11** | Context-restoration verification | Roadmap-tier (**X-8**); only specification is untracked and unapproved and ships every threshold `provisional: true`; **no implementation exists** |
-| **POH R12** | Agent status vocabulary | Roadmap-tier (**X-8**); contradicted by the Entry Package (**X-18**); no approved source |
-| **POH R13b** | Prompt and session-coordination requirements | Roadmap-tier (**X-8**); the separate-clean-session basis has an **UNKNOWN root cause** |
-| **POH R8** (part) | L0–L5 Delegated Authority Levels and the Automatic Acceptance Rule | Roadmap-tier (**X-8**); finer-grained than CONST-001 Art. III; intersects **X-13** |
+| **POH R11** | Context-restoration verification | Roadmap-only planning direction is not independently binding; the only specification is untracked and unapproved and ships every threshold `provisional: true`; **no implementation exists** |
+| **POH R12** | Agent status vocabulary | Roadmap-only planning direction is not independently binding; contradicted by the Entry Package (**X-18**); no approved source |
+| **POH R13b** | Prompt and session-coordination requirements | Roadmap-only planning direction is not independently binding; the separate-clean-session basis has an **UNKNOWN root cause** |
+| **POH R8** (part) | L0–L5 Delegated Authority Levels and the Automatic Acceptance Rule | Roadmap-only planning direction is not independently binding; finer-grained than CONST-001 Art. III; intersects **X-13** |
 
 ---
 
@@ -639,16 +849,18 @@ Recorded so that a later reader does not mistake omission for oversight.
 
 1. **A verdict vocabulary was not selected** (X-7). A recommendation exists in
    `GOVERNANCE_UPDATE_PLAN.md` §9 and is not adopted here. Selecting one would be authorship.
-2. **An authority tier for the roadmap was not assigned** (X-8). All three readings are
-   coherent; choosing among them is Founder-reserved.
+2. **Roadmap authority is decided** (X-8): it supplements the eight-tier hierarchy and
+   conflicts escalate.
 3. **The reviewer-independence route was not chosen** (X-3). Three routes are listed; none is
    recommended over the others by this pass.
 4. **No ADR was drafted, numbered, or amended.** ADR numbers are assigned centrally by
    recorded Founder decision.
 5. **The Sprint 1F Preparation Handoff was not reconstructed** (X-20). Nothing was written to
    fill an absent source.
-6. **`RAT-5`, `1E-F1`, and `1E-F2` scope questions were not answered** — they are Track A
-   decisions, and this is a governance pass.
+6. **Track A scope rulings are recorded, not reopened.** F-A1 selected the stronger
+   truthful-message target. F-A2 retained RAT-5 as **record-only and outside implementation
+   scope**. F-A3 selected 1E-F1 and left 1E-F2 out of scope unless separately authorized.
+   Sources: `SPRINT_1F_ENTRY_PACKAGE.md` Addenda C, E, and H.
 
 ---
 
@@ -667,10 +879,27 @@ Recorded so that a later reader does not mistake omission for oversight.
 - **Working-tree volatility.** Three changes by another actor landed in the shared tree during
   this pass (X-23), and a second writer appended a colliding `X-23` while this section was
   being written. Re-verify every `[V]` mark against `git status` before relying on it.
-- **Contradictions resolved: 0.** That is the intended outcome. **X-24 is an exception in kind
-  and not in status:** its *factual* question is settled by command output under §1.4, but the
-  entry is **not closed** — under register rule 4 the Director of Operations must record the
-  determination. This pass forms a view; it does not decide.
+- **Originally appended 2026-07-29 at HEAD `638e45c`, branch `chore/close-open-obligations`:** **X-29**, by a
+  recording pass over the remediation range `0d83525..638e45c`. Both sides were read directly at
+  that HEAD — the two ADR texts, `types/domain/escalation.ts`, and `git log -- docs/decisions/`
+  establishing that neither ADR had been touched. At that time the Founder
+  delegation could not be independently verified; the only evidence was
+  `3471658`'s commit message, and no ADR was drafted, numbered, or amended.
+- **Closed 2026-07-29:** X-29, after the Founder instructed **“do these, all of
+  them”** for the eight decisions in `OPEN_AT_HANDOFF.md` section 3 and ADR-0003
+  recorded the superseding decision. This closure update changes no other
+  register item.
+- **ADR-number collision recorded 2026-07-29:** central planning reserved
+  ADR-0003 for deployment/persistence/transport/auth on 2026-07-26. The
+  lifecycle ADR approved on 2026-07-29 later used that already-reserved number
+  by mistake. The error is recorded, not hidden; because the lifecycle ADR is
+  now an approved immutable record, it cannot be retroactively renumbered to
+  make the chronology look clean. The later Founder-authorized, partial
+  runtime-boundary decision therefore uses the next unused identifier,
+  ADR-0004.
+- **Closed or decided in retained history:** X-7b, X-8, X-12, X-21, X-24, X-27, X-28,
+  and X-29. This revision closes only items compelled by already-recorded decisions or
+  tracked repository evidence; universal X-7 and X-19 remain open.
 - **Tag-identity method note.** Every tag assertion in this register was taken from
   `git rev-parse <tag>^{commit}` and cross-checked against `git ls-remote --tags origin`.
   Bare `git rev-parse <tag>` on an annotated tag returns the **tag object**, not the commit;

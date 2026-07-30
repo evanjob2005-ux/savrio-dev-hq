@@ -239,6 +239,32 @@ describe("agent execution service", () => {
     // review of the completed work, which the default policy asks for.
     const dispatchedTasks = triggerMock.mock.calls.map((call) => call[0]);
     expect(dispatchedTasks).toEqual(["agent-execution", "agent-review"]);
+    expect(getDevHqStore().tasks.get(task.id)?.status).toBe("active");
+  });
+
+  it("completes a no-review task on success and converges on callback replay", async () => {
+    const task = seedTask();
+    const dispatched = await dispatchAgentExecution({
+      taskId: task.id,
+      requiredCapabilities: ["validation"],
+      instructions: "do work",
+      reviewPolicy: "none",
+    });
+    await handleExecutionRunning(dispatched.executionId!);
+
+    const callback = {
+      executionId: dispatched.executionId!,
+      status: "succeeded" as const,
+      instructions: "do work",
+    };
+    await handleExecutionComplete(callback);
+    expect(getDevHqStore().tasks.get(task.id)?.status).toBe("completed");
+
+    await handleExecutionComplete(callback);
+    expect(getDevHqStore().tasks.get(task.id)?.status).toBe("completed");
+    expect(triggerMock.mock.calls.map((call) => call[0])).toEqual([
+      "agent-execution",
+    ]);
   });
 
   it("re-dispatches a failed attempt under the retry budget", async () => {
@@ -906,20 +932,39 @@ describe("agent execution service", () => {
       expect(triggerMock).toHaveBeenCalledTimes(1);
     });
 
+    /**
+     * Rewritten for NBF-3, and the change is the finding.
+     *
+     * This asserted `{ executions: 2, assignments: 2 }` for two distinct keys
+     * against **one task** — which is precisely the defect: one task with two
+     * live agent-backed executions, two independent retry budgets and two
+     * escalation paths. It was pinning that as the contract. The claim worth
+     * keeping is that distinct keys are distinct logical dispatches, and that is
+     * true (and legitimate) across two tasks. The same-task form is now refused;
+     * see `lib/dev-hq/one-live-execution-per-task.test.ts`.
+     */
     it("still treats distinct keys as distinct logical dispatches", async () => {
-      const task = seedTask();
-      const first = await dispatchWithKey(task.id, "dispatch-key-a");
-      const second = await dispatchWithKey(task.id, "dispatch-key-b");
+      const first = await dispatchWithKey(seedTask().id, "dispatch-key-a");
+      const second = await dispatchWithKey(
+        seedTask({ id: "task-ax-keys" }).id,
+        "dispatch-key-b",
+      );
 
       expect(second.executionId).not.toBe(first.executionId);
       expect(second.triggerRunId).not.toBe(first.triggerRunId);
       expect(storeCounts()).toEqual({ executions: 2, assignments: 2 });
     });
 
+    /**
+     * Subject is key ALLOCATION — an omitted key gets a fresh one per call — not
+     * how many executions one task may hold. Moved to two tasks so it states only
+     * that, rather than depending on the NBF-3 defect to be observable.
+     */
     it("allocates a key when the caller omits one", async () => {
-      const task = seedTask();
-      const first = await dispatchAgentExecution({ taskId: task.id });
-      const second = await dispatchAgentExecution({ taskId: task.id });
+      const first = await dispatchAgentExecution({ taskId: seedTask().id });
+      const second = await dispatchAgentExecution({
+        taskId: seedTask({ id: "task-ax-alloc" }).id,
+      });
 
       expect(first.executionId).toBeTruthy();
       expect(second.executionId).not.toBe(first.executionId);
@@ -1130,7 +1175,7 @@ describe("agent execution service", () => {
       });
     }
 
-    it("does not recreate a terminal event evicted from the buffer", async () => {
+    it("does not recreate a terminal event after more than 200 later events", async () => {
       const task = seedTask();
       const dispatched = await dispatchAgentExecution({
         taskId: task.id,
@@ -1153,18 +1198,17 @@ describe("agent execution service", () => {
         ),
       ).toHaveLength(1);
 
-      // The original entries age out of the ring entirely.
       await floodEventRing();
-      expect(await executionEvents(executionId)).toHaveLength(0);
+      const retained = await executionEvents(executionId);
+      expect(retained.length).toBeGreaterThan(0);
 
       await handleExecutionReclaim();
       await handleExecutionReclaim();
 
-      // Reconciliation must not resurrect a transition it can no longer see.
-      expect(await executionEvents(executionId)).toHaveLength(0);
+      expect(await executionEvents(executionId)).toEqual(retained);
     });
 
-    it("does not recreate retry events evicted from the buffer", async () => {
+    it("does not recreate retry events after more than 200 later events", async () => {
       const task = seedTask();
       const dispatched = await dispatchAgentExecution({
         taskId: task.id,
@@ -1190,10 +1234,11 @@ describe("agent execution service", () => {
       ).toHaveLength(2);
 
       await floodEventRing();
+      const retained = await executionEvents(executionId);
       await handleExecutionReclaim();
       await handleExecutionReclaim();
 
-      expect(await executionEvents(executionId)).toHaveLength(0);
+      expect(await executionEvents(executionId)).toEqual(retained);
     });
 
     it("still records each transition once when nothing has been evicted", async () => {
@@ -1414,7 +1459,10 @@ describe("agent execution service", () => {
       await handleExecutionReclaim();
       expect(await exhaustedCount(executionId)).toBe(1);
       expect(
-        await getDevHqAdapters().escalationStore.findByExecution(executionId),
+        await getDevHqAdapters().escalationStore.findByExecution(
+          executionId,
+          "retry_exhausted",
+        ),
       ).not.toBeNull();
     });
 
@@ -1603,16 +1651,23 @@ describe("agent execution service", () => {
     });
 
     it("recovers the loser of a pre-claim race for a capacity-one agent", async () => {
-      const task = seedTask();
       // Two distinct logical dispatches both select the one available agent with
       // this capability: selection proposes, only the claim reserves (ADR-0001).
+      //
+      // Two TASKS, not two dispatches of one task. The race being exercised is
+      // over a capacity-one *agent*, and two tasks competing for one supervisor
+      // is its realistic shape; the same-task form was only ever a convenience,
+      // and it is what NBF-3 now refuses. Nothing else about this test changes —
+      // the loser is still queued, dispatched, unclaimed and leaseless.
+      const task = seedTask();
+      const otherTask = seedTask({ id: "task-ax-race" });
       const first = await dispatchAgentExecution({
         taskId: task.id,
         requiredCapabilities: ["validation"],
         idempotencyKey: "race-key-a",
       });
       const second = await dispatchAgentExecution({
-        taskId: task.id,
+        taskId: otherTask.id,
         requiredCapabilities: ["validation"],
         idempotencyKey: "race-key-b",
       });

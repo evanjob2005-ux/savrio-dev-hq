@@ -36,7 +36,8 @@ Source: **CONST-001 Article IX** and **AGENT-001 (`AGENTS.md`) §Governing Autho
 
 ## 1.2 Axis B — source-of-truth precedence (which artifact is right about a fact)
 
-Source: **Master Roadmap v8.0, §Authority Rule**.
+Source: **Master Roadmap §Authority Rule** — registered **v10.4**,
+`docs/roadmap/MASTER_ROADMAP.md:230`.
 
 | Source | Authoritative for |
 |---|---|
@@ -44,7 +45,12 @@ Source: **Master Roadmap v8.0, §Authority Rule**.
 | Current Progress Update (CPU-001) | Current sprint, candidate, owners, reviews, blockers, next gate |
 | Approved ADRs and recorded decisions | Architecture, security, policy, governance constraints |
 | Permanent Operating Handbook (POH-001) | Stable operating rules, authority boundaries, review behaviour, prompt standards |
-| Master Roadmap v8.0 | Long-term capability direction, dependencies, phase promises, completion gates |
+| Master Roadmap (registered v10.4) | Long-term capability direction, dependencies, phase promises, completion gates |
+
+**Citation corrected 2026-07-29.** Both rows previously read *"Master Roadmap v8.0."* See
+**ACR-001 §1.2** for the correction note. Review check **C-1** (the four copies of this
+section match) now compares POH-001, ACR-001 and this packet — **CPU-001 still carries the
+v8.0 text**, held unedited by `OBL-14`. C-1 cannot pass on all four until CPU-001 is revised.
 
 ## 1.3 The unresolved seam between the two axes
 
@@ -68,14 +74,14 @@ before Sprint 1F Track B begins.
 
 | # | Deliverable | State |
 |---|---|---|
-| 1 | Master Roadmap v8.0 registered at a canonical repository path | **DELIVERED** |
+| 1 | Master Roadmap registered at a canonical repository path | **DELIVERED — but not as claimed.** The path `docs/roadmap/MASTER_ROADMAP.md` exists and holds a registered roadmap. It holds **v10.4**, registered by `639be4f`. This row originally read *"Master Roadmap v8.0"*; **no v8.0 roadmap was ever registered here.** See §3 |
 | 2 | Version and title preserved accurately | **DELIVERED** |
 | 3 | Stale references treating absent v7.1 as available, updated | **DELIVERED** — six citations; historical evidence preserved |
 | 4 | Current Progress Update grounded only in verified repository state | **DELIVERED** |
 | 5 | Repository copy of the Sprint 1F Preparation Handoff | **NOT DELIVERED — source not located.** Path reserved; absence recorded. **Nothing reconstructed** |
 | 6 | Permanent Operating Handbook consolidating approved stable rules | **DELIVERED as DRAFT** — 15 rules |
 | 7 | Source authority cited for every handbook rule | **DELIVERED** — every rule carries a quoted citation |
-| 8 | Unresolved or contradictory rules placed in a decision register | **DELIVERED** — **25** items, 0 resolved. Two (X-24, X-25) were appended by a **second concurrent writer** and are **not verified by this submitter** |
+| 8 | Unresolved or contradictory rules placed in a decision register | **DELIVERED** — **28** items as of 2026-07-29 (25 at submission), 0 resolved. Two (X-24, X-25) were appended by a **second concurrent writer** and are **not verified by this submitter**; three (X-26, X-27, X-28) were added on 2026-07-29 for roadmap-registration questions that had been routed here and never arrived |
 | 9 | Document authority and precedence defined consistently across the artifacts | **DELIVERED** — §1, reproduced identically in four documents |
 | 10 | Confirmation that the roadmap does not prove implementation status | **DELIVERED** — POH-001 R15a; roadmap registration record; CPU-001 §1.4 |
 
@@ -85,14 +91,34 @@ before Sprint 1F Track B begins.
 
 # 3. Artifacts under review
 
-| # | Path | Document | Lines |
-|---|---|---|---|
-| **1** | `docs/roadmap/MASTER_ROADMAP.md` | Master Roadmap v8.0 + registration record | 1,923 |
-| **2** | `docs/governance/PERMANENT_OPERATING_HANDBOOK.md` | POH-001 v0.1.0 — **DRAFT** | 645 |
-| **3** | `docs/governance/CURRENT_PROGRESS_UPDATE.md` | CPU-001 | ~500 |
-| **4** | `docs/governance/AUTHORITY_AND_CONTRADICTION_REGISTER.md` | ACR-001 | ~550 |
-| **5** | `docs/plans/SPRINT_1F_PREPARATION_HANDOFF_INTAKE.md` | Intake record — **not** the handoff | 141 |
-| **6** | `docs/governance/GOVERNANCE_BASELINE_REVIEW_PACKET.md` | This packet | — |
+| # | Path | Document | Lines (as submitted) | Lines (measured 2026-07-29) |
+|---|---|---|---|---|
+| **1** | `docs/roadmap/MASTER_ROADMAP.md` | Master Roadmap **v10.4** + registration record | ~~v8.0, 1,923~~ | **2,361** |
+| **2** | `docs/governance/PERMANENT_OPERATING_HANDBOOK.md` | POH-001 v0.1.0 — **DRAFT** | 645 | 673 |
+| **3** | `docs/governance/CURRENT_PROGRESS_UPDATE.md` | CPU-001 | ~500 | 724 |
+| **4** | `docs/governance/AUTHORITY_AND_CONTRADICTION_REGISTER.md` | ACR-001 | ~550 | 706 |
+| **5** | `docs/plans/SPRINT_1F_PREPARATION_HANDOFF_INTAKE.md` | Intake record — **not** the handoff | 141 | 141 |
+| **6** | `docs/governance/GOVERNANCE_BASELINE_REVIEW_PACKET.md` | This packet | — | — |
+
+Measured with `wc -l` on 2026-07-29 against branch `chore/close-open-obligations`.
+Rows 2, 3 and 4 have grown through ordinary revision; that drift is expected and is
+recorded rather than back-fitted.
+
+**Row 1 was not drift, and two things about it were wrong.** It described *"Master Roadmap
+v8.0"* at 1,923 lines. **No v8.0 roadmap has ever existed in this repository**, and 1,923
+matches no version of that file at any commit:
+
+- `git log --diff-filter=A --oneline -- docs/roadmap/MASTER_ROADMAP.md` returns exactly one
+  commit, `639be4f docs(roadmap): register Master Roadmap v10.4…`. That first registration was
+  already **v10.4**, at 2,303 lines.
+- `git ls-tree -r 9069c12 --name-only | grep -i roadmap` returns nothing. **At this packet's
+  own stated baseline the roadmap path did not exist** — and neither did rows 2, 3, 4 or 5,
+  each of which returns 0 lines at `9069c12`.
+
+**The baseline line in this packet's header therefore does not identify a commit at which the
+artifacts under review can be inspected.** That is a defect in this packet's provenance, not
+in the artifacts. It is recorded here for the reviewer rather than repaired, because choosing
+a replacement baseline is a decision for the document's owner.
 
 ## 3.1 Documents edited, not created
 
@@ -111,7 +137,7 @@ before Sprint 1F Track B begins.
 
 | Source | Path / identity | How used |
 |---|---|---|
-| **Founder-supplied Master Roadmap v8.0** | `C:\Users\evanj\Downloads\Savrio_Dev_HQ_Master_Roadmap_v8.0_Canonical.docx`, SHA-256 `52a79925…` | Registered verbatim; source for R2, R3, R7, R8, R11, R12, R13b, R15, and Axis B |
+| **Founder-supplied Master Roadmap v8.0** | `C:\Users\evanj\Downloads\Savrio_Dev_HQ_Master_Roadmap_v8.0_Canonical.docx`, SHA-256 `52a79925…` | Claimed *"registered verbatim"*; source for R2, R3, R7, R8, R11, R12, R13b, R15, and Axis B. **See the note below — this registration is not present in the repository.** |
 | **Repository + verified command output** | HEAD `9069c12` | Every factual claim in CPU-001 |
 | **Approved ADRs** | `ADR-0001`, `ADR-0002` | R2; X-1, X-6, X-10, X-15 |
 | **Approved governance** | CONST-001, GOV-001, ORG-001, AGENT-001 | R1, R5, R6, R7, R8, R9, R10, R13a |
@@ -120,6 +146,21 @@ before Sprint 1F Track B begins.
 | **Final Sprint 1E evidence** | `RATIFICATION_1E_D922F379.md`, `SPRINT_1F_FOLLOWUP_REGISTER.md`, `WORKFLOW_DIAGNOSIS.md`, `FRESH_CR_1E_3DAF_FINAL_REVIEW.md` | CPU-001 §3, §4, §8; R3, R4 |
 | **Committed governance plans** | `GOVERNANCE_UPDATE_PLAN.md`, `SPRINT_1F_MISSION_CONTROL_LITE.md`, `SPRINT_1F_ENTRY_PACKAGE.md`, `PHASE_2_PROGRAM_PLAN.md` | ACR-001 carried-forward items, marked `[C]` |
 | **Agent definitions and operating rules** | `handbooks/`, `.claude/agents/`, `AGENTS.md` | R5, R12, R13; X-12 |
+
+**Note added 2026-07-29 — row 1 cannot be verified from this repository, and its
+repository-side claim is disproved.** The `.docx` named there is on a local machine and is
+outside anything a reviewer here can open, so whether it exists and hashes to `52a79925…`
+is neither confirmed nor denied. What *is* checkable is the claim that it was **registered
+verbatim**: it was not, at least not into this repository. The only commit ever to add
+`docs/roadmap/MASTER_ROADMAP.md` is `639be4f`, and it registered **v10.4**. There is no v8.0
+roadmap at any path or any commit.
+
+The row is retained rather than deleted because it is a provenance claim someone may need to
+reconcile against the Founder's own files, and Appendix G requires superseded records be
+preserved. Everything in this packet sourced to *"v8.0"* — **R2, R3, R7, R8, R11, R12, R13b,
+R15, and Axis B** — therefore rests on a document this repository has never held. Whether
+those derivations may stand is **ACR-001 X-17**, extended to the v8.0 → v10.4 step by
+**X-26**.
 
 ## 4.2 Refused or unavailable
 

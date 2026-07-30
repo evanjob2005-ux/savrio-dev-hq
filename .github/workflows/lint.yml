@@ -39,7 +39,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Write markdownlint configuration
         run: |
@@ -153,6 +153,42 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python for workflow structure controls
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install workflow verifier runtime
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.3"
+
+      - name: Verify workflow structure against the triggering base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE_SHA:-${PUSH_BASE_SHA:-}}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          python scripts/verify-workflow-structure.py "$base" \
+            --approval-manifest scripts/workflow-structure-approval.json
+
+      - name: Mutation-test the workflow structure verifier
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE_SHA:-${PUSH_BASE_SHA:-}}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          WORKFLOW_STRUCTURE_BASE="$base" \
+            python scripts/test-verify-workflow-structure.py
 
       - name: Install actionlint (checksum-verified)
         env:

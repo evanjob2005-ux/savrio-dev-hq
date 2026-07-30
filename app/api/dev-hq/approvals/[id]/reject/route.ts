@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { rejectFounderRequest } from "@/lib/dev-hq/founder-request-service";
+import { internalError, jsonError } from "@/app/api/dev-hq/_lib/route-errors";
+import {
+  ApprovalAuthorityError,
+  rejectFounderRequest,
+} from "@/lib/dev-hq/founder-request-service";
+
+const ROUTE = "POST /api/dev-hq/approvals/[id]/reject";
 
 export async function POST(
   _request: Request,
@@ -10,7 +16,10 @@ export async function POST(
     const state = await rejectFounderRequest(id);
     return NextResponse.json({ state });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // See the approve route: an evaluated refusal is 409, never 500.
+    if (error instanceof ApprovalAuthorityError) {
+      return jsonError(error.message, 409);
+    }
+    return internalError(ROUTE, error);
   }
 }

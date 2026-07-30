@@ -2,7 +2,11 @@
 // Single Next.js process, non-durable, not for production.
 
 import { MISSION_CONTROL_PLACEHOLDERS } from "@/data/placeholders/mission-control";
-import { FOUNDER_REQUEST_WORKFLOW_ID } from "@/lib/dev-hq/constants";
+import {
+  EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+  FOUNDER_USER_ID,
+  FOUNDER_REQUEST_WORKFLOW_ID,
+} from "@/lib/dev-hq/constants";
 import type {
   DevHqState,
   DevHqStoreData,
@@ -27,6 +31,54 @@ import type {
 } from "@/types/domain";
 
 const STORE_KEY = Symbol.for("savrio.dev-hq.store");
+export const DEV_HQ_E2E_BLOCKED_SCENARIO = "mission-control-blocked-task";
+export const DEV_HQ_E2E_BLOCKED_TASK_ID = "task-e2e-blocked";
+
+/**
+ * Process-start fixture for the optimized-build Mission Control E2E only.
+ *
+ * This is deliberately not callable over HTTP. Both values are exact, default
+ * off, and server-only; a public deployment with an absent, misspelled, or
+ * prefixed value receives the normal empty store.
+ */
+function seedE2EBlockedTask(store: DevHqStoreData): void {
+  if (
+    process.env.DEV_HQ_DEPLOYMENT_MODE !== "local" ||
+    process.env.DEV_HQ_E2E_SCENARIO !== DEV_HQ_E2E_BLOCKED_SCENARIO
+  ) {
+    return;
+  }
+
+  const timestamp = nowIso();
+  const project: Project = {
+    id: "proj-e2e-blocked",
+    name: "E2E Blocked Project",
+    slug: "e2e-blocked-project",
+    description: "Process-start fixture for Mission Control browser evidence.",
+    repository: "local/e2e-only",
+    defaultBranch: "main",
+    status: "active",
+    ownerId: FOUNDER_USER_ID,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  const task: Task = {
+    id: DEV_HQ_E2E_BLOCKED_TASK_ID,
+    projectId: project.id,
+    workflowId: null,
+    title: "E2E blocked task",
+    description: "Deterministic blocked-lane browser fixture.",
+    status: "blocked",
+    priority: "High",
+    assigneeAgentId: null,
+    claimedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    dueAt: null,
+  };
+  store.projects.set(project.id, project);
+  store.tasks.set(task.id, task);
+}
 
 function createSeedWorkflow(): Workflow {
   const createdAt = nowIso();
@@ -81,8 +133,54 @@ function createSeedWorkflow(): Workflow {
 function createSeedAgents(): Map<string, Agent> {
   const agents = new Map<string, Agent>();
   for (const agent of MISSION_CONTROL_PLACEHOLDERS.agents) {
-    agents.set(agent.id, { ...agent, capabilities: [...agent.capabilities] });
+    agents.set(agent.id, {
+      ...agent,
+      // Seed the concurrency primitive UNLOCKED, whatever the roster displays.
+      //
+      // ADR-0001 D6 makes availability the compare-and-set primitive: claiming
+      // requires "available", and only releasing an execution writes it back.
+      // The placeholder roster carries "busy"/"waiting" as cosmetic UI status,
+      // and copying that through seeded three agents into a lock nobody holds
+      // and nothing can release -- not-available, so never selected, so never
+      // claimed, so never released. Terminal.
+      //
+      // That stranded five of the ten capabilities frozen by ADR-0001 O3
+      // (implementation, review, corrections, qa, accessibility): dispatch
+      // found no eligible agent, the execution sat queued forever, and because
+      // no attempt was consumed no escalation was ever raised. Work that
+      // neither completes nor fails.
+      //
+      // Display status is a view-model concern and belongs in Mission Control.
+      availability: "available",
+      capabilities: [...agent.capabilities],
+    });
   }
+
+  // ADR-0001 D5 requires the seed to reuse ids already hard-referenced
+  // elsewhere, naming this one explicitly. It was referenced but never seeded:
+  // escalation-service and founder-request-service persist it as
+  // raisedByAgentId, createdByAgentId and actorId, and getAgent() returned null
+  // for every one of them -- so an escalation's "raised by" joined to nothing.
+  // The events looked right only because a hardcoded label string masked it.
+  if (!agents.has(EXECUTIVE_ORCHESTRATOR_AGENT_ID)) {
+    agents.set(EXECUTIVE_ORCHESTRATOR_AGENT_ID, {
+      id: EXECUTIVE_ORCHESTRATOR_AGENT_ID,
+      name: "Executive Orchestrator",
+      provider: "internal",
+      role: "Executive Orchestrator",
+      // Deliberately no capabilities. This is a system actor, not a worker: it
+      // exists so escalation and founder-request records join to a real
+      // identity, and it must never win a dispatch. Every production
+      // selectAgent call specifies requiredCapabilities, so an empty set makes
+      // it unselectable without needing a special case in the registry.
+      capabilities: [],
+      availability: "available",
+      accentColor: "#c9a227",
+      initials: "EO",
+      lastActiveAt: null,
+    });
+  }
+
   return agents;
 }
 
@@ -105,7 +203,7 @@ function createProcessStartMarker(): ProcessStartMarker {
 function createEmptyStore(): DevHqStoreData {
   const workflows = new Map<string, Workflow>();
   workflows.set(FOUNDER_REQUEST_WORKFLOW_ID, createSeedWorkflow());
-  return {
+  const store: DevHqStoreData = {
     projects: new Map(),
     tasks: new Map(),
     approvals: new Map(),
@@ -118,11 +216,14 @@ function createEmptyStore(): DevHqStoreData {
     evidence: new Map(),
     evidenceUris: new Map(),
     escalations: new Map(),
+    escalationResolutionOrder: new Map(),
     reviews: new Map(),
     reviewFindings: new Map(),
     eventKeys: new Map(),
     processStart: createProcessStartMarker(),
   };
+  seedE2EBlockedTask(store);
+  return store;
 }
 
 /** Centralized in-memory development store (single Next.js process, non-durable). */
@@ -247,7 +348,6 @@ export function appendEvent(event: Event, dedupeKey?: string): Event {
     store.eventKeys.set(dedupeKey, event);
   }
   store.events.unshift(event);
-  store.events = store.events.slice(0, 200);
   return event;
 }
 
@@ -350,4 +450,37 @@ export function saveEscalation(escalation: Escalation): Escalation {
 
 export function getEscalation(escalationId: string): Escalation | null {
   return getDevHqStore().escalations.get(escalationId) ?? null;
+}
+
+/**
+ * Stamp this escalation's resolution with its position in the store's total
+ * order of founder decisions, and return that position (P0-3).
+ *
+ * Call it in the same synchronous step as the resolution write, with no await
+ * between the two: that is what makes the order a faithful record of which
+ * decision was committed last, and it is the same argument that makes
+ * `appendEvent`'s dedupe key and `ensureEvidenceByUri` hold.
+ *
+ * Assigned once. A replay of an already-resolved escalation reads back the
+ * position it was given when it was resolved rather than being promoted to the
+ * front of the order, which is precisely the thing a replay must not do.
+ */
+export function recordEscalationResolution(escalationId: string): number {
+  const store = getDevHqStore();
+  const existing = store.escalationResolutionOrder.get(escalationId);
+  if (existing !== undefined) return existing;
+  const position = store.escalationResolutionOrder.size + 1;
+  store.escalationResolutionOrder.set(escalationId, position);
+  return position;
+}
+
+/**
+ * This escalation's position in the resolution order, or null when it carries no
+ * committed founder decision. Null is not "oldest": an unresolved escalation has
+ * no decision to be superseded and none to supersede with.
+ */
+export function getEscalationResolutionOrder(
+  escalationId: string,
+): number | null {
+  return getDevHqStore().escalationResolutionOrder.get(escalationId) ?? null;
 }

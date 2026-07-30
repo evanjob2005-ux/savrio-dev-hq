@@ -3,8 +3,14 @@ import {
   EXECUTIVE_ORCHESTRATOR_AGENT_ID,
   FOUNDER_REQUEST_WORKFLOW_ID,
   FOUNDER_USER_ID,
+  TASK_STATUS_REFUSED_EVENT_TYPE,
 } from "@/lib/dev-hq/constants";
 import { getDevHqAdapters } from "@/lib/dev-hq/adapters";
+// The one predicate the two Task.status orchestrators share (ARCH-02). Imported
+// statically and by name so the coordination between them is greppable rather
+// than implied; the dependency is one-way — the escalation service knows nothing
+// about this one.
+import { hasOpenEscalationForTask } from "@/lib/dev-hq/escalation-service";
 import { nowIso, slugify } from "@/lib/dev-hq/id";
 import type { DevHqState } from "@/lib/dev-hq/types";
 import type {
@@ -23,6 +29,24 @@ import type {
 const FOUNDER_REQUEST_TASK_ID = "founder-request-workflow";
 /** Run 2: started by the founder's decision. */
 const FOUNDER_REQUEST_CONTINUATION_TASK_ID = "founder-request-continuation";
+
+/**
+ * A gate registration or finalization that cannot show it carries the authority
+ * it claims: an approval belonging to a different execution or task, a recorded
+ * decision contradicting the outcome being written, or a founder-gated workflow
+ * finalising with no approval identity at all.
+ *
+ * Distinct from an ordinary Error because the two say different things to the
+ * caller. A thrown Error says the server broke; this says the server evaluated
+ * the act and refused it. The internal routes answer 409 for this and 500 for
+ * everything else, so a refusal is never read as an outage and retried as one.
+ */
+export class ApprovalAuthorityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApprovalAuthorityError";
+  }
+}
 
 function deterministicExecutiveReview(task: Task): {
   passed: boolean;
@@ -281,6 +305,75 @@ export async function runExecutiveReview(executionId: string): Promise<{
 }
 
 /**
+ * Resolves the approval a caller is acting under, and proves it belongs to this
+ * run before anything is written on its authority.
+ *
+ * `failWorkflowExecution` already required exactly this of its
+ * continuation-failure input. The two sites that write outcomes did not, which
+ * is how execution A came to be finalizable under execution B's approval: the
+ * approval was checked for existence, and existing is not belonging.
+ *
+ * Both links are checked, not only the execution. `Approval.executionId` and
+ * `Approval.taskId` are written independently when the approval is created, so
+ * agreeing with one is not evidence of agreeing with the other — and the outcome
+ * is written onto the task.
+ */
+async function requireApprovalBoundToRun(
+  approvalId: string,
+  run: WorkflowRunRecord,
+): Promise<Approval> {
+  const { approvalManager } = getDevHqAdapters();
+  const approval = await approvalManager.getApproval(approvalId);
+  // Rule 5 of the control standard: unable to evaluate is its own refusal, never
+  // a pass. An approval that cannot be read establishes nothing about who
+  // authorised this.
+  if (!approval) {
+    throw new ApprovalAuthorityError(
+      `Approval not found: ${approvalId}. Execution ${run.executionId} cannot act on an approval that does not exist.`,
+    );
+  }
+  if (approval.executionId !== run.executionId) {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} belongs to execution ${approval.executionId ?? "none"}, ` +
+        `not execution ${run.executionId}.`,
+    );
+  }
+  if (approval.taskId !== run.taskId) {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} belongs to task ${approval.taskId}, ` +
+        `not task ${run.taskId} which execution ${run.executionId} carries.`,
+    );
+  }
+  return approval;
+}
+
+/**
+ * Whether this run has reached the founder's gate, and so may only finalise
+ * under an approval.
+ *
+ * Two readings, because the gate is opened in two steps by two processes. The
+ * stage is set when the gate is registered; the approval exists one step before
+ * that, and a run whose approval was created but whose registration has not
+ * landed yet is just as much the founder's to decide. Reading the stage alone
+ * would leave the window between the two finalisable without any founder
+ * identity — which is the state `runExecutiveReview` explicitly retries through.
+ *
+ * A validation rejection reaches neither reading: it finalises from
+ * `executive_review`, and its own early return guarantees no approval exists for
+ * the execution. It is therefore unaffected, which is the point — the rule binds
+ * founder authority, and validation never claimed any.
+ */
+async function isAwaitingFounderAuthority(
+  run: WorkflowRunRecord,
+): Promise<boolean> {
+  if (run.stage === "founder_approval_required") return true;
+  const { approvalManager } = getDevHqAdapters();
+  return (
+    (await approvalManager.findPendingByExecution(run.executionId)) !== null
+  );
+}
+
+/**
  * Opens the founder decision gate. Run 1 calls this and then ends.
  *
  * There is no token to attach. The gate is now a stage on the run record and a
@@ -291,17 +384,21 @@ export async function registerApprovalGate(input: {
   executionId: string;
   approvalId: string;
 }): Promise<Approval> {
-  const { approvalManager, workflowRunRepository, eventLogger } =
-    getDevHqAdapters();
+  const { workflowRunRepository, eventLogger } = getDevHqAdapters();
   const run = await workflowRunRepository.getRun(input.executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${input.executionId}`);
   }
 
-  const approval = await approvalManager.getApproval(input.approvalId);
-  if (!approval) {
-    throw new Error(`Approval not found: ${input.approvalId}`);
-  }
+  // The approval must be this run's own, and that is established before the
+  // terminal early return so a cross-linked registration is never answered with
+  // another execution's approval record.
+  //
+  // Registering a gate under a foreign approval used to be accepted: this run's
+  // stage advanced to `founder_approval_required` while the approval the founder
+  // would actually act on carried a different execution. Deciding it advanced
+  // that one, and left this one parked at a gate no decision could open.
+  const approval = await requireApprovalBoundToRun(input.approvalId, run);
 
   if (isWorkflowCompleted(run)) {
     return approval;
@@ -346,6 +443,73 @@ export async function finalizeWorkflowOutcome(input: {
   const run = await workflowRunRepository.getRun(input.executionId);
   if (!run) {
     throw new Error(`Workflow run not found: ${input.executionId}`);
+  }
+
+  // --- The authority binding.
+  //
+  // Evaluated before anything else this function does, including the terminal
+  // early return, so a finalization that cannot show it carries this run's
+  // approval is refused whatever state the run is in. Behind the early return it
+  // would instead be answered with the completed record — a success it did not
+  // earn, reported for an act nobody authorised.
+  const approval = input.approvalId
+    ? await requireApprovalBoundToRun(input.approvalId, run)
+    : null;
+
+  // The founder recorded one answer and this call writes the other. Neither
+  // record is quietly corrected to match: the outcome is refused, and the
+  // recorded decision stands as the only decision either record holds. This is
+  // the same stance `decideFounderRequest` already takes on a conflicting
+  // submission, applied to the side that writes the outcome.
+  //
+  // An approval carrying *no* decision is a different case and is still
+  // converged forward below. That path is reachable only for this run's own
+  // approval, it is documented and covered behaviour, and absence of a recorded
+  // answer is not a contradiction of one.
+  if (approval?.decision && approval.decision !== input.decision) {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} records a ${approval.decision} decision and cannot ` +
+        `finalize execution ${run.executionId} as ${input.decision}.`,
+    );
+  }
+
+  // The founder's decision is honoured in name and inverted in effect (MINOR-1).
+  //
+  // The check above binds `decision`. Nothing bound `rejectionKind`, and it is
+  // not a lesser field: `taskStatusForOutcome` reads it, and "validation" routes
+  // the task to `needs_revision` instead of `rejected`. So a caller past the
+  // internal guard could POST {decision:"rejected", rejectionKind:"validation"}
+  // against a correctly-bound, founder-decided approval, pass every authority
+  // check here, send the task to needs_revision — and still have
+  // `approval.rejected` logged below, saying the founder's rejection took effect.
+  //
+  // The founder never chooses a rejection kind. `decideFounderRequest` records
+  // only "approved" | "rejected"; "validation" is produced by exactly one caller,
+  // `runExecutiveReview`, which finalises from `executive_review` before any
+  // founder gate exists and passes no `approvalId` at all. An approval-bound
+  // finalization claiming a validation rejection is therefore not a legitimate
+  // request under any caller the system has — it is the founder's authority being
+  // spent on an outcome the founder did not choose.
+  //
+  // Refused rather than coerced to "founder": the caller stated an outcome, and
+  // quietly rewriting it would leave them believing the request they sent is the
+  // one that ran, which is the same defect class one step further along.
+  if (approval && input.rejectionKind === "validation") {
+    throw new ApprovalAuthorityError(
+      `Approval ${approval.id} carries the founder's decision for execution ${run.executionId} ` +
+        `and cannot finalize it as a "validation" rejection: that routes task ${run.taskId} to ` +
+        `"needs_revision" rather than "rejected", while the timeline records that the founder's ` +
+        "decision took effect. Validation rejections are raised by executive review and carry no approval.",
+    );
+  }
+
+  // A founder-gated workflow finalising with no approval identity at all. The
+  // outcome would be attributed to Evan on the timeline with nothing behind it.
+  if (!approval && (await isAwaitingFounderAuthority(run))) {
+    throw new ApprovalAuthorityError(
+      `Execution ${run.executionId} is awaiting a founder decision and cannot be ` +
+        `finalized without the approval that carries it.`,
+    );
   }
 
   if (isWorkflowCompleted(run)) {
@@ -395,10 +559,58 @@ export async function finalizeWorkflowOutcome(input: {
     });
   }
 
-  await taskRepository.updateTask(task.id, {
-    status: taskStatusForOutcome(input.decision, rejectionKind),
-    occurredAt: timestamp,
-  });
+  // ARCH-02. This flow and the escalation lifecycle both write `Task.status`,
+  // and this site used to write it unconditionally from a reading taken several
+  // awaits earlier — so the later writer simply overwrote the earlier one's
+  // decision. That is how an escalation could sit open on a task this flow had
+  // already marked `completed`: a founder decision outstanding on work the board
+  // reported finished.
+  //
+  // Both conditions are evaluated by the repository in the same synchronous step
+  // as the write:
+  //   - the task must still hold the status it was observed with, so a
+  //     transition that landed in the gap refuses this write instead of being
+  //     silently overwritten by it;
+  //   - no unresolved escalation may hold the task. An open escalation means the
+  //     founder still owes a decision here, and the escalation lifecycle owns
+  //     the status until they give it. Whichever of the two flows runs second
+  //     now observes the other and yields, so the pair converges either way
+  //     round instead of depending on who wrote last.
+  //
+  // The conditional writer stamps its own `updatedAt`; this write no longer
+  // shares `timestamp` with the rest of the finalization. Nothing reads that
+  // correspondence, and giving it up is what buys the guarantee above.
+  const taskOutcome = taskStatusForOutcome(input.decision, rejectionKind);
+  const appliedTaskStatus = await taskRepository.updateTaskStatusIf(
+    task.id,
+    taskOutcome,
+    (current) =>
+      current.status === task.status && !hasOpenEscalationForTask(task.id),
+  );
+  if (!appliedTaskStatus) {
+    // The workflow still finalizes — it did complete — but the task deliberately
+    // keeps someone else's status, and that divergence goes on the timeline
+    // rather than being inferred later from two records that disagree.
+    const current = await taskRepository.getTask(task.id);
+    await eventLogger.log({
+      type: TASK_STATUS_REFUSED_EVENT_TYPE,
+      entityType: "task",
+      entityId: task.id,
+      message:
+        `Workflow ${input.executionId} finalized as ${input.decision} but did not set task ` +
+        `${task.id} to "${taskOutcome}": the task now reads "${current?.status ?? "missing"}"` +
+        `${
+          hasOpenEscalationForTask(task.id)
+            ? " and an unresolved founder escalation holds it"
+            : " after another transition landed first"
+        }. The other decision stands.`,
+      actorId: null,
+      actorLabel: "System",
+      // One entry per (execution, intended outcome): a replay of the same
+      // finalization is the same refusal, not a second one.
+      dedupeKey: `${TASK_STATUS_REFUSED_EVENT_TYPE}:${input.executionId}:${taskOutcome}`,
+    });
+  }
 
   await workflowEngine.markExecutionSucceeded(input.executionId, {
     at: timestamp,

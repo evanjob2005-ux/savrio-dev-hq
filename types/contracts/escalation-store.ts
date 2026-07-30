@@ -30,10 +30,25 @@ export interface EscalationStore {
   /** Newest open escalation for an execution, or null. Used for the queue. */
   findOpenByExecution(executionId: string): Promise<Escalation | null>;
   /**
-   * The escalation for an execution regardless of status, or null. Used by the
-   * self-healing sweep to skip executions that already escalated (open or resolved).
+   * The escalation for an execution **of a given origin**, regardless of status,
+   * or null. Used by the self-healing sweeps to skip work that already escalated
+   * (open or resolved).
+   *
+   * `origin` is required, not optional. `createEscalation` dedupes per
+   * (execution, origin), so (execution, origin) — not execution alone — is the
+   * identity of an escalation, and a lookup that omits it is asking a question no
+   * writer answers. The origin-agnostic form was a live hazard the moment
+   * `queue_stalled` was added: an execution can legitimately carry a
+   * `queue_stalled` escalation and then, once capacity returns, genuinely exhaust
+   * its retry budget. A backstop asking "has this execution escalated at all?"
+   * finds the stall, skips the exhaustion, and the founder is never told about
+   * the real failure. Making the parameter required means that question can no
+   * longer be asked by omission.
    */
-  findByExecution(executionId: string): Promise<Escalation | null>;
+  findByExecution(
+    executionId: string,
+    origin: Escalation["origin"],
+  ): Promise<Escalation | null>;
   createEscalation(input: CreateEscalationInput): Promise<Escalation>;
   /**
    * Resolves only if the escalation is still open, returning null when it is

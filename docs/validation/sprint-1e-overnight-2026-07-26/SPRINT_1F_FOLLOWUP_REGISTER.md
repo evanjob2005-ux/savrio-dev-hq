@@ -71,6 +71,49 @@ AR-1E in its persistence-readiness section — without either seeing the other's
 adds the eviction consequence: it is not merely unbounded growth, it is a *correctness*
 consequence for the timeline.
 
+#### CORRECTION 2026-07-29 — the retention cap RAT-5 depends on no longer exists
+
+**The "Behaviour" and "Consequence" rows above are SUPERSEDED as statements about the
+current tree.** They are preserved because they were accurate when written; they are not
+accurate now.
+
+Superseded claims:
+
+> **Behaviour** — The event store caps retained events at **200** (`store.ts:224`)
+>
+> **Consequence** — Once a deduplicated event is evicted, its key persists, so that event
+> **can never be re-appended** — the timeline can lose an event that dedup then refuses to
+> restore
+
+What is true at `c52039e`, verified by reading the file:
+
+- `appendEvent` (`lib/dev-hq/store.ts:343-352`) ends at `store.events.unshift(event)`. There
+  is no `slice`, `splice`, `shift`, or cap of any kind in the file.
+- `store.eventKeys` (`lib/dev-hq/store.ts:222`) is still never trimmed. `lib/dev-hq/store.ts:224`
+  is the closing brace of `createEmptyStore`, not a cap.
+- Both `store.events` and `store.eventKeys` therefore grow without bound for the life of the
+  process.
+- **RAT-5's stated consequence cannot occur as written.** Nothing is evicted, so no key can
+  outlive the event it guards. Keys and events are added together and are discarded together
+  when the process-global store is recreated.
+
+**Why the cap is gone, and by what authority.** The `slice(0, 200)` truncation was present
+from `58ca636`, was renamed to `EVENT_BUFFER_SIZE` in `804d56e`, and was **removed
+deliberately** in `a32d040` ("fix(dev-hq): harden local runtime boundaries"). The removal is
+authorized by **ADR-0004 §2**, which states: *"The event timeline is append-only. The 200
+value is a maximum feed page, not a retention policy."* It closes ARCH-07. It is guarded by
+`lib/dev-hq/audit-timeline.test.ts`, which asserts 205 distinct events are retained.
+`EVENT_BUFFER_SIZE = 200` still exists in `lib/dev-hq/constants.ts:205`, but it now bounds
+only the `limit` parameter of `/api/dev-hq/events`, not retention.
+
+**RAT-5 is therefore not a live correctness defect.** What survives from it is the
+unbounded-growth property both reviewers independently identified, which ADR-0004 itself
+records as a knowingly accepted consequence keeping **SVC-06** open. Carried forward as
+**OBL-41** in `docs/plans/OPEN_OBLIGATIONS.md`.
+
+**Not resolved here:** whether the growth needs bounding is a behaviour change against an
+approved ADR and is not this correction's to decide.
+
 ---
 
 ## Process items carried forward (record-only)
@@ -155,7 +198,7 @@ reviewer's. This is a defect in the brief template, not in either agent.
 | ID | Item |
 |---|---|
 | **AR N-7** | `docs/plans/SPRINT_1F_ENTRY_PACKAGE.md:143` lists dependency **D-6** (*"new dependencies (auth, web-push, jsdom)"*) as ❌ OPEN. The approved tree now contains `jsdom@^29.1.1`. D-6's *Blocks* column names 1F-6, 1F-10, 1F-19 — **not** 1F-18 — so the entry package did not gate PKG-2 on D-6 and **no governance breach is reported**. Recommend recording D-6's jsdom leg as discharged by PKG-2's authorization. Founder decision. |
-| **AR N-8 / ICR NOTE-6** | `handbooks/INDEPENDENT_CODE_REVIEWER.md` is absent, though `agents/independent-code-reviewer/AGENT.md:7` references it. Already tracked as dependency **D-8** at `docs/plans/SPRINT_1F_ENTRY_PACKAGE.md:144`. **Record against D-8; do not open a new item.** |
+| **AR N-8 / ICR NOTE-6** | ~~`handbooks/INDEPENDENT_CODE_REVIEWER.md` is absent, though `agents/independent-code-reviewer/AGENT.md:7` references it.~~ Already tracked as dependency **D-8** at `docs/plans/SPRINT_1F_ENTRY_PACKAGE.md:144`. **Record against D-8; do not open a new item.** — **CORRECTION 2026-07-29:** the absence claim is **SUPERSEDED**. `handbooks/INDEPENDENT_CODE_REVIEWER.md` exists, and `python scripts/verify-agent-references.py` reports *"Agent references resolve: 19 roles, 19 handbooks, 111 standard references"* — every referenced handbook resolves, with none missing. The reference at `agents/independent-code-reviewer/AGENT.md:7` is no longer dangling. Closed by **OBL-19**. Whether that discharges dependency **D-8** in the entry package is the entry package's record to make, not this one's |
 | **AR N-2** | The E2E assertion is coupled to a DOM nesting decision in `components/dashboard/TopBar.tsx:37-42`, a file the spec never names. Moving the `Mission Control` span inside the `h1` breaks the smoke test — fail-closed and the intended trade. Recorded so no future maintainer "repairs" it by deleting `exact: true`, **which would reinstate the candidate-1 defect.** Treat `e2e/smoke.spec.ts:11-14` as load-bearing documentation. |
 | **AR N-3** | `// @vitest-environment jsdom` in a `.test.ts` works but bypasses `setupFiles`, so such a test gets no `cleanup()` — precisely what `test/setup-dom.ts:7-9` exists to prevent. One line of documentation if the hatch is ever used. |
 | **AR N-5** | `fullyParallel: true` with `workers: 1` is a no-op today but a latent constraint: raising `workers` runs specs concurrently against one hardcoded port and one shared `.next` build directory. Flagged for whoever raises `workers`. |
@@ -176,6 +219,30 @@ Architecture Review returned **APPROVE WITH FINDINGS**, but the approval
 checkpoint is withheld pending preservation and reconciliation of the complete
 text of both independent gates. See "Blocked" below.
 
+> **CORRECTION 2026-07-29 — the tag now exists. The two records conflict.**
+>
+> The sentence "`sprint-1f-pkg3-approved` does not exist" is **SUPERSEDED as a
+> statement of fact.** The tag exists and is annotated:
+>
+> - `sprint-1f-pkg3-approved` → commit `b7386f0521f296a5411e77e15d4dd385eb65691d`
+> - annotation opens: *"Sprint 1F PKG-3 — protected checkpoint. Founder-approved
+>   candidate 1, unchanged."*
+> - the commit it points at is the same `b7386f05…` this section names as the
+>   candidate, so the tag was created against the frozen candidate, not a new one.
+>
+> **This correction is limited to the tag's existence.** It asserts nothing about
+> whether the complete ICR and Architecture Review texts were ever received. This
+> agent has no evidence either way, and the "Blocked" section below is left
+> untouched and unweakened.
+>
+> **The conflict is unresolved and is routed for decision.** A checkpoint whose
+> annotation reads "Founder-approved" exists, while this register records the
+> status as NOT YET APPROVED and the approval as withheld pending inputs the
+> register states were never received. One of the two records is wrong, or the
+> checkpoint was created under authority not captured here. **Deciding which is
+> outside this correction's authority** and requires the Founder or the Main
+> Coordinator. Until then, treat neither record as settled.
+
 Everything in this section was directed by the Founder and does **not** depend on
 the outstanding review texts, so it is recorded now rather than held.
 
@@ -189,6 +256,38 @@ branch protection, no ruleset, and no required status checks** — independently
 confirmed: `gh api …/branches/feature%2Fdev-hq-operating-system/protection`
 returns `404 Branch not protected`. **Therefore failing frontend tests currently
 block nothing.** The workflow is a dependable alarm; it is not yet a gate.
+
+> **CORRECTION 2026-07-29 — a ruleset now exists. The obligation is NOT
+> discharged.**
+>
+> The paragraph above is **SUPERSEDED as a statement of the current repository
+> state.** The `404 Branch not protected` result is still reproducible, but it is
+> no longer evidence of absent protection: rulesets are a separate API surface from
+> the legacy branch-protection endpoint, and the branch is protected by a ruleset.
+>
+> Measured via `gh api repos/:owner/:repo/rulesets/19824646`:
+>
+> - Ruleset **"Sprint 1F active line protection"**, id `19824646`, enforcement
+>   **active**, scoped to `refs/heads/feature/dev-hq-operating-system`.
+> - Rules: `deletion`, `non_fast_forward`, `pull_request`, `required_status_checks`.
+> - Required checks (`strict_required_status_checks_policy: true`): **Unit and
+>   Static Validation**, **End-to-End Smoke**, **Static Analysis (Semgrep)**,
+>   **Repository Integrity**, **Credential and Artifact Audit**.
+>
+> So "failing frontend tests block nothing" is no longer true for those five checks.
+>
+> **The obligation stays OPEN.** Three of the decisions this section requires are
+> recorded at values that do not gate anything:
+>
+> - `required_approving_review_count: 0` — a pull request is required, but no
+>   approval is.
+> - `require_code_owner_review: false`.
+> - `bypass_actors: [{ actor_type: "RepositoryRole", actor_id: 5, bypass_mode:
+>   "always" }]` — the admin role bypasses the ruleset unconditionally, with no
+>   authorization or audit step of the kind the "Emergency bypass" row demands.
+>
+> The decision table below is therefore still owed a recorded answer, and this
+> correction does not supply one.
 
 Once the workflow exists on the active default branch and its check names are
 available, repository governance must be configured. The settings action must
@@ -214,9 +313,9 @@ must follow integration — the check name cannot be required before it exists.
 |---|---|---|
 | **B** | **`pr.yml` repair** | `pr.yml` has a `pull_request` trigger with **no branch filter**, so it fires on every pull request. It ran throughout the PKG-3 validation campaign and **failed every time**. Left unrepaired it reddens every PR and will erode trust in the new signal. Recommended as the next package after integration and settings |
 | **C** | **Lockfile hygiene and toolchain contract** | Regenerate and validate `package-lock.json`; add `packageManager`; add `engines`; then **decide whether the npm 11.16.0 CI pin remains or is removed**. Root cause: the lockfile was generated by npm 11.16.0, and npm 10.9.4 (bundled with Node 22) rejects it because the `vite` nested in `vitest` declares a peer `esbuild ^0.27.0 \|\| ^0.28.0` the lock does not satisfy. **Pre-existing at `6eefff7f`** and reproducible on Windows, so caused by neither PKG-2 nor PKG-3 nor Linux |
-| **D** | **Dependency-vulnerability enforcement** | Enforcement plus handling of the existing backlog (42 advisories at PKG-2 review time: 1 critical, 19 high, 21 moderate, 1 low; all traced to baseline packages, 0 of the 47 PKG-2 additions) |
-| **E** | **Small PKG-3 workflow follow-up** | `if-no-files-found: ignore` → `warn`; cancellation-aware hygiene behaviour instead of `if: always()`; add `next` to the **e2e** job's binary precondition list; and **direct validation of concurrency cancellation, which remains UNVALIDATED** |
-| **F** | **Deferred PKG-2 test-configuration follow-up** | The four PKG-2 MINOR findings M-1…M-4, unchanged and still open. **PKG-3 required none of them** and included none |
+| **D** | **Dependency-vulnerability enforcement** | Enforcement plus handling of the existing backlog. **Historical, at PKG-2 review time:** 42 advisories — 1 critical, 19 high, 21 moderate, 1 low; all traced to baseline packages, 0 of the 47 PKG-2 additions. **CORRECTION 2026-07-29 — this figure is history, not the current state.** Measured on `c52039e`: `npm audit` reports **2 moderate, 0 critical, 0 high, 0 low** (esbuild, reached only through `trigger.dev`), and `npm audit --omit=dev` reports **0 vulnerabilities**. The historical figure is retained because it is the evidence the PKG-2 gates reasoned from; it must not be read as current. The package remains **Open** — enforcement itself was never implemented, and that is what Package D is for, not the backlog size |
+| **E** | **Small PKG-3 workflow follow-up** | `if-no-files-found: ignore` → `warn`, cancellation-aware hygiene, executable clean/tracked-dirty/untracked-dirty hygiene controls, removal of the redundant `e2e/smoke.spec.ts` precondition, and event-isolated concurrency grouping in the current Package E candidate; `next` in the **e2e** binary precondition list resolved by `b32caec`; **direct validation of concurrency cancellation remains OPEN and UNVALIDATED** |
+| **F** | **Deferred PKG-2 test-configuration follow-up** | The four PKG-2 MINOR findings M-1…M-4 were resolved by `b32caec` with executable regression coverage. **PKG-3 itself required none of them** and included none |
 
 ### PKG-3-CORRECTION-1 — a false claim in the candidate tag annotation
 
@@ -271,19 +370,22 @@ texts are supplied.
 | 1E-F4 | Required deliverable | **Closed** — Sprint 1F Track A, `sprint-1f-tracka-approved` |
 | 1E-F5 | Required deliverable | **Closed** — Sprint 1F Track A, `sprint-1f-tracka-approved` |
 | AR2-6 | Required deliverable | **Closed** — `sprint-1f-ar2-6-approved`; GATE-1 and GATE-2 condition future authorizations |
-| PKG-2 M-1 | Deferred MINOR | **Open** — highest priority of the four |
-| PKG-2 M-2 | Deferred MINOR | **Open** — closed as a side effect of M-3 |
-| PKG-2 M-3 | Deferred MINOR | **Open** |
-| PKG-2 M-4 | Deferred MINOR | **Open** |
+| PKG-2 M-1 | Deferred MINOR | **Closed** — `b32caec`; widened spec-only Playwright collection is pinned through the real CLI |
+| PKG-2 M-2 | Deferred MINOR | **Closed** — `b32caec`; both Vitest projects exclude `e2e/**` |
+| PKG-2 M-3 | Deferred MINOR | **Closed** — `b32caec`; both projects compose installed-version `configDefaults.exclude`, with regression coverage |
+| PKG-2 M-4 | Deferred MINOR | **Closed** — `b32caec`; both E2E ports are validated as distinct base-10 integers in range |
 | PKG-2 CI enforcement | Future package | **Delivered as PKG-3**, `candidate-1f-pkg3-1` — frozen, **not yet approved** |
 | PKG-2 review-brief correction | Process | **Binding on future briefs** |
-| PKG-3 candidate approval | Gate | **Blocked** — awaiting complete ICR and Architecture Review texts |
-| PKG-3-OBLIGATION-A repository settings | **Mandatory** post-integration | **Open — requires its own authorization** |
+| PKG-3 candidate approval | Gate | **CONFLICTED — routed for decision, 2026-07-29.** Superseded status: ~~"**Blocked** — awaiting complete ICR and Architecture Review texts"~~. The `sprint-1f-pkg3-approved` tag exists at `b7386f05…`, annotated "Founder-approved candidate 1, unchanged", while this register records the approval as withheld. **Not resolved here** — this agent has no evidence about whether the review texts were received. Founder or Main Coordinator must reconcile |
+| PKG-3-OBLIGATION-A repository settings | **Mandatory** post-integration | **Open — requires its own authorization. Partially actioned, 2026-07-29.** Ruleset "Sprint 1F active line protection" (`19824646`) is active on the active line with 5 required status checks, so the "blocks nothing" premise no longer holds. Still open: `required_approving_review_count: 0`, `require_code_owner_review: false`, and admin `bypass_mode: "always"` with no audited emergency-bypass procedure. The decision table is still owed recorded answers |
 | PKG-3 package B `pr.yml` repair | Future package | **Open** — recommended first after integration and settings |
 | PKG-3 package C lockfile and toolchain | Future package | **Open** — also decides the fate of the npm 11.16.0 pin |
-| PKG-3 package D vulnerability enforcement | Future package | **Open** |
-| PKG-3 package E workflow follow-up | Future package | **Open** — includes UNVALIDATED concurrency cancellation |
-| PKG-3 package F deferred PKG-2 test config | Future package | **Open** — M-1…M-4 unchanged |
+| PKG-3 package D vulnerability enforcement | Future package | **Open** — enforcement still unimplemented. Backlog measured 2026-07-29 on `c52039e`: `npm audit` 2 moderate, `npm audit --omit=dev` 0. The 42-advisory figure in the package table is history, not current |
+| PKG-3 package E workflow follow-up | Future package | **Safe-local work resolved by this Package E change** — `next` precondition closed by `b32caec`; artifact warnings, cancellation-aware hygiene, N-3/N-4/N-6, and exact null/red controls are implemented; **direct GitHub concurrency-cancellation validation remains OPEN and UNVALIDATED** |
+| PKG-3 E / AR N-3 redundant smoke-file precondition | Deferred MINOR | **Resolved by this Package E change** — E2E preconditions retain `playwright.config.ts`, Playwright, and Next while Playwright itself remains the fail-closed collection authority |
+| PKG-3 E / AR N-4 unexecuted hygiene detection | Deferred MINOR | **Resolved by this Package E change** — both jobs execute one shared verifier; clean, tracked-dirty, and untracked-dirty paths execute in regression tests, with removal and `|| true` weakening controls |
+| PKG-3 E / AR N-6 cross-event concurrency collision | Deferred MINOR | **Resolved by this Package E change** — `github.event_name` separates push and `workflow_dispatch` while `github.ref` preserves per-pull-request isolation |
+| PKG-3 package F deferred PKG-2 test config | Future package | **Closed** — M-1…M-4 resolved by `b32caec` |
 | PKG-3-CORRECTION-1 tag annotation | Governance correction | **Recorded; supersedes the annotation. Tag must not be re-frozen** |
 | Package C Track B plan preservation | Documentation custody | **Closed** — `candidate-1f-pkgc-1`, both gates approved. Four planning documents preserved byte-for-byte |
 | PKGC-OBLIGATION-A custody note | **Mandatory** custody clarification | **Discharged** — `docs/plans/SPRINT_1F_TRACK_B_CUSTODY_NOTE.md`, additive and forward-only |
@@ -376,13 +478,13 @@ texts are supplied.
 | Multi-day V-2 observation | Gate | **BLOCKED** — not authorized; only warranted if Step 0, Path B, and Path A all pass |
 | PKGE-HAZARD-1 worker-bundle second store | **MEDIUM** architectural constraint | **Open** — helpers pure at anchor; worker imports must be limited to pure functions, types, and safe utilities |
 | SEC-1…SEC-14 reconciliation obligation | **Mandatory** for ADR-0003 | **Open** — readable at `SPRINT_1F_MISSION_CONTROL_LITE.md` §10.2:707-720. Package E wrongly recorded them unreadable |
-| SEC-6 / CR-1 predictable capability minting | **HIGH** — pre-deployment blocker | **Open** — `review-service.ts:354` uses `nextId("rvt")`; CSPRNG required before generalizing the capability pattern |
+| SEC-6 / CR-1 predictable capability minting | **HIGH** — pre-deployment blocker | **Closed — CORRECTION 2026-07-29.** Superseded claim: ~~"**Open** — `review-service.ts:354` uses `nextId("rvt")`; CSPRNG required before generalizing the capability pattern"~~. The token is now minted by `nextCapabilityToken("rvt")` at `lib/dev-hq/review-service.ts:359`. `lib/dev-hq/id.ts:10-24` implements it over `randomUUID()` from `node:crypto` and documents in-line why it is deliberately **not** `nextId` — `nextId` returns `prefix-<epoch-ms>-<counter>` from a process-wide counter, which a reviewer brute-forced. The CSPRNG requirement is met |
 | SEC-12 conversation-surface prompt injection | **HIGH** | **Open** — no Package E topic covers it; structured confirmed commands only |
 | PKGE-CORRECTION-1 transmission format | Process | **Binding** — no load-bearing content preserved only inside wide Markdown tables |
 | Eight FD / ACR-001 X-8 decisions | Founder decision | **Open** — tracked entry package governs; no durable Founder decision record exists |
 | Timeline tie-break and assembly location | Architecture | **Open** — corpus self-contradicts; ADR-0002 §E5 unamended. AA-1 owed |
 | Entry package "frontend test infrastructure absent" | Tracked-document staleness | **Open** — pre-existing defect in `SPRINT_1F_ENTRY_PACKAGE.md`; outside Package C scope |
-| RAT-5 | Record-only observation | Logged for triage |
+| RAT-5 | Record-only observation | **Corrected 2026-07-29 — premise no longer holds.** The 200-event cap was removed in `a32d040` under ADR-0004 §2 (append-only timeline), so nothing is evicted and RAT-5's correctness consequence cannot occur as written. The residual unbounded growth of `store.events` and `store.eventKeys` is carried forward as **OBL-41** and remains covered by **SVC-06** |
 | RAT-4 | Process | Logged |
 | RAT-7 | Process | Logged |
 | Workflow diagnosis | Process | Logged, root cause unknown |

@@ -51,6 +51,5 @@ export interface TaskRepository {
     status: Task["status"],
     precondition: (current: Task) => boolean,
   ): Promise<Task | null>;
-  claimTask(id: string, agentId: string): Promise<Task>;
   listDependencies(taskId: string): Promise<TaskDependency[]>;
 }

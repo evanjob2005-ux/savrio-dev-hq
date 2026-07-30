@@ -1,18 +1,25 @@
 # Permanent Operating Handbook
 
 **Document ID:** POH-001
-**Version:** 0.1.0
+**Version:** 0.1.1
 **Status:** **DRAFT — NOT YET APPROVED.** Consolidation only. This document creates no new
 policy and grants no authority. Every rule below is either (a) already controlling under a
 cited approved authority, or (b) explicitly marked **PROPOSED** and therefore not binding.
 **Authority:** CONST-001, GOV-001, ORG-001, AGENT-001 (`AGENTS.md`), ADR-0001, ADR-0002,
-Master Roadmap v8.0, recorded Founder decisions
+Master Roadmap (registered **v10.4** at `docs/roadmap/MASTER_ROADMAP.md`), recorded Founder
+decisions
 **Owner:** Director of Operations (consolidation); Founder (approval)
-**Baseline:** branch `validation/sprint-1e-overnight-2026-07-26`, HEAD `9069c12`
+**Baseline:** original draft at branch `validation/sprint-1e-overnight-2026-07-26`, HEAD
+`9069c12`; narrow 2026-07-29 authority/reference reconciliation authorized by the Founder.
 
 ---
 
 # 0. What this document is
+
+**Role sources:** repository convention uses `agents/*/AGENT.md` for role definitions and
+`handbooks/*` for operating manuals. `employees/**` contains active/supporting role documents
+subject to higher authority. Any conflict among them escalates; this draft does not supersede
+or demote a source.
 
 The Master Roadmap, the Phase 2 program plan, and the Sprint 1F planning corpus all cite a
 *Permanent Operating Handbook* as a controlling authority. No such document existed in this
@@ -76,7 +83,8 @@ state the same eight tiers.
 
 ## 1.2 Axis B — source-of-truth precedence (which artifact is right about a fact)
 
-Source: **Master Roadmap v8.0, §Authority Rule** and its accompanying table.
+Source: **Master Roadmap §Authority Rule** and its accompanying table — registered **v10.4**,
+`docs/roadmap/MASTER_ROADMAP.md:230`.
 
 | Source | Authoritative for |
 |---|---|
@@ -84,20 +92,23 @@ Source: **Master Roadmap v8.0, §Authority Rule** and its accompanying table.
 | Current Progress Update (CPU-001) | Current sprint, candidate, owners, reviews, blockers, next gate |
 | Approved ADRs and recorded decisions | Architecture, security, policy, governance constraints |
 | Permanent Operating Handbook (this document) | Stable operating rules, authority boundaries, review behaviour, prompt standards |
-| Master Roadmap v8.0 | Long-term capability direction, dependencies, phase promises, completion gates |
+| Master Roadmap (registered v10.4) | Long-term capability direction, dependencies, phase promises, completion gates |
 
-## 1.3 The unresolved seam between the two axes
+**Citation corrected 2026-07-29.** Both rows previously read *"Master Roadmap v8.0"*, which
+exists at no path in this repository. See **ACR-001 §1.2** for the full correction note,
+including v10.4's additional Binding Operating Kernel row. X-8/X-27 now decide that the
+kernel supplements the eight-tier hierarchy and cannot override it.
+
+## 1.3 Resolution between the two axes
 
 **Axis A contains no roadmap tier and no handbook tier.** CONST-001 Art. IX and `AGENTS.md`
 §Governing Authority list eight tiers; neither the Master Roadmap nor this handbook appears
 in them. Axis B asserts a position for both.
 
-**This handbook does not resolve that.** It is carried as register item **X-8** and is a
-Founder decision. Until it is answered:
-
-- Where Axis A and Axis B are both silent on a conflict, **escalate** rather than choose.
-- Where a claim rests only on the roadmap or only on this handbook, it is an
-  **unverifiable-tier premise** and must be labelled as such, not asserted as governed.
+**Recorded decision (ACR-001 X-8/X-27).** Axis A controls governing authority. The roadmap
+and its kernel supplement it for planning and long-term direction; they are not promoted into
+the eight-tier hierarchy and cannot override a conflicting higher-authority instruction.
+Material conflicts escalate rather than being reconciled locally.
 
 ## 1.4 The rule that governs all of the above
 
@@ -124,7 +135,7 @@ AGENT-001 §Governing Authority (`AGENTS.md`) · Master Roadmap v8.0 §Authority
 GOV-001 §Evidence and Audit Requirements (`docs/company/GOVERNANCE.md:364-378`).
 
 **Not approved:** the *position of the roadmap and of this handbook within Axis A*. See
-§1.3 and register **X-8**.
+§1.3 and decided register item **X-8**.
 
 ---
 
@@ -196,9 +207,9 @@ mutated mid-review, producing a `FAIL` on candidate identity rather than on code
 **Status: PROPOSED. NOT BINDING.**
 
 Recorded here because it is repeatedly relied on in Sprint 1F planning and has **no approved
-source**. `standards/GIT_STANDARD.md` protects only `main` and `develop` (`:44-47`) and says
-nothing about candidate freezes, sprint baseline tags, worktree isolation, or concurrent
-session writes.
+source**. `standards/GIT_STANDARD.md` §Branch Strategy (`:42-68`) covers only the two
+long-lived branches and says nothing about candidate freezes, sprint baseline tags, worktree
+isolation, or concurrent session writes.
 
 The proposed rule, as practised and recommended:
 
@@ -345,7 +356,8 @@ accepted; it has been lost, and the verdict does not authorize commit."*
 
 ## R8 — Authority and escalation
 
-**Status: CONTROLLING** for the duty. **Tier-unresolved** for the L0–L5 grid.
+**Status: CONTROLLING** for the duty. The L0–L5 grid remains separately unapproved; X-8 does
+not promote roadmap text into the hierarchy.
 
 An employee decides within its role, scope, and documented authority, and **escalates rather
 than choosing an unauthorized interpretation.** Escalation states the blocker, the facts, the
@@ -360,10 +372,10 @@ performed. (GOV-001:193-198.)
 §Reviewer Escalation (:380-388), §Conflict Resolution (:458-470) · AGENT-001 §Escalation
 Standards, §Decision Boundaries · Master Roadmap v8.0 §2 Reserved Founder Authority.
 
-**Roadmap-sourced, tier unresolved (X-8):** the **L0–L5 Delegated Authority Levels** grid and
+**Roadmap-sourced and not independently binding:** the **L0–L5 Delegated Authority Levels** grid and
 the **Automatic Acceptance Rule** (Master Roadmap v8.0 §2) are a finer-grained authority model
 than CONST-001 Art. III carries. They are recorded, and **not** cited here as controlling,
-pending X-8. GOV-PLAN-001 §4.10 independently records that *no governance construct exists
+pending separate approval. GOV-PLAN-001 §4.10 independently records that *no governance construct exists
 for machine-executed Founder authority* — register item **X-13**.
 
 ---
@@ -442,7 +454,7 @@ explicit recovery/uncertain state and blocks unsafe work.
 
 **Why PROPOSED and not CONTROLLING:**
 
-1. Its authority is roadmap-tier, and the roadmap's tier is unresolved (**X-8**).
+1. It is roadmap-only planning direction and is not independently binding under decided X-8.
 2. The only specification is `agents/lead-software-engineer/outputs/CONTEXT_LIFECYCLE_MANAGER_SPEC.md`
    (SPEC-CLM-001 v1.1.0), which is **untracked and unapproved**, ships every threshold as
    `provisional: true`, and explicitly declines threshold ownership on governance grounds.
@@ -507,7 +519,7 @@ CONST-001 Art. VI steps 10–12 · GOV-001 §Operations Review (:438-454).
 > *"Prefer one exact next action over multiple competing options unless a genuine Founder
 > decision is required."* — Master Roadmap v8.0 §23
 
-Roadmap-tier (**X-8**), and no approved standard carries it. The related requirement that
+Roadmap-only planning direction, and no approved standard carries it. The related requirement that
 reviews run from a **separate clean session** rests on `WORKFLOW_DIAGNOSIS.md` — where seven
 consecutive in-session spawns produced zero deliverables and **the root cause is recorded as
 UNKNOWN**. A mitigation that works for unknown reasons is not yet a rule; see R4.
@@ -520,9 +532,16 @@ UNKNOWN**. A mitigation that works for unknown reasons is not yet a rule; see R4
 
 ### R14a — Branch and history protection (CONTROLLING)
 
-Protected branches are `main` and `develop`. Force-pushing protected branches is to be
-avoided. Feature work occurs on dedicated branches.
-**Source:** `standards/GIT_STANDARD.md:44-47`, `:49`, `:253`.
+The long-lived branches are `feature/dev-hq-operating-system` (the repository default and
+active integration line) and `main`. Force-pushing protected branches is to be avoided.
+Feature work occurs on dedicated branches.
+**Source:** `standards/GIT_STANDARD.md:42-68`, `:272`.
+
+**Corrected 2026-07-29.** This clause previously read *"Protected branches are `main` and
+`develop`"*, faithfully reproducing the standard — which named a branch that has never
+existed in this repository, and omitted the branch that is actually the default. The standard
+was corrected; this clause follows it. What the protected set *should* contain remains
+**X-19**, unresolved.
 
 ### R14b — Repository conduct (CONTROLLING)
 
@@ -574,7 +593,8 @@ yet reflect it. Register item **X-19**.
 
 ## R15 — Roadmap change control
 
-**Status: CONTROLLING** (roadmap-sourced; tier subject to **X-8**).
+**Status: CONTROLLING only through its separately cited approved authorities**; roadmap-only
+language is supplemental under decided X-8.
 
 **Source — Master Roadmap v8.0, Appendix G, quoted:**
 
@@ -625,11 +645,11 @@ rule is not yet consolidatable.
 |---|---|
 | **Reviewer verdict vocabulary** | **Five incompatible vocabularies are in force at once.** Choosing one would be authorship, not consolidation. Register item **X-7**, expanded in ACR-001 §3. |
 | **Severity ladder** | A Founder decision fixes `BLOCKER · MAJOR · MINOR · OBSERVATION` (`PHASE_2_PROGRAM_PLAN.md:151-163`), but two approved documents still carry different ladders (EMP-QA-001, `handbooks/ARCHITECTURE_REVIEWER.md:129`). The decision binds; the retirement of the others has not been recorded. Register item **X-7b**. |
-| **Negative-outcome policy** (throw/absorb) | Governs four services and two reviewers' verdicts but *"lives only in a review artifact"* — 1E-F1, open. Not yet a governed rule. |
+| **Negative-outcome policy** (throw/absorb) | 1E-F1 remains a reserved Track A decision. The generic `ERROR_HANDLING_STANDARD.md` requires explicit, non-silent failure behavior but does not decide the service-specific throw/absorb policy. |
 | **ADR numbering ownership** | Recorded as resolved by Founder decision in `PHASE_2_PROGRAM_PLAN.md` §0.6 context, but the assignment authority itself is unwritten. Register item **X-5**. |
 | **Delegated acceptance / machine-executed Founder authority** | No governance construct exists. Register item **X-13**. |
 | **Bounded repair attempts** | Recommended in GOV-PLAN-001 §2.3 L-8; never approved. |
-| **Missing standards** (`NAMING`, `LOGGING`, `ERROR_HANDLING`) and `handbooks/INDEPENDENT_CODE_REVIEWER.md` | Absent from the repository. *"A review gate whose own standard is missing cannot certify against it."* Register item **X-12**. |
+| **Previously missing standards and handbooks** | Closed by ACR-001 X-12: all 19 role handbooks and all 111 role standard references resolve under a focused audited control. |
 
 ---
 

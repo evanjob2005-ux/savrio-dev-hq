@@ -540,3 +540,53 @@ type/task shape). A fourth is not proposed on this evidence.
 
 **Standing recommendation:** commission fresh independent reviews from a separate clean
 session. That path is proven; in-session fresh spawns are not.
+
+---
+
+## 4f. §7's MITIGATION FAILED ITS FIRST INDEPENDENT TEST — four of four, 2026-07-29
+
+Recorded 2026-07-29 from a separate coordinating session running a Founder-directed
+three-loop package (implement → check → independent code review → architecture review)
+against `c52039e`. Four agents were spawned fresh in-session.
+
+| # | Agent | Type | Work completed | Delivered on idle | Delivered after explicit `SendMessage` |
+|---|---|---|---|---|---|
+| 1 | coder-1 | general-purpose | **yes — verified on disk** | ❌ | ❌ |
+| 2 | checker-1 | general-purpose | unknown | ❌ | ❌ (asked twice) |
+| 3 | icr-1 | independent-code-reviewer | unknown | ❌ | ❌ |
+| 4 | arch-1 | architecture-reviewer | unknown | ❌ | ❌ |
+
+**This contradicts §7 on the point that matters.** §7 establishes that terminal-report
+delivery is unreliable but records that *"explicit `SendMessage` recovered it in every case
+tested."* Here explicit `SendMessage` was sent to all four agents, in the form §7
+prescribes, and recovered **nothing**. The mitigation §7 records as reliable is not
+reliable.
+
+**What this establishes:**
+
+1. §7's delivery-path mechanism remains the best-supported explanation — coder-1 completed
+   correct, substantive work that was verified on disk, so the failure is again at delivery
+   and not at execution.
+2. §7's *remedy* does not generalise. Four of four is not a marginal result.
+3. §4e's standing recommendation is **strengthened, not superseded**, by §7. A separate
+   clean session remains the only proven path.
+
+**What this does NOT establish, and is deliberately not claimed:**
+
+1. That the mechanism is identical to §7's. These transcripts were not examined either.
+2. That `SendMessage` never works. §7 demonstrates cases where it did; this records cases
+   where it did not. Both stand.
+3. Anything about agents *resumed* rather than freshly spawned. Not tested here.
+
+**Corroborating detail worth preserving.** coder-1's work was independently falsified by the
+coordinator rather than accepted on its own report — comment-only diff confirmed by
+filtering non-comment lines, six gates re-run — and it was found not merely adequate but
+better than its brief: it located `ADR-0004` decision 2 and commit `a32d040`, which the
+coordinator's own prior analysis had missed and had drawn a wrong recommendation from. **The
+agents are not producing poor work. The work is not arriving.**
+
+**Consequence for the three-loop protocol.** Loops 2 and 3 were never reachable: a loop
+repeats on a gate *failure*, and these gates returned no verdict at all. The package
+`075b993` was committed with its review gap disclosed in its own commit body. The
+independent code and architecture gates remain **owed** against that commit and must be
+commissioned from a separate clean session per §4e.

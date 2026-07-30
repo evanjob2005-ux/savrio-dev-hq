@@ -1,4 +1,5 @@
 # AI Agent Orchestrator Handbook
+**Document ID:** HBK-AI-AGENT-ORCHESTRATOR
 
 **Role ID:** ROLE-013
 

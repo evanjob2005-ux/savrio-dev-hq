@@ -182,3 +182,17 @@ docs/generated/
 
 local/
 
+##############################
+# Python
+##############################
+
+# scripts/ holds Python control-verification and roadmap-conversion scripts.
+# Running them writes bytecode caches next to the source. One such file --
+# scripts/__pycache__/test-verify-workflow-structure.cpython-314.pyc -- was
+# committed in c8c4c38 before this rule existed. This rule stops the next one;
+# it does NOT untrack the file already in the index, which still needs
+# `git rm --cached`. Tracked as OBL-32.
+__pycache__/
+*.py[cod]
+*$py.class
+

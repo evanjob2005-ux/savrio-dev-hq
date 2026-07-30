@@ -107,7 +107,7 @@ describe("execution manager", () => {
   it("reports no_agent_available when nothing eligible matches", async () => {
     const task = seedTask();
     const decision = await assignExecution(task.id, {
-      requiredCapabilities: ["qa"], // gemini has qa but is only "waiting"
+      requiredCapabilities: ["no-such-capability"],
     });
     expect(decision.assigned).toBe(false);
     expect(decision.reason).toBe("no_agent_available");
@@ -595,7 +595,7 @@ describe("execution manager", () => {
       await ensureExecution({ executionId: CANONICAL, taskId: task.id });
 
       const result = await ensureAssignment(CANONICAL, {
-        requiredCapabilities: ["qa"], // eligible agent exists but is only "waiting"
+        requiredCapabilities: ["no-such-capability"],
       });
       expect(result.created).toBe(false);
       expect(result.decision.assigned).toBe(false);
