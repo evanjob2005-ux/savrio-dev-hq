@@ -229,9 +229,15 @@ jobs:
           # The record-claims check below asserts things about git tags, and a
           # checkout without tags reports zero of them. That state cannot tell
           # an absent tag from an unfetched one, so the verifier refuses to
-          # judge any tag claim and exits 2 rather than guessing. fetch-tags
-          # keeps the fetch shallow while still making the refs available.
+          # judge any tag claim and exits 2 rather than guessing.
           fetch-tags: true
+          # Full history, because the verifier reads the manifest's
+          # required-claims baseline out of a pinned commit (CTL-02). On a
+          # shallow checkout that commit is absent, nothing is known about which
+          # claims SHOULD be present, and the verifier exits 2 rather than
+          # reporting coverage it never measured. The record-claims harness also
+          # clones this checkout, which needs real history to clone.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -262,6 +268,24 @@ jobs:
       # file or an unfetched tag is never reported as a claim that still holds.
       - name: Verify documented record claims
         run: python scripts/verify-record-claims.py
+
+      # CTL-03: the step above had been running the verifier without ever
+      # running its negative controls, so CI proved that the claims were green
+      # and nothing about whether the control could go red. A verifier that has
+      # only been seen passing is indistinguishable from one that cannot fail --
+      # the NBF-5 failure mode this repository has already shipped twice.
+      #
+      # Three phases: a hermetic matrix over every probe in both directions, a
+      # null audit proving each case is green without its mutation, and a live
+      # phase that inverts every seeded claim inside a throwaway clone and
+      # requires it to go red naming itself. Roughly 70s.
+      #
+      # Boundary, recorded so this step is not over-read: the harness and the
+      # control it tests are both candidate-editable, so this raises the cost of
+      # a false green without closing OBL-30, which needs a trust anchor
+      # outside these files.
+      - name: Exercise the record-claims negative controls
+        run: python scripts/test-verify-record-claims.py
 
       - name: Validate YAML and JSON syntax
         run: |

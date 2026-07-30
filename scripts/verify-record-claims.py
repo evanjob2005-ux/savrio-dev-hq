@@ -88,15 +88,22 @@ _TAG_INDEX = None
 
 
 def _build_tag_index():
-    """Map tag name -> the commit it resolves to, or a string saying why not.
+    """Map tag name -> (resolved commit, ref object type), or a string saying why not.
 
     `%(*objectname)` is the peeled target of an annotated tag and is empty for a
     lightweight one, so the fallback to `%(objectname)` handles both.
+
+    `%(objecttype)` is the type of the object the REF points at, which is the
+    only thing that distinguishes the two: `tag` for an annotated tag object,
+    `commit` for a lightweight ref pointing straight at a commit. Without it a
+    lightweight tag satisfies a claim whose statement says "annotated" -- one of
+    the CTL-01 false-green paths.
     """
     try:
         out = subprocess.run(
             ["git", "for-each-ref",
-             "--format=%(refname:short)\t%(objectname)\t%(*objectname)",
+             "--format=%(refname:short)\t%(objectname)\t%(*objectname)"
+             "\t%(objecttype)",
              "refs/tags"],
             capture_output=True,
         )
@@ -113,10 +120,10 @@ def _build_tag_index():
     index = {}
     for line in out.stdout.decode("utf-8", errors="replace").splitlines():
         parts = line.split("\t")
-        if len(parts) != 3 or not parts[0]:
+        if len(parts) != 4 or not parts[0]:
             continue
-        name, objectname, peeled = parts
-        index[name] = peeled or objectname
+        name, objectname, peeled, objecttype = parts
+        index[name] = (peeled or objectname, objecttype)
 
     if not index:
         # The decisive fail-closed case. A shallow checkout that never fetched
@@ -215,6 +222,48 @@ def exists(raw, path):
             f"unknown") from error
 
 
+def flag(args, field, default):
+    value = args.get(field, default)
+    if not isinstance(value, bool):
+        raise CannotEvaluate(f"args.{field} {value!r} is not a boolean")
+    return value
+
+
+def _is_comment_line(line):
+    """True for a line whose content is only a comment."""
+    stripped = line.lstrip()
+    return (stripped.startswith("//") or stripped.startswith("*")
+            or stripped.startswith("/*"))
+
+
+# A trailing `//` comment, which must go too. Blanking only whole comment LINES
+# is not enough: `token: nextId("rvt"), // nextCapabilityToken("rvt")` leaves
+# the searched-for call on the very line the claim names, and this harness
+# caught that passing. The lookbehind spares `http://` and `https://`.
+_TRAILING_COMMENT = re.compile(r"(?<!:)//.*$")
+
+
+def code_lines(text, code_only):
+    """File lines, with comments removed when code_only is set.
+
+    Blanked in place rather than dropped so that reported line numbers keep
+    referring to the real file. CTL-01 bypass 2 was exactly this: a claim
+    asserting that a generator is built over `randomUUID()` stayed green when
+    the call was replaced by a predictable counter and the identifier survived
+    in a COMMENT describing what the code used to do. A claim about code must be
+    decided by code.
+
+    Heuristic, and knowingly so: `//` inside a string literal is treated as the
+    start of a comment, so a claim whose pattern spans one would read short.
+    Erring that way makes a claim go red rather than falsely green.
+    """
+    lines = text.splitlines()
+    if not code_only:
+        return lines
+    return ["" if _is_comment_line(line) else _TRAILING_COMMENT.sub("", line)
+            for line in lines]
+
+
 # ---------------------------------------------------------------------------
 # probes
 #
@@ -226,7 +275,8 @@ def probe_tag_present(args):
     tag = require(args, "tag")
     index = tag_index()
     if tag in index:
-        return True, f"tag exists at {index[tag][:12]}"
+        target, kind = index[tag]
+        return True, f"tag exists at {target[:12]} ({kind} object)"
     return False, f"tag does not exist ({len(index)} tags read)"
 
 
@@ -234,8 +284,38 @@ def probe_tag_absent(args):
     tag = require(args, "tag")
     index = tag_index()
     if tag in index:
-        return False, f"tag now EXISTS at {index[tag][:12]}"
+        target, kind = index[tag]
+        return False, f"tag now EXISTS at {target[:12]} ({kind} object)"
     return True, f"tag does not exist ({len(index)} tags read)"
+
+
+def probe_tag_annotated(args):
+    """The tag must exist AND be a real annotated tag object.
+
+    CTL-01 bypass 4: `tag-present` is satisfied by a lightweight ref, so a
+    record stating that a checkpoint "exists and is annotated" stayed green
+    after the annotation -- the immutable evidence PKG-3-CORRECTION-1 depends
+    on -- was replaced by a bare pointer. An optional `commit` pins the peeled
+    target in the same probe, so identity and annotation cannot drift apart.
+    """
+    tag = require(args, "tag")
+    index = tag_index()
+    if tag not in index:
+        return False, f"tag does not exist ({len(index)} tags read)"
+    target, kind = index[tag]
+    if kind != "tag":
+        return False, (f"tag is LIGHTWEIGHT (ref points straight at a {kind}), "
+                       f"so it carries no annotation")
+    want = args.get("commit")
+    if want is not None:
+        if not isinstance(want, str) or not HEX_NAME.fullmatch(want):
+            raise CannotEvaluate(
+                f"args.commit {want!r} is not a 7-to-40 character lowercase "
+                f"hexadecimal object name")
+        if not target.startswith(want):
+            return False, (f"annotated tag -> {target[:12]}, not "
+                           f"{want[:12]}")
+    return True, f"annotated tag object -> {target[:12]}"
 
 
 def probe_tag_at_commit(args):
@@ -248,9 +328,9 @@ def probe_tag_at_commit(args):
     index = tag_index()
     if tag not in index:
         return False, "tag does not exist, so it points at nothing"
-    got = index[tag]
+    got, kind = index[tag]
     if got.startswith(want):
-        return True, f"tag -> {got[:12]}"
+        return True, f"tag -> {got[:12]} ({kind} object)"
     return False, f"tag -> {got[:12]}, not {want[:12]}"
 
 
@@ -270,10 +350,22 @@ def probe_file_absent(args):
     return True, "path does not exist"
 
 
-def probe_grep_present(args):
+def _grep(args):
+    """(pattern_text, searched_text, raw) honouring the optional code_only arg.
+
+    code_only defaults to false here so that every claim already written
+    against these two probes keeps its exact prior meaning. A claim that needs
+    comments excluded says so.
+    """
     raw, path = repo_path(args)
     pattern_text, pattern = compiled(args)
     text = read_text(raw, path)
+    searched = "\n".join(code_lines(text, flag(args, "code_only", False)))
+    return pattern_text, pattern, searched, raw
+
+
+def probe_grep_present(args):
+    pattern_text, pattern, text, raw = _grep(args)
     match = pattern.search(text)
     if match:
         line = text.count("\n", 0, match.start()) + 1
@@ -282,9 +374,7 @@ def probe_grep_present(args):
 
 
 def probe_grep_absent(args):
-    raw, path = repo_path(args)
-    pattern_text, pattern = compiled(args)
-    text = read_text(raw, path)
+    pattern_text, pattern, text, raw = _grep(args)
     match = pattern.search(text)
     if match:
         line = text.count("\n", 0, match.start()) + 1
@@ -292,10 +382,116 @@ def probe_grep_absent(args):
     return True, f"{pattern_text} matches nothing in {raw}"
 
 
+def probe_grep_scoped(args):
+    """`pattern` must match within `within` lines of `anchor`.
+
+    CTL-01 bypass 2 and 5: a whole-file grep is satisfied by a match ANYWHERE
+    in the file, so `randomUUID()` surviving in an unrelated helper kept a
+    claim green after the generator it names stopped using it. Binding the
+    pattern to a named anchor makes the claim about the call site it asserts.
+
+    Both the anchor and the pattern are required to appear. A file where the
+    anchor itself has gone is a changed subject, not a satisfied claim.
+
+    `within: 0` means "on the anchor's own line", which is what closes CTL-01
+    bypass 3: an unrelated `toHaveLength(205)` added as filler satisfied a
+    whole-file grep, and would still satisfy a generous window, but cannot
+    satisfy a claim bound to the line asserting on the value under test.
+
+    Comment-only lines are excluded by default, for both anchor and pattern, so
+    that a comment cannot stand in for the code the claim describes. Pass
+    `code_only: false` for a claim genuinely about prose in a file.
+    """
+    raw, path = repo_path(args)
+    anchor_text, anchor = compiled(args, "anchor")
+    pattern_text, pattern = compiled(args)
+    within = args.get("within", 3)
+    if not isinstance(within, int) or isinstance(within, bool) or within < 0:
+        raise CannotEvaluate(
+            f"args.within {within!r} is not a non-negative integer")
+    text = read_text(raw, path)
+    lines = code_lines(text, flag(args, "code_only", True))
+
+    anchor_lines = [i for i, line in enumerate(lines) if anchor.search(line)]
+    if not anchor_lines:
+        return False, (f"anchor {anchor_text} matches nothing in {raw}, so the "
+                       f"claimed site no longer exists")
+    for i in anchor_lines:
+        lo = max(0, i - within)
+        hi = min(len(lines), i + within + 1)
+        window = "\n".join(lines[lo:hi])
+        if pattern.search(window):
+            return True, (f"{pattern_text} matches within {within} line(s) of "
+                          f"{anchor_text} at {raw}:{i + 1}")
+    sites = ", ".join(f"{raw}:{i + 1}" for i in anchor_lines[:4])
+    return False, (f"anchor {anchor_text} is present ({sites}) but "
+                   f"{pattern_text} does NOT match within {within} line(s) of "
+                   f"it -- the claim's binding to that site is broken")
+
+
+# Every way a JavaScript array is shortened in place or rebound to a shorter
+# copy. Kept as one list so a reviewer can see the whole surface at a glance.
+_TRUNCATION_FORMS = (
+    (r"\.slice\s*\(", ".slice("),
+    (r"\.splice\s*\(", ".splice("),
+    (r"\.pop\s*\(", ".pop("),
+    (r"\.shift\s*\(", ".shift("),
+    (r"\.length\s*=", ".length ="),
+    (r"\.length\s*-=", ".length -="),
+)
+
+
+def probe_no_truncation(args):
+    """No operation anywhere in `path` shortens the named collection.
+
+    CTL-01 bypass 1, the decisive one. The claim asserted that no retention cap
+    exists; the probe searched for the identifier a PREVIOUS cap happened to
+    use, so writing a genuinely equivalent cap by other means --
+    `if (store.events.length > 200) store.events.length = 200;` -- kept it
+    green. This searches for the OPERATION instead of a name, over every form
+    that shortens an array in place or rebinds it to a shorter copy.
+
+    Still a static check, and still not proof: an alias assigned to another
+    variable first, or truncation performed in a different file, would evade
+    it. That residue is disclosed rather than papered over.
+
+    This probe deliberately does NOT execute the retention behaviour. The
+    verifier runs in a Python-only CI job with no Node toolchain, so a probe
+    that shelled out to Vitest would exit 2 on every run and report nothing.
+    The executed arm lives where it can actually run: the append-more-than-200
+    test in lib/dev-hq/audit-timeline.test.ts, itself bound by the
+    timeline-retention-* claims below so it cannot be gutted while this stays
+    green.
+    """
+    raw, path = repo_path(args)
+    collection = require(args, "collection")
+    text = read_text(raw, path)
+    lines = code_lines(text, flag(args, "code_only", True))
+
+    if collection not in "\n".join(lines):
+        return False, (f"{collection} does not appear in {raw} at all, so the "
+                       f"claim's subject is gone and nothing was measured "
+                       f"about it")
+
+    hits = []
+    for i, line in enumerate(lines):
+        for form, label in _TRUNCATION_FORMS:
+            if re.search(re.escape(collection) + r"\s*" + form, line):
+                hits.append(f"{raw}:{i + 1} ({label})")
+    if hits:
+        return False, (f"{collection} is TRUNCATED at " + "; ".join(hits[:4]) +
+                       " -- a retention cap exists")
+    return True, (f"{collection} appears in {raw} and no "
+                  f"slice/splice/pop/shift/length-assignment is applied to it")
+
+
 PROBES = {
     "tag-present": probe_tag_present,
     "tag-absent": probe_tag_absent,
+    "tag-annotated": probe_tag_annotated,
     "tag-at-commit": probe_tag_at_commit,
+    "grep-scoped": probe_grep_scoped,
+    "no-truncation": probe_no_truncation,
     "file-present": probe_file_present,
     "file-absent": probe_file_absent,
     "grep-present": probe_grep_present,
@@ -339,7 +535,110 @@ def load_manifest(location):
             die(f"claim id {identifier!r} appears more than once in "
                 f"{location}; results could not be attributed")
         seen.add(identifier)
-    return claims
+    return manifest, claims
+
+
+# ---------------------------------------------------------------------------
+# manifest coverage (CTL-02)
+# ---------------------------------------------------------------------------
+
+RETIREMENT_FIELDS = ("id", "reason", "authorized_by")
+
+
+def _git_show(spec):
+    """(text, reason). Exactly one of the two is None."""
+    try:
+        out = subprocess.run(["git", "show", spec], capture_output=True)
+    except OSError as error:
+        return None, f"git could not be executed ({error})"
+    if out.returncode != 0:
+        detail = " ".join(out.stderr.decode("utf-8", errors="replace").split())
+        return None, (f"`git show {spec}` failed with exit {out.returncode} "
+                      f"({detail or 'no diagnostic output'})")
+    return out.stdout.decode("utf-8", errors="replace"), None
+
+
+def missing_required_claims(manifest, present):
+    """Claim IDs that were required at the pinned baseline and are now gone.
+
+    CTL-02: the verifier enumerated only the claims that REMAINED, so deleting
+    an entry took coverage from 15 to 14 and still exited 0. The manifest was
+    the one record here that nothing checked, which made "delete the claim"
+    the cheapest way to turn any red green -- the single response the header of
+    this file says is never correct.
+
+    The authoritative base is the manifest as it stood at a pinned commit, read
+    out of git history rather than from any file the same change can edit. A
+    removal is legitimate only with an explicit retirement record naming the
+    claim, a reason, and who authorized it.
+
+    Fails closed. If the pin is unreadable -- a shallow clone, a rewritten
+    history, no git -- then nothing is known about what SHOULD be present, and
+    that is CannotEvaluate rather than a silent skip. The structured-data job
+    checks out with fetch-depth: 0 for this reason.
+
+    Residue, per OBL-30: one commit can still move the pin and delete the claim
+    together. This removes the SILENT deletion and forces it to appear in a
+    diff as a retirement record; it is not an external trust anchor.
+    """
+    baseline = manifest.get("required_claims_baseline")
+    if not isinstance(baseline, dict):
+        raise CannotEvaluate(
+            "the manifest declares no 'required_claims_baseline', so there is "
+            "no authoritative base to compare its claim IDs against and a "
+            "deletion could not be detected")
+    commit = baseline.get("commit")
+    if not isinstance(commit, str) or not HEX_NAME.fullmatch(commit):
+        raise CannotEvaluate(
+            f"required_claims_baseline.commit {commit!r} is not a 7-to-40 "
+            f"character lowercase hexadecimal object name")
+    path = baseline.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise CannotEvaluate(
+            "required_claims_baseline.path is missing, blank, or not a string")
+
+    raw, reason = _git_show(f"{commit}:{path}")
+    if reason is not None:
+        raise CannotEvaluate(
+            f"the baseline manifest at {commit[:12]}:{path} could not be read "
+            f"({reason}), so the required claim IDs are unknown. In CI, check "
+            f"out with fetch-depth: 0")
+    try:
+        base = json.loads(raw)
+    except ValueError as error:
+        raise CannotEvaluate(
+            f"the baseline manifest at {commit[:12]}:{path} is not parseable "
+            f"JSON ({error}), so the required claim IDs are unknown") from error
+    base_claims = base.get("claims")
+    if not isinstance(base_claims, list) or not base_claims:
+        raise CannotEvaluate(
+            f"the baseline manifest at {commit[:12]}:{path} has no non-empty "
+            f"'claims' list, so the required claim IDs are unknown")
+    required = {c.get("id") for c in base_claims
+                if isinstance(c, dict) and isinstance(c.get("id"), str)}
+    if not required:
+        raise CannotEvaluate(
+            f"the baseline manifest at {commit[:12]}:{path} yielded no usable "
+            f"claim ids")
+
+    retired = manifest.get("retired_claims", [])
+    if not isinstance(retired, list):
+        raise CannotEvaluate("'retired_claims' is present but is not a list")
+    authorized = set()
+    for index, record in enumerate(retired):
+        if not isinstance(record, dict):
+            raise CannotEvaluate(f"retired_claims #{index} is not an object")
+        blank = [f for f in RETIREMENT_FIELDS
+                 if not isinstance(record.get(f), str)
+                 or not record[f].strip()]
+        if blank:
+            raise CannotEvaluate(
+                f"retired_claims #{index} is missing {', '.join(blank)}; a "
+                f"retirement that does not say what was retired, why, and on "
+                f"whose authority is not a reviewed retirement")
+        authorized.add(record["id"])
+
+    return sorted(required - set(present) - authorized), len(required)
 
 
 def evaluate(claim):
@@ -364,7 +663,7 @@ def main():
     parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
     args = parser.parse_args()
 
-    claims = load_manifest(args.manifest)
+    manifest, claims = load_manifest(args.manifest)
     print(f"Verifying {len(claims)} documented claim(s) from {args.manifest}\n")
     print(f"{'claim':44s} {'probe':14s} verdict")
 
@@ -398,6 +697,35 @@ def main():
         print(f"  claim:     {claim['statement']}")
         print(f"  red means: {claim['red_means']}")
 
+    # Coverage is checked AFTER the claims so that a broken git or an
+    # unreadable baseline still prints every per-claim verdict alongside it. A
+    # run learns as much as it can before deciding it cannot conclude.
+    missing = []
+    coverage_note = None
+    try:
+        missing, required_count = missing_required_claims(
+            manifest, {claim["id"] for claim in claims})
+        coverage_note = (f"{len(claims)} claim(s) present; "
+                         f"{required_count} required at the pinned baseline")
+    except CannotEvaluate as reason:
+        unevaluated.append(({"id": "(manifest coverage)",
+                             "document": args.manifest,
+                             "statement": "the manifest still carries every "
+                                          "claim required at its baseline"},
+                            str(reason)))
+        print(f"\n::error::CANNOT EVALUATE manifest coverage: {reason}")
+        print("  Whether a required claim was deleted is UNKNOWN. This must "
+              "not be read as evidence that none was.")
+
+    for identifier in missing:
+        print(f"\n::error::REQUIRED CLAIM DELETED {identifier}")
+        print(f"  This id exists in the baseline manifest but not in "
+              f"{args.manifest}, and no retired_claims record authorizes its "
+              f"removal.")
+        print("  Deleting a claim to restore green is the one response that "
+              "is never correct. Restore it, or record an authorized "
+              "retirement naming the claim, the reason, and the authority.")
+
     print()
     if unevaluated:
         # Deliberately dominant over the red exit code below. A run that did
@@ -407,35 +735,50 @@ def main():
               f"{len(red)} no longer hold. Exiting 2: this run is not a "
               f"complete measurement.")
         sys.exit(2)
-    if red:
-        print(f"RESULT: {len(red)} of {len(claims)} documented claim(s) no "
-              f"longer hold. Each is a record and the repository disagreeing. "
-              f"Correct whichever is wrong; do not delete the claim.")
+    if red or missing:
+        if missing:
+            print(f"RESULT: {len(missing)} required claim(s) are MISSING from "
+                  f"the manifest ({', '.join(missing)}) and {len(red)} of "
+                  f"{len(claims)} present claim(s) no longer hold.")
+        else:
+            print(f"RESULT: {len(red)} of {len(claims)} documented claim(s) no "
+                  f"longer hold. Each is a record and the repository "
+                  f"disagreeing. Correct whichever is wrong; do not delete "
+                  f"the claim.")
         sys.exit(1)
     print(f"RESULT: {len(claims)} documented claim(s) reported CONSISTENT "
           f"with the repository.")
+    if coverage_note:
+        print(f"        Manifest coverage: {coverage_note}.")
     print()
     # Stated on every green run, deliberately, and NOT only in a handoff
     # document. A control whose caveat lives somewhere else reads as stronger
-    # than it is, which is the exact defect this control exists to catch --
-    # and the exact defect CTL-01 charges it with. Until CTL-01 lands, the
-    # limitation travels with the output.
-    print("LIMITATION -- read before relying on this result. Several probes "
-          "match TEXT, not the property the claim asserts, so this is "
-          "evidence of consistency and NOT proof. Confirmed false-green "
-          "paths (CTL-01/CTL-02, docs/plans/HANDOFF_2026-07-30.md):")
-    print("  * a retention cap written without the searched-for identifier "
-          "passes `event-store-has-no-retention-cap`;")
-    print("  * a matching string elsewhere in the same file satisfies a "
-          "whole-file grep, without binding to the claimed call site;")
-    print("  * `tag-present` does not check that the tag is ANNOTATED, so a "
-          "lightweight tag satisfies a claim that names an annotation;")
-    print("  * DELETING an entry from the manifest lowers the claim count and "
-          "still exits 0 -- the manifest is not itself protected.")
+    # than it is, which is the exact defect this control exists to catch. The
+    # four CTL-01/CTL-02 false-green paths this block used to list are closed
+    # and are now regression cases in scripts/test-verify-record-claims.py; what
+    # remains is what is genuinely still weak, which is why the block shrank
+    # rather than disappeared.
+    print("LIMITATION -- read before relying on this result. Every probe here "
+          "is static: it reads the tree and git refs, and executes none of the "
+          "behaviour a claim describes. This is strong evidence of consistency "
+          "and NOT proof. What remains weak:")
+    print("  * `no-truncation` searches for the truncating OPERATION applied "
+          "to a named collection, so it catches a cap written by any of "
+          "slice/splice/pop/shift/length-assignment -- but an alias bound to "
+          "another variable first, or eviction performed in a different file, "
+          "would still evade it;")
+    print("  * comment-only lines are excluded line-by-line, so a token "
+          "hidden inside a /* ... */ body whose continuation lines do not "
+          "begin with '*' is still read as code;")
+    print("  * claims still written as whole-file greps prove that text "
+          "exists somewhere in the file, not that it binds to the claimed "
+          "site; `grep-scoped` is what binds one, and it is used only where a "
+          "claim names a site.")
     print("A green run here does not certify any security or audit property. "
-          "Closure additionally requires the OBL-30 external trust anchor, "
-          "because a candidate can edit this control and its manifest "
-          "together.")
+          "Closure additionally requires the OBL-30 external trust anchor: the "
+          "manifest's required-claim baseline is read from git history, which "
+          "makes a silent deletion fail, but one commit can still move the pin "
+          "and drop the claim together.")
 
 
 if __name__ == "__main__":

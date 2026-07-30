@@ -521,14 +521,33 @@ def _(root):
     tagged = ("# v7.0.1\n        with:\n          fetch-tags: true\n\n"
               "      - name: Set up Python\n")
     if "fetch-tags: true" in text:
-        updated = re.sub(
-            r"(?m)^[ \t]+with:\n(?:[ \t]+#.*\n)*[ \t]+fetch-tags: true\n",
-            "", text, count=1)
+        # Only the one input line. This used to remove the whole `with:` block,
+        # which worked while fetch-tags was its sole member -- but the block now
+        # also carries fetch-depth: 0 (CTL-02), and taking `with:` away while
+        # leaving fetch-depth behind produces a step whose YAML does not parse.
+        # The verifier would then exit 2, "cannot evaluate", and this case would
+        # be measuring a broken fixture rather than a detected structural change.
+        updated = re.sub(r"(?m)^[ \t]+fetch-tags: true\n", "", text, count=1)
         assert updated != text, "fetch-tags could not be removed"
     else:
         assert anchor in text, "selected baseline fixture has no bare "\
                                "structured-data checkout"
         updated = text.replace(anchor, tagged, 1)
+    p.write_text(updated, encoding="utf-8", newline="")
+
+
+@case("add/remove fetch-depth on the structured-data checkout", 1)
+def _(root):
+    # The record-claims verifier reads its required-claims baseline from a
+    # pinned commit (CTL-02). A shallow checkout does not have that commit, so
+    # dropping this input does not quietly weaken the control -- it exits 2 --
+    # but it does stop the manifest being checked at all, which is structural.
+    p = root / ".github/workflows/ci.yml"
+    text = p.read_text(encoding="utf-8")
+    assert "fetch-depth: 0" in text, \
+        "selected baseline fixture has no fetch-depth on structured-data"
+    updated = re.sub(r"(?m)^[ \t]+fetch-depth: 0\n", "", text, count=1)
+    assert updated != text, "fetch-depth could not be removed"
     p.write_text(updated, encoding="utf-8", newline="")
 
 

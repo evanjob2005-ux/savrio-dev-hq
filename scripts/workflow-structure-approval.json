@@ -82,9 +82,20 @@
       "fingerprint": "sha256:51669d9da6889d7f55cecf2d812caad539bdb5e5255989d149a66959d10bd1b7"
     },
     {
+      "base_commit": "5064526bd32007575303e94c7bfab522b3308734",
+      "base_workflow_tree": "f21d11d129a955a8be865297614cb01d92c2f726",
+      "candidate_workflow_tree": "sha256:36ddae9d134e15c7ba6ade02bd746c008da4aa9654eed986bda09a1123b3a4c7",
+      "changed_files": [
+        "ci.yml"
+      ],
+      "diff_digest": "sha256:017dc7240b41d9d830a02dbc48786016d8df793b9f97fc6037f9bf6fb3f0aa72",
+      "rationale": "CTL-03 remediation (docs/plans/HANDOFF_2026-07-30.md, Batch 1): run the record-claims negative-control harness in CI, which previously ran the verifier without ever running its mutation suite, and check out full history so the manifest's required-claims baseline (CTL-02) can be read from its pinned commit. Candidate-written record: NOT Founder-authorized, and it does not close OBL-30.",
+      "fingerprint": "sha256:ac0294d3425bfeb4c7292d587923b2e64ddc3762aa6714e3b8c5897ebad48900"
+    },
+    {
       "base_commit": "79dd9edf5e4f99e5ab356167406ffcc5402ea335",
       "base_workflow_tree": "8fe380d637c1ac9e5cfc641946707f2bbaa20196",
-      "candidate_workflow_tree": "sha256:19ebc7ff269e5746bc3eb8c2366867067a7e73c2edd8cfb996d56aa8a98f1232",
+      "candidate_workflow_tree": "sha256:36ddae9d134e15c7ba6ade02bd746c008da4aa9654eed986bda09a1123b3a4c7",
       "changed_files": [
         "ci.yml",
         "dependencies.yml",
@@ -94,9 +105,9 @@
         "release.yml",
         "security.yml"
       ],
-      "diff_digest": "sha256:5e5d6dfac48e27850914550831f2c4d6ba7efa6c33e6b10b1c5f428d9487c563",
-      "rationale": "Aggregate workflow delta from 79dd9edf, re-recorded to add one item. Previously recorded and Founder-authorized: reviewed CI, security, release, readiness, and workflow-structure controls plus the Node 24 bundled-toolchain repair; locked Playwright and Next binaries required through an executable precondition with red/null coverage; and Package E safe-local hardening with artifact warnings, cancellation-aware shared hygiene verification, honest outcome summaries, event-isolated concurrency, and removal of the redundant smoke-file precondition. PREVIOUSLY RECORDED AND NOT PRE-AUTHORIZED BY THE FOUNDER, still pending independent review: the pr.yml prohibited-file defect repair made in response to an observed live failure on PR #11, where the environment-file allowlist refused this repository's tracked .env.local.example template, with the allowlist now anchored on the trailing template marker (.example/.sample/.template) so real environment files such as .env, .env.local and .env.development.local are still refused; and the security.yml defect-prevention change lowering the entropy of the placeholder strings at the eight sites that exist ONLY as documentation prose inside Python comments in the credential-scanner step, where the three KNOWN_BAD code occurrences remain high-entropy so the control still exercises entropy detection, no scanner rule, regex, threshold or fixture was changed, and .gitleaksignore was not touched. NEW IN THIS RECORD, COORDINATOR-INITIATED AND NOT PRE-AUTHORIZED BY THE FOUNDER, pending independent review: two additions to the ci.yml structured-data job that install a record-claims control. (1) A \"Verify documented record claims\" step running scripts/verify-record-claims.py, which evaluates docs/claims.json, a manifest pairing each factual claim this repository's governance records make about themselves with an executable probe over tag existence, tag target commit, file presence or absence, and regex presence or absence in a named file. It exits 1 when a documented claim no longer holds and 2 when any probe could not be evaluated, and exit 2 dominates exit 1 so an incomplete measurement is never reported as a completed verdict. (2) fetch-tags: true on that job's actions/checkout, because a checkout without tags reports zero tags and cannot distinguish an absent tag from an unfetched one; without it every tag claim would be refused and the step would exit 2 on every run. No existing step, guard, permission, trigger, concurrency group or pinned action SHA was changed, and no workflow other than ci.yml was touched. The control is additive: it adds a new failure mode to CI and removes none. Its coverage is proved by scripts/test-verify-record-claims.py, whose matrix, null-audit and live-discrimination phases invert every seeded claim inside a throwaway clone and require it to go red naming itself. This item is a coordinator-initiated control addition pending independent review, not an approved change.",
-      "fingerprint": "sha256:f893822ff4d5d34643540503097f48fbf73abf2eb4276cdfbd781d7d7d3cc28f"
+      "diff_digest": "sha256:475a33c9798803e93c888a25e7e3c8ad82c08f7c67967641cad3156fd967f5f6",
+      "rationale": "CTL-03 remediation (docs/plans/HANDOFF_2026-07-30.md, Batch 1), re-recorded as the aggregate delta from main so the pull-request comparison also resolves: run the record-claims negative-control harness in CI and check out full history for the CTL-02 required-claims baseline. Candidate-written record: NOT Founder-authorized, and it does not close OBL-30.",
+      "fingerprint": "sha256:7d30b08b47c67ffd88d0c0d6fbdd2adbbd74b68f22633e1175960feab05f83b3"
     }
   ]
 }

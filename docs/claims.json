@@ -1,5 +1,25 @@
 {
   "version": 1,
+  "required_claims_baseline": {
+    "commit": "5064526bd32007575303e94c7bfab522b3308734",
+    "path": "docs/claims.json",
+    "_why": [
+      "CTL-02: nothing checked this manifest, so deleting an entry took",
+      "coverage from 15 claims to 14 and still exited 0 -- which made",
+      "'delete the claim' the cheapest way to turn any red green. Every claim",
+      "id present at this commit must still be present here, or be named in",
+      "retired_claims with a reason and an authority.",
+      "",
+      "Read out of git history rather than from a sibling file, so that the",
+      "change deleting a claim cannot also supply the list of what was",
+      "required. This needs full history: the verifier exits 2, never 0, when",
+      "the pinned commit cannot be read.",
+      "",
+      "Moving this pin forward is a reviewable act. Do it only when claims are",
+      "legitimately retired, and say so in the retirement record."
+    ]
+  },
+  "retired_claims": [],
   "_readme": [
     "Executable form of the factual claims this repository's records make about",
     "itself. Every entry pairs a documented statement with a probe that decides",
@@ -12,17 +32,35 @@
     "the right response.",
     "",
     "Only add a claim you have personally executed at the commit you add it on.",
-    "Probe types: tag-present, tag-absent, tag-at-commit, file-present,",
-    "file-absent, grep-present, grep-absent. Patterns are Python regular",
-    "expressions searched against the whole file; paths are repository-relative",
-    "and use forward slashes."
+    "",
+    "Probe types: tag-present, tag-absent, tag-annotated, tag-at-commit,",
+    "file-present, file-absent, grep-present, grep-absent, grep-scoped,",
+    "no-truncation. Patterns are Python regular expressions; paths are",
+    "repository-relative and use forward slashes.",
+    "",
+    "Choosing a probe (CTL-01 exists because these were chosen carelessly):",
+    "  * A claim naming a SITE -- 'the token is minted at this call' -- wants",
+    "    grep-scoped, which requires the pattern to match within `within`",
+    "    lines of `anchor`. `within: 0` means the anchor's own line. A",
+    "    whole-file grep-present only proves the text exists SOMEWHERE, which",
+    "    a copy in an unrelated helper satisfies.",
+    "  * A claim that nothing SHORTENS a collection wants no-truncation, which",
+    "    looks for the operation rather than for the identifier that a previous",
+    "    cap happened to use.",
+    "  * A claim saying a tag is ANNOTATED wants tag-annotated. tag-present is",
+    "    satisfied by a lightweight ref that carries no annotation at all.",
+    "  * grep-scoped and no-truncation ignore comment-only lines by default, so",
+    "    a comment describing what the code used to do cannot satisfy a claim",
+    "    about the code. Pass code_only:true on grep-present/grep-absent to get",
+    "    the same treatment; pass code_only:false on the scoped probes for a",
+    "    claim genuinely about prose."
   ],
   "claims": [
     {
       "id": "pkg3-approval-tag-exists",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
       "statement": "The CORRECTION of 2026-07-29 supersedes the register's sentence \"sprint-1f-pkg3-approved does not exist\": the tag exists and is annotated.",
-      "probe": "tag-present",
+      "probe": "tag-annotated",
       "args": { "tag": "sprint-1f-pkg3-approved" },
       "red_means": "The tag was deleted. The correction becomes the stale record and the register's original NOT YET APPROVED sentence becomes true again; the conflict routed for Founder decision has changed shape and must be re-read before anyone relies on either statement."
     },
@@ -71,10 +109,12 @@
       "id": "sec6-review-token-from-csprng",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
       "statement": "SEC-6 / CR-1 CORRECTION 2026-07-29: the review callback token is minted by nextCapabilityToken(\"rvt\") in lib/dev-hq/review-service.ts.",
-      "probe": "grep-present",
+      "probe": "grep-scoped",
       "args": {
         "path": "lib/dev-hq/review-service.ts",
-        "pattern": "nextCapabilityToken\\(\\s*\"rvt\"\\s*\\)"
+        "anchor": "token:",
+        "pattern": "nextCapabilityToken\\(\\s*\"rvt\"\\s*\\)",
+        "within": 0
       },
       "red_means": "SEC-6, a HIGH pre-deployment blocker recorded as Closed, is reopened. The register would still read Closed while the CSPRNG requirement it claims is met no longer is."
     },
@@ -85,7 +125,8 @@
       "probe": "grep-absent",
       "args": {
         "path": "lib/dev-hq/review-service.ts",
-        "pattern": "nextId\\(\\s*\"rvt\"\\s*\\)"
+        "pattern": "nextId\\(\\s*\"rvt\"\\s*\\)",
+        "code_only": true
       },
       "red_means": "The predictable prefix-epoch-counter minting an independent reviewer brute-forced in roughly 250k guesses is back in the review path. This is the exact defect SEC-6 was closed on."
     },
@@ -93,10 +134,12 @@
       "id": "capability-token-uses-node-crypto",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
       "statement": "SEC-6 correction: lib/dev-hq/id.ts implements nextCapabilityToken over randomUUID() from node:crypto.",
-      "probe": "grep-present",
+      "probe": "grep-scoped",
       "args": {
         "path": "lib/dev-hq/id.ts",
-        "pattern": "randomUUID\\(\\)"
+        "anchor": "export function nextCapabilityToken",
+        "pattern": "randomUUID\\(\\)",
+        "within": 3
       },
       "red_means": "The CSPRNG behind every capability token was replaced. sec6-review-token-from-csprng can stay green while this goes red, because the call site is unchanged and only its implementation was hollowed -- which is why this is a separate claim."
     },
@@ -104,10 +147,10 @@
       "id": "event-store-has-no-retention-cap",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
       "statement": "RAT-5 CORRECTION 2026-07-29: there is no slice, splice, shift, or cap of any kind in lib/dev-hq/store.ts, so nothing is evicted and RAT-5's stated consequence cannot occur.",
-      "probe": "grep-absent",
+      "probe": "no-truncation",
       "args": {
         "path": "lib/dev-hq/store.ts",
-        "pattern": "EVENT_BUFFER_SIZE|\\.slice\\(|\\.splice\\(|\\.shift\\(|\\.pop\\("
+        "collection": "store.events"
       },
       "red_means": "Truncation was reintroduced into the store. That reverses ADR-0004 Section 2's append-only ruling, reopens the ARCH-07 data-loss defect, and makes RAT-5's correctness consequence live again -- the state OBL-41 explicitly warns is not licensed by the obligation."
     },
@@ -118,7 +161,8 @@
       "probe": "grep-present",
       "args": {
         "path": "lib/dev-hq/constants.ts",
-        "pattern": "EVENT_BUFFER_SIZE\\s*=\\s*200"
+        "pattern": "EVENT_BUFFER_SIZE\\s*=\\s*200",
+        "code_only": true
       },
       "red_means": "The constant the correction points at moved or changed value, so the correction's account of where the 200 lives and what it now bounds no longer describes the tree."
     },
@@ -126,12 +170,27 @@
       "id": "timeline-retention-guarded-by-test",
       "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
       "statement": "RAT-5 correction: the append-only timeline is guarded by lib/dev-hq/audit-timeline.test.ts, which asserts 205 distinct events are retained.",
-      "probe": "grep-present",
+      "probe": "grep-scoped",
       "args": {
         "path": "lib/dev-hq/audit-timeline.test.ts",
-        "pattern": "toHaveLength\\(205\\)"
+        "anchor": "expect\\(all\\)",
+        "pattern": "toHaveLength\\(205\\)",
+        "within": 0
       },
-      "red_means": "The only executable guard on ADR-0004 Section 2's append-only ruling was weakened or removed, leaving event-store-has-no-retention-cap as the sole thing standing between this repository and a silent reintroduction of the cap."
+      "red_means": "The only executed guard on ADR-0004 Section 2's append-only ruling was weakened or removed, leaving event-store-has-no-retention-cap as the sole thing standing between this repository and a silent reintroduction of the cap."
+    },
+    {
+      "id": "timeline-retention-test-appends-205",
+      "document": "docs/validation/sprint-1e-overnight-2026-07-26/SPRINT_1F_FOLLOWUP_REGISTER.md",
+      "statement": "RAT-5 correction: the guard in lib/dev-hq/audit-timeline.test.ts genuinely appends 205 events, looping over logger.log, rather than asserting 205 about anything else.",
+      "probe": "grep-scoped",
+      "args": {
+        "path": "lib/dev-hq/audit-timeline.test.ts",
+        "anchor": "index < 205",
+        "pattern": "logger\\.log",
+        "within": 3
+      },
+      "red_means": "The guard no longer appends the 205 events its assertion counts. CTL-01 bypass 3 was exactly this shape: the loop bound was lowered to 1 and an unrelated toHaveLength(205) left behind, and a whole-file grep could not tell the difference. Retention would then be unguarded while both claims read green."
     },
     {
       "id": "next-config-not-standalone",
@@ -140,7 +199,8 @@
       "probe": "grep-absent",
       "args": {
         "path": "next.config.ts",
-        "pattern": "output\\s*:\\s*[\"']standalone[\"']"
+        "pattern": "output\\s*:\\s*[\"']standalone[\"']",
+        "code_only": true
       },
       "red_means": "One of the three named conditions that convert the PKG-2 Architecture Review's verdict to REJECT -- REMEDIATION REQUIRED is now true. The register states in terms that the deferral of M-1 through M-4 must be revisited if this happens."
     },
@@ -151,7 +211,8 @@
       "probe": "grep-present",
       "args": {
         "path": "e2e/smoke.spec.ts",
-        "pattern": "exact:\\s*true"
+        "pattern": "exact:\\s*true",
+        "code_only": true
       },
       "red_means": "Accessible-name matching falls back to case-insensitive substring, so an unrelated heading merely containing the words satisfies the assertion. That is the false positive that failed candidate-1f-pkg2-1, reinstated with both gates still green."
     },
@@ -162,7 +223,8 @@
       "probe": "grep-present",
       "args": {
         "path": "playwright.config.ts",
-        "pattern": "spec\\.\\?\\(c\\|m\\)\\[jt\\]s\\?\\(x\\)"
+        "pattern": "spec\\.\\?\\(c\\|m\\)\\[jt\\]s\\?\\(x\\)",
+        "code_only": true
       },
       "red_means": "M-1 is reopened: an e2e/foo.spec.tsx is executed by nothing while both gates report green. The register records that silent omission as the highest-consequence of the four deferred MINOR findings."
     },
@@ -173,7 +235,8 @@
       "probe": "grep-present",
       "args": {
         "path": "vitest.config.ts",
-        "pattern": "\\.\\.\\.configDefaults\\.exclude[\\s\\S]*\"e2e/\\*\\*\""
+        "pattern": "\\.\\.\\.configDefaults\\.exclude[\\s\\S]*\"e2e/\\*\\*\"",
+        "code_only": true
       },
       "red_means": "The \"e2e/ belongs to Playwright\" invariant stops being enforced on the Vitest side, or the default exclusions are replaced by a partial copy again -- both are the exact drift M-3 was raised about."
     }

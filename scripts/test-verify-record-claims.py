@@ -51,6 +51,7 @@ SANDBOX_ROOT = os.path.realpath(tempfile.gettempdir())
 
 NEEDLE = "keep-this-needle"
 FORBIDDEN = "forbidden-needle"
+ANCHOR = "anchor-of-the-claim"
 
 
 def assert_sandbox(cwd):
@@ -151,6 +152,22 @@ def fixture_manifest(pinned_sha):
              "probe": "grep-absent",
              "args": {"path": "lib/clean.txt", "pattern": FORBIDDEN},
              "red_means": "fixture"},
+            {"id": "t-annotated", "document": "FIXTURE.md",
+             "statement": "the fixture tag exists and is annotated",
+             "probe": "tag-annotated",
+             "args": {"tag": "fixture-annotated-tag"}, "red_means": "fixture"},
+            {"id": "g-scoped", "document": "FIXTURE.md",
+             "statement": "the needle is on the anchor's own line",
+             "probe": "grep-scoped",
+             "args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+                      "pattern": NEEDLE, "within": 0},
+             "red_means": "fixture"},
+            {"id": "nt-events", "document": "FIXTURE.md",
+             "statement": "nothing shortens store.events in the fixture module",
+             "probe": "no-truncation",
+             "args": {"path": "lib/collection.ts",
+                      "collection": "store.events"},
+             "red_means": "fixture"},
         ],
     }
 
@@ -177,6 +194,18 @@ def scratch(tmp):
         f"alpha\n{NEEDLE}\nomega\n", encoding="utf-8", newline="")
     (root / "lib" / "clean.txt").write_text(
         "nothing objectionable here\n", encoding="utf-8", newline="")
+    # The scoped fixture carries a DECOY: the needle appears both on the
+    # anchor's line and, far away, on a line of its own. A whole-file grep is
+    # satisfied by the decoy alone, so removing the needle from the anchor line
+    # is exactly CTL-01's "matching text elsewhere in the file" bypass, and the
+    # matrix case below requires the scoped probe to still go red.
+    (root / "lib" / "scoped.txt").write_text(
+        f"preamble\n{ANCHOR} {NEEDLE}\nmiddle\n{NEEDLE}\nomega\n",
+        encoding="utf-8", newline="")
+    (root / "lib" / "collection.ts").write_text(
+        "export function append(store, event) {\n"
+        "  store.events.unshift(event);\n"
+        "}\n", encoding="utf-8", newline="")
 
     git(["init", "-b", "main", "."], root)
     git(["add", "-A"], root)
@@ -184,12 +213,27 @@ def scratch(tmp):
     pinned = git(["rev-parse", "HEAD"], root)
     git(["tag", "fixture-present-tag"], root)
     git(["tag", "fixture-pinned-tag"], root)
+    git(["tag", "-a", "fixture-annotated-tag", "-m", "fixture annotation"],
+        root)
     # A second commit, so "the tag moved" has somewhere to move to.
     (root / "second.txt").write_text("second\n", encoding="utf-8", newline="")
     git(["add", "-A"], root)
     git(["commit", "-m", "second"], root)
 
+    # The manifest is committed, and only then rewritten to pin its
+    # required-claims baseline at that commit. The verifier reads the baseline
+    # out of git history, so a fixture whose manifest existed only in the
+    # working tree could not be evaluated at all.
     write_manifest(root, fixture_manifest(pinned))
+    git(["add", "claims.json"], root)
+    git(["commit", "-m", "fixture manifest"], root)
+    baseline = git(["rev-parse", "HEAD"], root)
+
+    data = fixture_manifest(pinned)
+    data["required_claims_baseline"] = {"commit": baseline,
+                                       "path": "claims.json"}
+    data["retired_claims"] = []
+    write_manifest(root, data)
     (root / "emptybin").mkdir()
     return root
 
@@ -271,6 +315,197 @@ def _(root):
     (root / "present.txt").unlink()
 
 
+# ------------------------------------------- CTL-01: the four closed bypasses
+#
+# Each of these passed before the CTL-01 repair. They are kept as cases rather
+# than as prose in a handoff so that re-opening any one of them fails here.
+
+@case("CTL-01/4 an annotated tag replaced by a LIGHTWEIGHT one", 1,
+      "is LIGHTWEIGHT")
+def _(root):
+    # tag-present cannot tell these apart, which is how a claim whose statement
+    # says "and is annotated" survived the annotation being thrown away.
+    at = git(["rev-parse", "fixture-annotated-tag^{commit}"], root)
+    git(["tag", "-d", "fixture-annotated-tag"], root)
+    git(["tag", "fixture-annotated-tag", at], root)
+
+
+@case("CTL-01/4 tag-annotated when the tag is gone entirely", 1,
+      "tag does not exist")
+def _(root):
+    git(["tag", "-d", "fixture-annotated-tag"], root)
+
+
+@case("CTL-01/5 the needle leaves the anchor line but survives ELSEWHERE", 1,
+      "does NOT match within")
+def _(root):
+    # The bypass verbatim: a whole-file grep is still satisfied by the decoy on
+    # its own line, so only a site-bound probe can see that the claim broke.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}", ANCHOR, 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("grep-scoped when the anchor itself is gone: red, not satisfied", 1,
+      "no longer exists")
+def _(root):
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    (root / "lib" / "scoped.txt").write_text(
+        text.replace(ANCHOR, "renamed-anchor", 1), encoding="utf-8",
+        newline="")
+
+
+@case("CTL-01/2 the needle survives only in a COMMENT on the anchor line", 1,
+      "does NOT match within")
+def _(root):
+    # The id.ts shape: the call is replaced by something predictable and the
+    # identifier is left behind in a comment describing what it used to do.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}",
+                        f"{ANCHOR}\n// {NEEDLE}", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("CTL-01/2 the needle survives only in a TRAILING comment on that line", 1,
+      "does NOT match within")
+def _(root):
+    # Found by this harness against the first CTL-01 fix, which blanked whole
+    # comment LINES only. `token: nextId("rvt"), // nextCapabilityToken("rvt")`
+    # kept the searched-for call on the exact line the claim names.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}", f"{ANCHOR} // {NEEDLE}", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("a URL's // is not treated as a comment (must PASS)", 0)
+def _(root):
+    # The over-stripping guard. If `//` after a colon were cut, every claim
+    # about a line containing a URL would go red for no reason.
+    text = (root / "lib" / "scoped.txt").read_text(encoding="utf-8")
+    text = text.replace(f"{ANCHOR} {NEEDLE}",
+                        f"{ANCHOR} {NEEDLE} https://example.invalid/x", 1)
+    (root / "lib" / "scoped.txt").write_text(text, encoding="utf-8",
+                                             newline="")
+
+
+@case("CTL-01/1 a cap by .length assignment, naming no searched-for symbol", 1,
+      "is TRUNCATED")
+def _(root):
+    # The decisive bypass. The old probe grepped for the identifier a PREVIOUS
+    # cap used, so a genuinely equivalent cap written any other way passed.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store.events.length = 200;\n")
+
+
+@case("no-truncation also catches splice", 1, "is TRUNCATED")
+def _(root):
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("store.events.splice(0, 5);\n")
+
+
+@case("no-truncation: a cap hidden in a comment is NOT a cap", 0)
+def _(root):
+    # The mirror of the case above, and the reason comment-blanking has to cut
+    # both ways: a commented-out cap evicts nothing, so reporting red here would
+    # be a false alarm that trains readers to ignore the control.
+    with (root / "lib" / "collection.ts").open(
+            "a", encoding="utf-8", newline="") as handle:
+        handle.write("// store.events.length = 200;\n")
+
+
+@case("no-truncation when the collection is gone: red, nothing measured", 1,
+      "does not appear")
+def _(root):
+    (root / "lib" / "collection.ts").write_text(
+        "export function append() {}\n", encoding="utf-8", newline="")
+
+
+# ----------------------------------------- CTL-02: the manifest is now checked
+
+@case("CTL-02 DELETING a required claim: red, and it names the id", 1,
+      "REQUIRED CLAIM DELETED f-present")
+def _(root):
+    # Before the repair this took coverage from 15 claims to 14 and exited 0,
+    # which made deleting the claim the cheapest way to turn any red green.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["claims"] = [c for c in data["claims"] if c["id"] != "f-present"]
+    write_manifest(root, data)
+
+
+@case("CTL-02 REPLACING a claim keeps the count and still fails", 1,
+      "REQUIRED CLAIM DELETED f-present")
+def _(root):
+    # A count floor alone would be satisfied here: one claim in, one claim out.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    for claim in data["claims"]:
+        if claim["id"] == "f-present":
+            claim["id"] = "a-cheap-substitute"
+    write_manifest(root, data)
+
+
+@case("CTL-02 an AUTHORIZED retirement is accepted (must PASS)", 0)
+def _(root):
+    # The escape hatch has to work, or the only way to retire a genuinely
+    # obsolete claim would be to disable the check.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["claims"] = [c for c in data["claims"] if c["id"] != "f-present"]
+    data["retired_claims"] = [{
+        "id": "f-present",
+        "reason": "the fixture file was intentionally removed",
+        "authorized_by": "harness fixture",
+    }]
+    write_manifest(root, data)
+
+
+@case("CTL-02 a retirement with no reason or authority: exit 2", 2,
+      "not a reviewed retirement")
+def _(root):
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["claims"] = [c for c in data["claims"] if c["id"] != "f-present"]
+    data["retired_claims"] = [{"id": "f-present"}]
+    write_manifest(root, data)
+
+
+@case("CTL-02 the baseline declaration is removed: exit 2, never 0", 2,
+      "declares no 'required_claims_baseline'")
+def _(root):
+    # Deleting the check must not be a way to pass it.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data.pop("required_claims_baseline")
+    write_manifest(root, data)
+
+
+@case("CTL-02 the pinned baseline commit cannot be read: exit 2", 2,
+      "could not be read")
+def _(root):
+    # The shallow-clone case. Nothing is known about what SHOULD be present, so
+    # a green verdict here would assert coverage on no evidence.
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["required_claims_baseline"]["commit"] = "d" * 40
+    write_manifest(root, data)
+
+
+@case("CTL-02 the baseline commit is not an object name: exit 2", 2,
+      "hexadecimal object name")
+def _(root):
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["required_claims_baseline"]["commit"] = "HEAD"
+    write_manifest(root, data)
+
+
+@case("CTL-02 the baseline manifest blob is not parseable: exit 2", 2,
+      "not parseable")
+def _(root):
+    data = json.loads((root / "claims.json").read_text(encoding="utf-8"))
+    data["required_claims_baseline"]["path"] = "present.txt"
+    write_manifest(root, data)
+
+
 # --------------------------------------------------------- fail closed: files
 #
 # The SEC-6 class. A regex over a file that is not there matches nothing, which
@@ -326,7 +561,8 @@ def _(root):
     # reports zero tags, and in that state "absent" and "never fetched" are the
     # same observation -- so a tag-absent claim would otherwise pass on no
     # evidence whatsoever.
-    for tag in ("fixture-present-tag", "fixture-pinned-tag"):
+    for tag in ("fixture-present-tag", "fixture-pinned-tag",
+                "fixture-annotated-tag"):
         git(["tag", "-d", tag], root)
 
 
@@ -425,6 +661,68 @@ def _(root):
         {"args": {"tag": "fixture-pinned-tag", "commit": "HEAD"}}))
 
 
+@case("grep-scoped with no anchor: exit 2", 2, "missing, blank, or not a string")
+def _(root):
+    amend(root, "g-scoped", lambda c: c.update(
+        {"args": {"path": "lib/scoped.txt", "pattern": NEEDLE}}))
+
+
+@case("grep-scoped with a non-integer within: exit 2", 2,
+      "not a non-negative integer")
+def _(root):
+    amend(root, "g-scoped", lambda c: c.update(
+        {"args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+                  "pattern": NEEDLE, "within": "close enough"}}))
+
+
+@case("grep-scoped with a negative within: exit 2", 2,
+      "not a non-negative integer")
+def _(root):
+    amend(root, "g-scoped", lambda c: c.update(
+        {"args": {"path": "lib/scoped.txt", "anchor": ANCHOR,
+                  "pattern": NEEDLE, "within": -1}}))
+
+
+@case("grep-scoped with an unparseable anchor: exit 2", 2,
+      "not a valid regular expression")
+def _(root):
+    amend(root, "g-scoped", lambda c: c.update(
+        {"args": {"path": "lib/scoped.txt", "anchor": "unclosed(",
+                  "pattern": NEEDLE, "within": 0}}))
+
+
+@case("no-truncation with no collection named: exit 2", 2,
+      "missing, blank, or not a string")
+def _(root):
+    amend(root, "nt-events", lambda c: c.update(
+        {"args": {"path": "lib/collection.ts"}}))
+
+
+@case("no-truncation over a MISSING file: exit 2, not a pass", 2,
+      "never searched")
+def _(root):
+    (root / "lib" / "collection.ts").unlink()
+
+
+@case("code_only given a non-boolean: exit 2", 2, "is not a boolean")
+def _(root):
+    amend(root, "g-present", lambda c: c.update(
+        {"args": {"path": "lib/needle.txt", "pattern": NEEDLE,
+                  "code_only": "yes"}}))
+
+
+@case("code_only excludes a commented-out match (grep-present goes red)", 1,
+      "no longer matches")
+def _(root):
+    # Proves the option is actually wired, not merely accepted: with the only
+    # occurrence commented out, a code claim must not read as satisfied.
+    amend(root, "g-present", lambda c: c.update(
+        {"args": {"path": "lib/needle.txt", "pattern": NEEDLE,
+                  "code_only": True}}))
+    (root / "lib" / "needle.txt").write_text(
+        f"alpha\n// {NEEDLE}\nomega\n", encoding="utf-8", newline="")
+
+
 # ------------------------------------------------------------------ precedence
 
 @case("one red claim AND one unevaluable claim: exit 2 dominates exit 1", 2,
@@ -495,13 +793,42 @@ def null_audit():
 # which is what stops a future claim arriving unproven.
 # ---------------------------------------------------------------------------
 
+# Violations must be real CODE. These claims now carry code_only, which blanks
+# comment-only lines, so the commented-out violations this table used to hold
+# would no longer turn anything red -- the red arm would fail and the claim
+# would look uninvertible. A commented-out cap is genuinely not a cap; proving
+# the claim red requires breaking it for real.
 GREP_ABSENT_VIOLATIONS = {
     "sec6-review-token-not-nextid":
         '\nconst staleToken = nextId("rvt");\n',
-    "event-store-has-no-retention-cap":
-        '\n// store.events = store.events.slice(0, EVENT_BUFFER_SIZE);\n',
     "next-config-not-standalone":
-        '\n// output: "standalone",\n',
+        '\nconst deployTarget = { output: "standalone" };\n',
+}
+
+# A site-bound claim deserves a site-bound inversion. Emptying the file would
+# turn these red too, but only by deleting the anchor -- which proves the probe
+# reads the file and nothing about whether it binds to the claimed line. Each
+# entry below leaves the searched-for text in the file and moves it OFF the
+# site, which is the CTL-01 bypass itself.
+SCOPED_VIOLATIONS = {
+    "sec6-review-token-from-csprng": (
+        '    token: nextCapabilityToken("rvt"),',
+        '    token: nextId("rvt"), // nextCapabilityToken("rvt")',
+    ),
+    "capability-token-uses-node-crypto": (
+        '  return `${prefix}-${randomUUID().replace(/-/g, "")}`;',
+        '  // Formerly built over randomUUID() from node:crypto.\n'
+        '  return nextId(prefix);',
+    ),
+    "timeline-retention-guarded-by-test": (
+        "    expect(all).toHaveLength(205);",
+        "    expect(all).toHaveLength(1);\n"
+        "    expect(new Array(205)).toHaveLength(205);",
+    ),
+    "timeline-retention-test-appends-205": (
+        "for (let index = 0; index < 205; index += 1)",
+        "for (let index = 0; index < 1; index += 1)",
+    ),
 }
 
 
@@ -523,6 +850,27 @@ def clone(tmp):
     shutil.copy(os.path.join(REPO, VERIFIER), dest / "scripts")
     shutil.copy(MANIFEST, dest / "docs" / "claims.json")
     return dest
+
+
+def seed_one_claim(root, claim):
+    """Write, commit, and pin a one-claim manifest inside the clone.
+
+    The verifier reads its required-claims baseline out of git history, so a
+    manifest that exists only in the working tree cannot be evaluated at all
+    (exit 2, by design). Committing this one and pinning the baseline at that
+    commit makes the required set exactly this claim, so the phase measures the
+    claim rather than the coverage check.
+    """
+    write_manifest(root, {"version": 1, "claims": [claim]}, "one-claim.json")
+    git(["add", "one-claim.json"], root)
+    git(["commit", "-m", f"seed {claim['id']}"], root, check=False)
+    base = git(["rev-parse", "HEAD"], root)
+    write_manifest(root, {
+        "version": 1,
+        "required_claims_baseline": {"commit": base, "path": "one-claim.json"},
+        "retired_claims": [],
+        "claims": [claim],
+    }, "one-claim.json")
 
 
 def invert(root, claim):
@@ -553,6 +901,21 @@ def invert(root, claim):
         git(["tag", "-f", tag, "HEAD"], root)
         return f"force-moved tag {tag} onto HEAD", undo
 
+    if probe == "tag-annotated":
+        tag = args["tag"]
+        # The tag OBJECT, not the commit it peels to. Restoring the ref to this
+        # object is what puts the annotation back.
+        obj = git(["rev-parse", f"refs/tags/{tag}"], root)
+        at = git(["rev-parse", f"refs/tags/{tag}^{{commit}}"], root)
+
+        def undo():
+            git(["update-ref", f"refs/tags/{tag}", obj], root, check=False)
+
+        git(["tag", "-d", tag], root)
+        git(["tag", tag, at], root)
+        return (f"replaced annotated tag {tag} with a lightweight ref at the "
+                f"same commit"), undo
+
     path = root / args["path"]
 
     def restore_tracked():
@@ -575,6 +938,26 @@ def invert(root, claim):
         with path.open("a", encoding="utf-8", newline="") as handle:
             handle.write(violation)
         return (f"appended {violation.strip()!r} to {args['path']}",
+                restore_tracked)
+    if probe == "grep-scoped":
+        pair = SCOPED_VIOLATIONS.get(claim["id"])
+        if pair is None:
+            return None, None
+        find, replace = pair
+        text = path.read_text(encoding="utf-8")
+        if find not in text:
+            return None, None
+        path.write_text(text.replace(find, replace, 1), encoding="utf-8",
+                        newline="")
+        return (f"moved the claimed text off its site in {args['path']}",
+                restore_tracked)
+    if probe == "no-truncation":
+        # Derived from the claim rather than tabulated: the probe looks for the
+        # truncating operation, so the inversion is to perform one.
+        violation = f"\n{args['collection']}.length = 200;\n"
+        with path.open("a", encoding="utf-8", newline="") as handle:
+            handle.write(violation)
+        return (f"capped {args['collection']} in {args['path']}",
                 restore_tracked)
     return None, None
 
@@ -602,12 +985,20 @@ def live():
           f"a violating fixture in this harness"
           + (f" (unproven: {', '.join(stale)})" if stale else ""))
 
+    unscoped = [c["id"] for c in claims if c.get("probe") == "grep-scoped"
+                and c["id"] not in SCOPED_VIOLATIONS]
+    ok = not unscoped
+    passed += ok
+    failed += not ok
+    print(f"  [{'PASS' if ok else '*** FAIL ***'}] every grep-scoped claim has "
+          f"a site-bound violating fixture"
+          + (f" (unproven: {', '.join(unscoped)})" if unscoped else ""))
+
     with tempfile.TemporaryDirectory() as tmp:
         root = clone(tmp)
         for claim in claims:
             identifier = claim["id"]
-            write_manifest(root, {"version": 1, "claims": [claim]},
-                           "one-claim.json")
+            seed_one_claim(root, claim)
 
             code, _out = run_in(root, "one-claim.json")
             green = code == 0
