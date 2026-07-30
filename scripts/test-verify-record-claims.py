@@ -39,6 +39,7 @@ Pass --matrix-only, --null-audit, or --live to run one phase.
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
