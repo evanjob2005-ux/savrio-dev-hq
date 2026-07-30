@@ -44,16 +44,24 @@
 # Suppressing them here does not weaken the control -- the fixtures remain in
 # the workflow and the scanner still asserts against them.
 
-# `# `api_token: 9aQXZ1mLpR44TvBnKd` in a committed config file is the`
-# Prose inside a YAML comment, documenting the leak shape that the
-# UNQUOTED_SECRET regex was added to catch. The value is illustrative.
+# NOTE ON THIS FILE'S OWN CONTENT -- the placeholder values are described
+# below, never reproduced. Quoting them here made this file itself trip the
+# repository's Credential and Artifact Audit ("Generic secret assignment
+# detected"), which was the scanner behaving correctly: a high-entropy
+# assignment in a newly committed file is exactly what it exists to catch.
+# SECURITY.md offers a `scanner:allow-secret <reason>` pragma, but also warns
+# that several pragmas in one file means the values do not belong there. They
+# do not. Read the cited line in security.yml to see the actual fixture.
+
+# security.yml:114 -- prose inside a YAML comment, quoting an unquoted
+# `<name>: <value>` assignment as the leak shape that the UNQUOTED_SECRET
+# regex was added to catch. Illustrative; nothing reads it.
 508609c03738fc3c2afc65cdf62aba55b75656ad:.github/workflows/security.yml:generic-api-key:114
 
-# `#         {"password": "Zx91QpLm44TvBnRw"}     zero matches`
-# `#         {'apiKey': 'Zx91QpLm44TvBnRw'}       zero matches`
-# Two worked examples inside a YAML comment block, demonstrating a gap in the
-# GENERIC_SECRET regex: quoted property names matched nothing, so quoted-key
-# formats such as JSON were unscannable. "zero matches" is the point being
-# made -- these lines document a scanner defect that was then fixed.
+# security.yml:485-486 -- two worked examples inside a YAML comment block,
+# each a quoted-key mapping (JSON-style, then single-quoted) annotated
+# "zero matches". They document a real gap in the GENERIC_SECRET regex --
+# quoted property names matched nothing, so JSON-shaped config was
+# unscannable -- which was then fixed. The annotation is the point.
 b7b6d4b317b29aa8bcccc0296bf0326eee06bdf3:.github/workflows/security.yml:generic-api-key:485
 b7b6d4b317b29aa8bcccc0296bf0326eee06bdf3:.github/workflows/security.yml:generic-api-key:486
