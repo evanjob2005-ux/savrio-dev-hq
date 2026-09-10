@@ -33,7 +33,7 @@
     "tailwindcss": "^4",
     "trigger.dev": "4.5.7",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "//overrides": {
     "why": "Security overrides, scoped to the parent that motivates each one. Every entry forces a transitive dependency past a version carrying a high or critical advisory. Verified: 0 high and 0 critical at both full and --omit=dev scope.",
