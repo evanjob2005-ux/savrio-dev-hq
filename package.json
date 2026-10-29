@@ -28,7 +28,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.11",
+    "eslint-config-next": "16.4.3",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "trigger.dev": "4.5.7",
